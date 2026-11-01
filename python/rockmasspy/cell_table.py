@@ -53,6 +53,12 @@ class CellTable:
     base_edition = property(lambda self: self._chart.chart_id)
     cells = property(lambda self: self._cells)
 
+    def __eq__(self, other):
+        if not isinstance(other, CellTable):
+            return NotImplemented
+        key = lambda c: c.cell  # noqa: E731 - el orden de las celdas no importa
+        return self._chart == other._chart and sorted(self._cells, key=key) == sorted(other._cells, key=key)
+
     def lookup(self, structure: str, condition: str) -> CellClass:
         code = normalize_cell(f"{structure}/{condition}")
         if code not in self._chart.valid_cells:

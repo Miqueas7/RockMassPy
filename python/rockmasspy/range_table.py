@@ -62,6 +62,13 @@ class RangeTable:
     base_edition = property(lambda self: self._edition)
     classes = property(lambda self: self._classes)
 
+    def __eq__(self, other):
+        if not isinstance(other, RangeTable):
+            return NotImplemented
+        key = lambda c: (c.lo, c.hi, c.label)  # noqa: E731 - el orden de las clases no importa
+        return (self._method, self._edition, sorted(self._classes, key=key)) == (
+            other._method, other._edition, sorted(other._classes, key=key))
+
     def lookup(self, value: float) -> RangeClass:
         if math.isnan(value):
             raise ValueError("value must not be NaN")

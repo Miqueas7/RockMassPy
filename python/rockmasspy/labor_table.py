@@ -1,0 +1,80 @@
+"""Tabla por labor: catálogo + tabla de clases + luz a la que aplica, y selección por labor y luz.
+
+Clasificar nunca lanza por un sostenimiento ausente del catálogo (devuelve support=None y un aviso);
+solo lanza ValueError si los argumentos no corresponden al tipo de tabla.
+"""
+
+import math
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from .cell_table import CellTable
+from .issues import TableIssue
+from .range_table import RangeTable
+from .support import SupportCatalog, SupportType
+
+
+@dataclass(frozen=True)
+class Classification:
+    label: str
+    support: SupportType | None
+    base_edition: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LaborTable:
+    labor_type: str
+    catalog: SupportCatalog
+    table: RangeTable | CellTable
+    span_m: tuple[float, float] | None = None
+    correlations: tuple = ()  # tuple[rm.CustomCorrelation, ...]
+    author: str = ""
+    date: str = ""
+    notes: str = ""
+
+    def __post_init__(self):
+        if self.span_m is not None:
+            lo, hi = self.span_m
+            if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo < hi):
+                raise ValueError(f"span_m must satisfy 0 < lo < hi, got {self.span_m!r}")
+            object.__setattr__(self, "span_m", (lo, hi))
+        if self.date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", self.date):
+            raise ValueError(f"date must be ISO yyyy-mm-dd, got {self.date!r}")
+        object.__setattr__(self, "correlations", tuple(self.correlations))
+
+    def classify(self, value: float | None = None, *, structure: str | None = None,
+                 condition: str | None = None) -> Classification:
+        if isinstance(self.table, RangeTable):
+            if value is None or structure is not None or condition is not None:
+                raise ValueError("a range table is classified with 'value' only")
+            c = self.table.lookup(value)
+            label = c.label
+        else:
+            if value is not None or structure is None or condition is None:
+                raise ValueError("a cells table is classified with 'structure' and 'condition' only")
+            c = self.table.lookup(structure, condition)
+            label = c.label or c.cell
+        warnings: list[str] = []
+        support = None
+        if c.support is not None and c.support.strip() in self.catalog:
+            support = self.catalog.get(c.support.strip())
+        else:
+            warnings.append(f"class {label} has no support type in the catalog")
+        return Classification(label, support, self.table.base_edition, tuple(warnings))
+
+    def validate(self) -> list[TableIssue]:
+        return self.catalog.validate() + self.table.validate(self.catalog)
+
+
+def select_table(tables: Iterable[LaborTable], labor_type: str, span_m: float) -> LaborTable:
+    want = labor_type.strip().lower()
+    tables = list(tables)
+    hits = [t for t in tables
+            if t.labor_type.strip().lower() == want and (t.span_m is None or t.span_m[0] <= span_m <= t.span_m[1])]
+    if len(hits) == 1:
+        return hits[0]
+    cands = [(t.labor_type, t.span_m) for t in tables]
+    problem = "no table" if not hits else "more than one table"
+    raise ValueError(f"{problem} for labor_type {labor_type!r} and span {span_m:g} m; candidates: {cands}")

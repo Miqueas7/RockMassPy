@@ -88,6 +88,9 @@ class SupportCatalog:
     def __len__(self) -> int:
         return len(self._by_code)
 
+    def __eq__(self, other):
+        return isinstance(other, SupportCatalog) and self._by_code == other._by_code
+
     def validate(self) -> list[TableIssue]:
         issues: list[TableIssue] = []
         types = self.ordered()
