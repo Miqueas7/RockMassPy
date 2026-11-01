@@ -32,6 +32,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "es": "la librería recomienda, el ingeniero decide",
         "en": "the library recommends, the engineer decides",
     },
+    "gsi_quant_title": {"es": "Carta GSI cuantificada", "en": "Quantified GSI chart"},
+    "jcond89_axis": {"es": "Condición de juntas (JCond89)", "en": "Joint condition (JCond89)"},
+    "rqd_axis": {"es": "RQD (%)", "en": "RQD (%)"},
+    "gsi_label": {"es": "GSI", "en": "GSI"},
 }
 
 
