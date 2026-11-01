@@ -70,3 +70,30 @@ def test_adjustment_warning_and_duplicates():
     p = rm.CategoricalParam("w", {"a": 1})
     assert rm.RatingTable("X", [p]).rate({"w": "a"}).warnings == []
     with pytest.raises(ValueError, match="duplicate"): rm.RatingTable("X", [p, p])
+
+
+def _core_rmr(vals, orientation):
+    inp = rm.Rmr89Input()
+    inp.ucs_mpa, inp.rqd_pct, inp.spacing_m = vals["ucs_mpa"], vals["rqd_pct"], vals["spacing_m"]
+    inp.joint_condition = rm.JointCondition89(
+        vals["persistence_m"], vals["aperture_mm"], getattr(rm.Roughness, vals["roughness"]),
+        getattr(rm.Infilling, "None_" if vals["infilling"] == "None" else vals["infilling"]),
+        getattr(rm.Weathering, vals["weathering"]))
+    inp.water = getattr(rm.Water, vals["water"])
+    inp.orientation = getattr(rm.OrientationClass, orientation)
+    return rm.rmr89(inp).rmr
+
+
+BOUNDARIES = {"ucs_mpa": [0, 1, 5, 25, 50, 100, 250], "rqd_pct": [0, 25, 50, 75, 90, 100],
+              "spacing_m": [0.06, 0.2, 0.6, 2], "persistence_m": [0, 1, 3, 10, 20], "aperture_mm": [0, 0.1, 1, 5]}
+
+
+@pytest.mark.parametrize("name,value", [(n, v) for n, vs in BOUNDARIES.items() for v in vs])
+def test_boundary_parity_with_core(name, value):                  # el límite es donde tabla y núcleo podrían divergir
+    vals = {**BASE, name: value}
+    assert rm.RatingTable.rmr89_default().rate(vals, "Fair").total == _core_rmr(vals, "Fair")
+
+
+@pytest.mark.parametrize("orientation", ["VeryFavourable", "Favourable", "Fair", "Unfavourable", "VeryUnfavourable"])
+def test_orientation_adjustment_parity_with_core(orientation):
+    assert rm.RatingTable.rmr89_default().rate(BASE, orientation).total == _core_rmr(BASE, orientation)
