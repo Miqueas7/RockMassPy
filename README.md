@@ -34,8 +34,9 @@ A full synthetic walk-through is in `examples/01-tramo-sintetico/`.
 
 ## Methods
 
-Every result carries `info.method_id` and a verification mark: **Primary** (checked against the primary source),
-**PrimaryLaterAuthors** (primary formula as given by later authors) or **Secondary** (checked against a secondary source only).
+Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
+faithful reproduction of its equations by a cited author), **PrimaryLaterAuthors** (verified in a later publication by
+the same authors) or **Secondary** (checked against a secondary source only).
 
 | method_id | Method | Verification |
 |---|---|---|

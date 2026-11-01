@@ -35,8 +35,9 @@ El recorrido completo con datos sintéticos está en `examples/01-tramo-sintetic
 
 ## Métodos
 
-Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (contrastado con la fuente primaria),
-**PrimaryLaterAuthors** (fórmula primaria tal como la dan autores posteriores) o **Secondary** (solo fuente secundaria).
+Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
+una reproducción fiel de sus ecuaciones por un autor citado), **PrimaryLaterAuthors** (verificada en una publicación
+posterior de los mismos autores) o **Secondary** (solo fuente secundaria).
 
 | method_id | Método | Verificación |
 |---|---|---|
