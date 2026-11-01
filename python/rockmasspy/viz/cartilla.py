@@ -44,7 +44,8 @@ def _describe(t: SupportType, lang: str) -> str:
         parts.append(text("mesh", lang))
     if t.arch:
         parts.append(text("arch", lang))
-    return (lambda d: d[:1].upper() + d[1:])("; ".join(parts) or text("no_support", lang))
+    desc = "; ".join(parts) or text("no_support", lang)
+    return desc[:1].upper() + desc[1:]
 
 
 def _legend(fig, rect, ordered, colors, style):
@@ -104,9 +105,9 @@ def _cells(fig, table: LaborTable, rect, colors, style):
             second = cell.support if known else text("undefined", style.lang)
             ax.text(k + 0.5, r + 0.5, f"{code}\n{second}", ha="center", va="center", color=_ink(bg),
                     fontsize=style.font_size)
-    ax.set_xticks([k + 0.5 for k in range(nc)], [f"{c}\n{_axis_label("cond", c, lbl, style.lang)}" for c, lbl in chart.conditions],
+    ax.set_xticks([k + 0.5 for k in range(nc)], [f"{c}\n{_axis_label('cond', c, lbl, style.lang)}" for c, lbl in chart.conditions],
                   fontsize=style.font_size - 1)
-    ax.set_yticks([r + 0.5 for r in range(ns)], [f"{s}\n{_axis_label("struct", s, lbl, style.lang)}" for s, lbl in chart.structures],
+    ax.set_yticks([r + 0.5 for r in range(ns)], [f"{s}\n{_axis_label('struct', s, lbl, style.lang)}" for s, lbl in chart.structures],
                   fontsize=style.font_size - 1)
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position("top")
