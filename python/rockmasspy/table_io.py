@@ -3,6 +3,7 @@
 En 1B la cartilla de una tabla de celdas se serializa solo por su id (debe existir en GSI_CHARTS).
 """
 
+import datetime
 import json
 from collections.abc import Mapping
 
@@ -63,6 +64,18 @@ def _get(d, key, path, kind=None):
     return v
 
 
+def _bool(v, path):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        w = v.strip().lower()
+        if w in ("true", "si", "sí", "yes"):
+            return True
+        if w in ("false", "no"):
+            return False
+    raise ValueError(f"{path}: expected true/false")
+
+
 def _opt(d, key, path, kind=None, default=None):
     return default if d.get(key) is None else _get(d, key, path, kind)
 
@@ -83,7 +96,7 @@ def from_dict(d: Mapping) -> LaborTable:
                         _get(b, "spacing_m", p + ".bolt", "number"))
         if s.get("shotcrete") is not None:
             sc = s["shotcrete"]
-            shot = Shotcrete(_get(sc, "thickness_mm", p + ".shotcrete", "number"), bool(sc.get("fiber", False)))
+            shot = Shotcrete(_get(sc, "thickness_mm", p + ".shotcrete", "number"), _bool(sc.get("fiber", False), p + ".shotcrete.fiber"))
         types.append(SupportType(
             _get(s, "code", p, "str"), _get(s, "order", p, "number"), _opt(s, "description", p, "str", ""),
             bolt, shot, s.get("mesh"), s.get("arch"), _opt(s, "relative_cost", p, "number")))
@@ -122,6 +135,9 @@ def from_dict(d: Mapping) -> LaborTable:
             valid_min=_get(c, "valid_min", p, "number"), valid_max=_get(c, "valid_max", p, "number"),
             source=_opt(c, "source", p, "str", "")))
 
+    date = d.get("date")
+    if isinstance(date, datetime.date):  # YAML escrito a mano: `date: 2026-11-01` sin comillas
+        d = {**d, "date": date.isoformat()}
     span = d.get("span_m")
     return LaborTable(
         _get(d, "labor_type", "", "str"), catalog, table,
