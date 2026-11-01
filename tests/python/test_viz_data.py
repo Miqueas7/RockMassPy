@@ -60,7 +60,8 @@ def test_curva_global_omite_valores_fuera_de_validez():
 
 
 def test_ingles():
-    fig = plot_correlation(_pairs(), x="Q", y="RMR89", site=[_site("a", 44.0)], style=Style(lang="en"))
+    fig = plot_correlation(_pairs(), x="Q", y="RMR89", global_correlations=[rm.Correlation.RmrFromQ_Huang2026],
+                           site=[_site("a", 44.0)], style=Style(lang="en"))
     assert any("calibrate a site correlation" in t for t in _texts(fig))
 
 
@@ -106,6 +107,33 @@ def test_histograma_cinco_barras_suman_30_y_limite_al_peor():
     # 40 exacto cuenta en IV (la peor), no en III
     assert RMR.lookup(40.0).label == "IV"
     assert h[1] == sum(1 for v in values if RMR.lookup(v).label == "IV")
+
+
+def test_histograma_40_exacto_va_a_la_clase_iv():
+    # sin lookup: el valor 40 está en el límite entre IV [20, 40] y III [40, 60]; cae en la peor (IV)
+    assert _heights(plot_class_histogram([40.0], RMR)) == [0, 1, 0, 0, 0]
+
+
+def test_histograma_codigo_de_sostenimiento_sobre_la_barra():
+    fig = plot_class_histogram([10, 50], RMR, catalog=CATALOG)
+    assert any("III · S2" in t for t in _texts(fig))
+
+
+def test_curva_recortada_se_corta_donde_empieza_el_recorte():
+    fig = plot_correlation([(20.0, 22.0), (100.0, 100.0)], x="RMR89", y="RMR14",
+                           global_correlations=[rm.Correlation.Rmr14FromRmr89_Osinergmin2017])
+    xs = fig.axes[0].lines[0].get_xdata()
+    assert max(xs) <= 89.2
+
+
+def test_sin_globales_no_hay_nota_y_curva_vacia_no_se_dibuja():
+    fig = plot_correlation(_pairs(), x="Q", y="RMR89", site=[_site("a", 44.0)])
+    assert not any("dispersión" in t for t in _texts(fig))
+    far = rm.CustomCorrelation(name="lejos", from_="Q", to="RMR89", form=rm.CorrelationForm.LogLinear,
+                               a=9.0, b=44.0, valid_min=1e4, valid_max=1e5)
+    fig = plot_correlation(_pairs(), x="Q", y="RMR89", site=[far])
+    assert len(fig.axes[0].lines) == 0
+    assert "site:lejos" not in [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
 
 
 def test_histograma_fuera_de_clases_y_color():

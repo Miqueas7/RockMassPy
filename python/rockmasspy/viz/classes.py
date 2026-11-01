@@ -36,7 +36,10 @@ def plot_class_histogram(values: Sequence[float], table: RangeTable, *, catalog:
 
     fig = new_figure(style)
     ax = fig.add_axes([0.1, 0.14, 0.85, 0.76])
-    ax.bar([c.label for c in classes], [counts[c.label] for c in classes], color=colors, edgecolor="0.3")
+    bars = ax.bar([c.label for c in classes], [counts[c.label] for c in classes], color=colors, edgecolor="0.3")
+    for b, c in zip(bars, classes):  # el código del sostenimiento sobre la barra explica el color
+        ax.annotate(f"{c.label} · {c.support}" if c.support else c.label, (b.get_x() + b.get_width() / 2, b.get_height()),
+                    ha="center", va="bottom", xytext=(0, 3), textcoords="offset points", fontsize=style.font_size - 1)
     ax.set_ylabel(text("count_axis", style.lang), fontsize=style.font_size)
     ax.set_title(text("class_hist_title", style.lang), fontsize=style.font_size + 3, fontweight="bold")
     ax.tick_params(labelsize=style.font_size - 1)

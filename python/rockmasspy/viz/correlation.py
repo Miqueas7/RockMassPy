@@ -63,6 +63,9 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
         ax.set_xscale("log")
     ax.scatter(xs, [p[1] for p in pairs], s=18, color="0.25", label=text("scatter_points", style.lang), zorder=3)
 
+    def _clipped(r) -> bool:  # el núcleo recorta a [0, 100] y avisa: ese tramo plano engañaría, así que se corta
+        return any("clipped" in w for w in r.warnings)
+
     for k, c in enumerate(global_correlations):
         cx, cy, mid = [], [], ""
         for v in _grid(lo, hi, log):
@@ -70,22 +73,32 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
                 r = rm.correlate(c, v)
             except ValueError:  # fuera de validez (Q ≤ 0, RMR′ bajo el mínimo): el punto se omite
                 continue
+            if _clipped(r):
+                continue
             cx.append(v)
             cy.append(r.value)
             mid = r.info.method_id
-        ax.plot(cx, cy, linestyle=_DASHES[k % len(_DASHES)], linewidth=1.6, label=mid or c.name)
+        if cx:  # sin puntos no hay curva ni entrada de leyenda
+            ax.plot(cx, cy, linestyle=_DASHES[k % len(_DASHES)], linewidth=1.6, label=mid or c.name)
     for c in site:
-        a, b = max(lo, c.valid_min), min(hi, c.valid_max)  # shortcut: sin intersección, la curva queda vacía
-        cx = _grid(a, b, log) if a < b else []
-        ax.plot(cx, [rm.correlate_custom(c, v).value for v in cx], linewidth=1.8, label=f"site:{c.name}")
+        a, b = max(lo, c.valid_min), min(hi, c.valid_max)
+        cx, cy = [], []
+        for v in (_grid(a, b, log) if a < b else []):
+            r = rm.correlate_custom(c, v)
+            if not _clipped(r):
+                cx.append(v)
+                cy.append(r.value)
+        if cx:
+            ax.plot(cx, cy, linewidth=1.8, label=f"site:{c.name}")
 
     ax.set_xlabel(x, fontsize=style.font_size)
     ax.set_ylabel(y, fontsize=style.font_size)
     ax.set_title(text("correlation_title", style.lang), fontsize=style.font_size + 3, fontweight="bold")
     ax.grid(alpha=0.3)
     ax.tick_params(labelsize=style.font_size - 1)
-    ax.legend(fontsize=style.font_size - 1, loc="lower right")
-    fig.text(0.5, 0.06, text("global_scatter_note", style.lang), ha="center", fontsize=style.font_size - 1, style="italic")
+    ax.legend(fontsize=style.font_size - 1, loc="best")
+    if global_correlations:
+        fig.text(0.5, 0.06, text("global_scatter_note", style.lang), ha="center", fontsize=style.font_size - 1, style="italic")
     ids = [c.name for c in global_correlations] + [f"site:{c.name}" for c in site]
     footer(fig, ", ".join(ids) or f"{x} -> {y}", style)
     return fig
