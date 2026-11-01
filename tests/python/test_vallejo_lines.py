@@ -15,7 +15,7 @@ def test_rotulos_de_las_laminas():
 
 
 @pytest.mark.parametrize("lines", [vl.RMR_PRIME_LINES, vl.Q_PRIME_LINES], ids=["rmr", "q"])
-def test_ordenadas_y_bajan_de_izquierda_a_derecha(lines):
+def test_valores_descienden_y_lineas_van_abajo_a_la_derecha_dentro_de_la_cuadricula(lines):
     values = [ln.value for ln in lines]
     assert values == sorted(values, reverse=True)
     # a menor valor, la línea queda más abajo y a la derecha en la cartilla

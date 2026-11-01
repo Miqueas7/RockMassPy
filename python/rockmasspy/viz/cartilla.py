@@ -12,7 +12,8 @@ from ..support import SupportType
 from ..vallejo_lines import RMR_PRIME_LINES
 from .style import TEXTS, Style, footer, new_figure, support_color, text
 
-_DASHED, _UNDEFINED = "#E6E6E6", "#BDBDBD"
+# No aplica: blanco con rayado gris claro, distinto de todo color de sostenimiento también en blanco y negro.
+_NA_BG, _NA_HATCH, _UNDEFINED = "white", "0.75", "#BDBDBD"
 _LINES_CHART = "GSI-Vallejo-Osinergmin2017"  # la única cartilla con líneas RMR′ digitalizadas
 
 
@@ -86,6 +87,7 @@ def _header(fig, table: LaborTable, title, style):
 
 
 def _cells(fig, table: LaborTable, rect, colors, style, show_lines):
+    from matplotlib.patches import Rectangle
     from matplotlib.patheffects import withStroke
 
     chart, ct = table.table.chart, table.table
@@ -99,10 +101,11 @@ def _cells(fig, table: LaborTable, rect, colors, style, show_lines):
             code = f"{s}/{c}"
             cell = by_cell.get(code)
             if code not in chart.valid_cells:
-                p = _rect(k, r, 1, 1, _DASHED)
+                # el rayado toma el color del borde (matplotlib ≥ 3.8), así que el borde oscuro va en otro parche
+                p = Rectangle((k, r), 1, 1, facecolor=_NA_BG, edgecolor=_NA_HATCH, hatch="///", linewidth=0)
                 p.set_gid(f"dashed:{code}")
                 ax.add_patch(p)
-                ax.plot([k, k + 1], [r + 1, r], color="0.75", linewidth=0.8, linestyle=(0, (3, 3)))
+                ax.add_patch(_rect(k, r, 1, 1, "none"))
                 continue
             known = cell is not None and cell.support in colors
             bg = colors[cell.support] if known else _UNDEFINED
@@ -135,12 +138,12 @@ def _rmr_lines(ax, ns, nc, style):
     from matplotlib.patheffects import withStroke
 
     halo = [withStroke(linewidth=1.8, foreground="white")]  # sin el halo, la línea se pierde en las celdas moradas
-    for ln in RMR_PRIME_LINES:
+    for i, ln in enumerate(RMR_PRIME_LINES):
         x0, y0, x1, y1 = ln.x0 * nc, ln.y0 * ns, ln.x1 * nc, ln.y1 * ns
         ax.plot([x0, x1], [y0, y1], color="0.15", linewidth=0.7, gid=f"rmr_line:{ln.value:g}", path_effects=halo)
         # el rótulo va sobre la línea, un poco hacia adentro para no pisar el borde de la cuadrícula
         k = 0.12 / math.hypot(x1 - x0, y1 - y0)
-        ax.text(x1 - k * (x1 - x0), y1 - k * (y1 - y0), f"{ln.value:g}", ha="center", va="center",
+        ax.text(x1 - k * (x1 - x0), y1 - k * (y1 - y0), (f"RMR′ {ln.value:g}" if i == 0 else f"{ln.value:g}"), ha="center", va="center",
                 fontsize=style.font_size - 2, color="0.15",
                 bbox=dict(boxstyle="round,pad=0.1", facecolor="white", edgecolor="none", alpha=0.8))
 
@@ -204,6 +207,8 @@ def plot_cartilla(table: LaborTable, *, style: Style = Style(size="cartilla"), t
         _ranges(fig, table, body, colors, style)
     _legend(fig, [0.04, 0.07, 0.92, legend_h], ordered, colors, style)
     source = f"{table.table.base_edition} · {text('engineer_decides', style.lang)}"
+    if not is_cells:
+        source += f" · {text('boundary_rule', style.lang)}"
     if lines:
         source += "\n" + text("lines_source", style.lang)
     footer(fig, source, style)

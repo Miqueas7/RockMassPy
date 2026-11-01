@@ -57,6 +57,7 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
     # margen para que las curvas se vean un poco más allá de los datos
     lo, hi = (lo / 3, hi * 3) if log else (lo - 0.1 * (hi - lo or 1), hi + 0.1 * (hi - lo or 1))
 
+    site_tag = text("site", style.lang)  # prefijo de las correlaciones del sitio en leyenda y pie
     fig = new_figure(style)
     ax = fig.add_axes([0.1, 0.16, 0.85, 0.74])
     if log:
@@ -89,7 +90,7 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
                 cx.append(v)
                 cy.append(r.value)
         if cx:
-            ax.plot(cx, cy, linewidth=1.8, label=f"site:{c.name}")
+            ax.plot(cx, cy, linewidth=1.8, label=f"{site_tag}:{c.name}")
 
     ax.set_xlabel(x, fontsize=style.font_size)
     ax.set_ylabel(y, fontsize=style.font_size)
@@ -99,6 +100,6 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
     ax.legend(fontsize=style.font_size - 1, loc="best")
     if global_correlations:
         fig.text(0.5, 0.06, text("global_scatter_note", style.lang), ha="center", fontsize=style.font_size - 1, style="italic")
-    ids = [c.name for c in global_correlations] + [f"site:{c.name}" for c in site]
+    ids = [c.name for c in global_correlations] + [f"{site_tag}:{c.name}" for c in site]
     footer(fig, ", ".join(ids) or f"{x} -> {y}", style)
     return fig

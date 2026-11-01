@@ -85,3 +85,25 @@ def test_support_colors_hue_order_green_to_purple():
         h = colorsys.rgb_to_hsv(*(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)))[0] * 360
         hues.append(h if h < 180 else h - 360)  # rojo cerca de 0; los morados quedan negativos
     assert all(a > b for a, b in zip(hues, hues[1:])), hues
+
+
+def test_support_colors_vacio_lanza():
+    with pytest.raises(ValueError, match="support_colors must not be empty"):
+        Style(support_colors=())
+
+
+def test_mas_tipos_que_colores_lanza():
+    s = Style(support_colors=("#ffffff", "#000000"))
+    assert viz.support_color(2, 2, s) == "#000000"
+    with pytest.raises(ValueError, match="3 support types but only 2 support_colors.*longer support_colors"):
+        viz.support_color(1, 3, s)
+
+
+def test_pdf_con_fuentes_truetype(tmp_path):
+    import matplotlib
+
+    fig = viz.new_figure(Style(dpi=50, brand="Señal Ñ"))
+    raw = viz.save_figure(fig, tmp_path / "c.pdf").read_bytes()
+    # tipo 42: TrueType (con tildes, como CIDFontType2); el tipo 3 por defecto escribiría /Type3
+    assert b"/CIDFontType2" in raw and b"/Type3" not in raw
+    assert matplotlib.rcParams["pdf.fonttype"] == 3  # el ajuste no se filtra al estado global

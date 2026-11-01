@@ -40,12 +40,13 @@ def main(out_dir: Path) -> dict:
                                     labels=["P1", "P2", "P3", "P4", "P5"], style=a4), out_dir / "gsi_cuantificada.svg")
 
     # Envolventes Hoek-Brown (HB-2018) con ensayos sintéticos alrededor de la curva
-    sigma_ci = 90.0
-    p = rm.hb_params(59.5, 25, 0)
+    sigma_ci, gsi, mi, d = 90.0, 59.5, 25, 0
+    p = rm.hb_params(gsi, mi, d)
     s3max = rm.hb_sigma3max(rm.hb_global_strength(sigma_ci, p), 0.027, 400, rm.HbApplication.Tunnel)
     mc = rm.hb_mohr_coulomb(sigma_ci, p, s3max)
     ensayos = [(s3, rm.hb_sigma1(s3, sigma_ci, p) * rnd.uniform(0.95, 1.05)) for s3 in (0.0, 1.0, 3.0, 5.0)]
-    guardar(viz.plot_hb_envelopes(sigma_ci, p, sigma3max_mpa=s3max, mc=mc, tests=ensayos, style=a4),
+    guardar(viz.plot_hb_envelopes(sigma_ci, p, sigma3max_mpa=s3max, mc=mc, tests=ensayos, style=a4,
+                                  gsi=gsi, mi=mi, d=d),  # HbParams no guarda GSI, mi ni D: van al pie
             out_dir / "envolventes.png")
 
     # Dispersión Q–RMR89 con la correlación global que va de Q a RMR89

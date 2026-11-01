@@ -2,6 +2,10 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("matplotlib")
+
 RUTA = Path(__file__).resolve().parents[2] / "examples" / "03-cartillas" / "graficos.py"
 ARCHIVOS = ["cartilla_celdas.png", "cartilla_celdas.pdf", "cartilla_rango.png", "gsi_cuantificada.svg",
             "envolventes.png", "correlacion.png", "histograma.png"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..table_io import _optional
+from ..vallejo_lines import VALLEJO_LINES_SOURCE
 
 # Del sostenimiento más liviano al más pesado: verde, amarillo, naranja, rojo, morado.
 # Elección: el tono sigue ese orden y la luminosidad relativa (WCAG) baja de forma estricta,
@@ -53,8 +54,8 @@ TEXTS: dict[str, dict[str, str]] = {
     # Hoek-Marinos: sus códigos no chocan con los de Vallejo dentro de un mismo eje (cond P = «pobre» en ambas)
     "gsi_struct_IM": {"es": "intacta o masiva", "en": "intact or massive"},
     "gsi_struct_B": {"es": "en bloques", "en": "blocky"},
-    "gsi_struct_VB": {"es": "muy en bloques", "en": "very blocky"},
-    "gsi_struct_BD": {"es": "bloques alterados o con fallas", "en": "blocky, disturbed or seamy"},
+    "gsi_struct_VB": {"es": "muy fracturada en bloques", "en": "very blocky"},
+    "gsi_struct_BD": {"es": "bloques perturbados, con planos débiles", "en": "disturbed blocks with weak seams"},
     "gsi_struct_D": {"es": "desintegrada", "en": "disintegrated"},
     "gsi_struct_LS": {"es": "laminada o cizallada", "en": "laminated or sheared"},
     "gsi_cond_VG": {"es": "muy buena", "en": "very good"},
@@ -89,9 +90,11 @@ TEXTS: dict[str, dict[str, str]] = {
     "count_axis": {"es": "Cantidad", "en": "Count"},
     "outside_classes": {"es": "Fuera de toda clase", "en": "Outside every class"},
     "lines_source": {
-        "es": "digitalizado de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)",
-        "en": "digitized from Osinergmin (2017), Annex A.17 (Vallejo chart, 2011)",
+        "es": "líneas RMR′ digitalizadas de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)",
+        "en": "RMR′ lines " + VALLEJO_LINES_SOURCE,  # la fuente en inglés vive una sola vez, en vallejo_lines
     },
+    "boundary_rule": {"es": "un valor en el límite toma la clase peor", "en": "a value on a boundary takes the worse class"},
+    "site": {"es": "sitio", "en": "site"},
 }
 
 
@@ -111,6 +114,8 @@ class Style:
             raise ValueError(f"size must be one of 'cartilla', 'A4', 'A3', got {self.size!r}")
         if not 50 <= self.dpi <= 1200:
             raise ValueError(f"dpi must be in [50, 1200], got {self.dpi!r}")
+        if not self.support_colors:
+            raise ValueError("support_colors must not be empty")
 
 
 def _mpl():
@@ -130,6 +135,9 @@ def support_color(order: int, n_types: int, style: Style) -> str:
     if not 1 <= order <= n_types:
         raise ValueError(f"order must be in 1..{n_types}, got {order!r}")
     colors = style.support_colors
+    if n_types > len(colors):  # repetir colores confundiría dos tipos distintos
+        raise ValueError(f"{n_types} support types but only {len(colors)} support_colors; "
+                         f"pass a longer support_colors in Style")
     if n_types == 1:
         return colors[0]
     return colors[round((order - 1) * (len(colors) - 1) / (n_types - 1))]

@@ -19,8 +19,14 @@ def plot_hb_envelopes(
     mc: MohrCoulombFit | None = None,
     tests: Sequence[tuple[float, float]] = (),
     style: Style = Style(),
+    gsi: float | None = None,
+    mi: float | None = None,
+    d: float | None = None,
 ):
-    """Izquierda σ1–σ3 (con ensayos (σ3, σ1)), derecha τ–σn; la curva HB va de σt a sigma3max_mpa."""
+    """Izquierda σ1–σ3 (con ensayos (σ3, σ1)), derecha τ–σn; la curva HB va de σt a sigma3max_mpa.
+
+    HbParams no guarda GSI, mi ni D: si se pasan, el pie los muestra (solo los que se dan).
+    """
     st = hb_tensile(sigma_ci_mpa, params)
     if not sigma3max_mpa > st:
         raise ValueError(f"sigma3max_mpa must be greater than the tensile strength {st:g}, got {sigma3max_mpa!r}")
@@ -63,7 +69,10 @@ def plot_hb_envelopes(
     fig.subplots_adjust(bottom=0.12, wspace=0.25)
 
     src = f"{params.info.method_id} · σci {sigma_ci_mpa:g} MPa"
+    given = [f"{name} {v:g}" for name, v in (("GSI", gsi), ("mi", mi), ("D", d)) if v is not None]
+    if given:
+        src += " · " + ", ".join(given)
     if mc is not None:
-        src += f" · c′ {mc.cohesion_mpa:.3g} MPa, φ′ {mc.phi_deg:.1f}°"
+        src += f" · c′ {mc.cohesion_mpa:.3g} MPa, φ′ {mc.phi_deg:.1f}° (σ3max {mc.sigma3max_mpa:.3g} MPa)"
     footer(fig, src, style)
     return fig

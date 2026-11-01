@@ -41,7 +41,7 @@ def test_dispersion_tres_curvas_puntos_y_eje_log():
     assert ax.get_xscale() == "log"
     assert len(ax.lines) == 3
     assert len(ax.collections[0].get_offsets()) == 20
-    assert sorted(ln.get_label() for ln in ax.lines) == ["RmrFromQ_Huang2026", "site:a", "site:b"]
+    assert sorted(ln.get_label() for ln in ax.lines) == ["RmrFromQ_Huang2026", "sitio:a", "sitio:b"]
     assert any("dispersión" in t for t in _texts(fig))
 
 
@@ -63,6 +63,8 @@ def test_ingles():
     fig = plot_correlation(_pairs(), x="Q", y="RMR89", global_correlations=[rm.Correlation.RmrFromQ_Huang2026],
                            site=[_site("a", 44.0)], style=Style(lang="en"))
     assert any("calibrate a site correlation" in t for t in _texts(fig))
+    assert "site:a" in [ln.get_label() for ln in fig.axes[0].lines]
+    assert any(t == "RmrFromQ_Huang2026, site:a" for t in _texts(fig))  # el pie
 
 
 def test_from_o_to_distinto_lanza():
@@ -114,9 +116,10 @@ def test_histograma_40_exacto_va_a_la_clase_iv():
     assert _heights(plot_class_histogram([40.0], RMR)) == [0, 1, 0, 0, 0]
 
 
-def test_histograma_codigo_de_sostenimiento_sobre_la_barra():
-    fig = plot_class_histogram([10, 50], RMR, catalog=CATALOG)
-    assert any("III · S2" in t for t in _texts(fig))
+def test_histograma_cantidad_y_rango_sobre_la_barra():
+    fig = plot_class_histogram([10, 50, 55], RMR, catalog=CATALOG)
+    txt = _texts(fig)
+    assert "III (40–60): 2" in txt and "V (0–20): 1" in txt and "I (80–100): 0" in txt
 
 
 def test_curva_recortada_se_corta_donde_empieza_el_recorte():
@@ -133,7 +136,7 @@ def test_sin_globales_no_hay_nota_y_curva_vacia_no_se_dibuja():
                                a=9.0, b=44.0, valid_min=1e4, valid_max=1e5)
     fig = plot_correlation(_pairs(), x="Q", y="RMR89", site=[far])
     assert len(fig.axes[0].lines) == 0
-    assert "site:lejos" not in [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    assert "sitio:lejos" not in [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
 
 
 def test_histograma_fuera_de_clases_y_color():

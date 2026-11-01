@@ -41,7 +41,7 @@ _VALLEJO_DASHED = {"LF/MP", "MF/MB", "IF/MB", "IF/B", "T/MB", "T/B", "T/R"}
 # Celdas N/A: IM/P, IM/VP (roca masiva con superficies pobres no ocurre) y LS/VG, LS/G (lo laminado no tiene buena superficie).
 _HM_STRUCTURES = (
     ("IM", "intact or massive"), ("B", "blocky"), ("VB", "very blocky"),
-    ("BD", "blocky, disturbed or seamy"), ("D", "disintegrated"), ("LS", "laminated or sheared"),
+    ("BD", "disturbed blocks with weak seams"), ("D", "disintegrated"), ("LS", "laminated or sheared"),
 )
 _HM_CONDITIONS = (
     ("VG", "very good"), ("G", "good"), ("F", "fair"), ("P", "poor"), ("VP", "very poor"),

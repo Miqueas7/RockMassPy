@@ -163,10 +163,10 @@ def test_lineas_rmr_y_fuente_en_el_pie():
     fig = plot_cartilla(t)
     assert [ln.get_gid() for ln in _rmr_lines(fig)] == [f"rmr_line:{ln.value:g}" for ln in RMR_PRIME_LINES]
     txt = _texts(fig)
-    assert "90" in txt and "5" in txt  # rótulo en el extremo superior de cada línea
-    assert any("digitalizado de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)" in s for s in txt)
+    assert "RMR′ 90" in txt and "5" in txt  # rótulo en el extremo superior de cada línea
+    assert any("líneas RMR′ digitalizadas de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)" in s for s in txt)
     en = " ".join(_texts(plot_cartilla(t, style=Style(lang="en"))))
-    assert "digitized from Osinergmin (2017), Annex A.17 (Vallejo chart, 2011)" in en
+    assert "RMR′ lines digitized from Osinergmin (2017), Annex A.17 (Vallejo chart, 2011)" in en
 
 
 def test_sin_lineas_no_dibuja_ni_cita():
@@ -186,7 +186,7 @@ def test_otra_cartilla_nunca_lleva_lineas():
 def test_texto_de_fuente_igual_a_la_constante():
     from rockmasspy.vallejo_lines import VALLEJO_LINES_SOURCE
     from rockmasspy.viz import text
-    assert text("lines_source", "en") == VALLEJO_LINES_SOURCE
+    assert text("lines_source", "en") == "RMR′ lines " + VALLEJO_LINES_SOURCE
 
 
 def test_cartilla_hoek_marinos():
@@ -196,6 +196,10 @@ def test_cartilla_hoek_marinos():
     patches = _grid_patches(fig)
     assert len(patches) == 30 and sum(1 for p in patches if p.get_gid().startswith("dashed:")) == 4
     assert "bloques" in " ".join(_ticks(fig)) and not _rmr_lines(fig)
+    es = " ".join(_ticks(fig))
+    assert "bloques perturbados, con planos débiles" in es and "muy fracturada en bloques" in es
+    assert "disturbed blocks with weak seams" in " ".join(_ticks(plot_cartilla(_labor(CellTable(ch, cells)),
+                                                                                  style=Style(lang="en"))))
 
 
 def test_muestra_hoek_marinos():
@@ -233,7 +237,7 @@ def test_histograma_no_repite_codigo_cuando_label_igual_support():
     from rockmasspy.viz import plot_class_histogram
     _, rt, cat = _tabla_label_igual_codigo()
     txt = _textos(plot_class_histogram([5, 50], rt, catalog=cat))
-    assert "V · V" not in txt and "V" in txt
+    assert "V · V" not in txt and "V (0–20): 1" in txt  # cantidad y rango, sin repetir el código
 
 
 def test_subtitulo_oculto_si_el_titulo_trae_el_tipo_de_labor():
@@ -242,3 +246,29 @@ def test_subtitulo_oculto_si_el_titulo_trae_el_tipo_de_labor():
     assert "galería" not in _textos(plot_cartilla(t, title="Galeria (sintético)"))
     assert "galería" in _textos(plot_cartilla(t, title="Otro título"))
     assert "galería" in _textos(plot_cartilla(t))
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_lineas_dicen_rmr_prima(lang):
+    # sin «RMR′» las líneas con solo números se confunden con GSI (como en las cartillas clásicas)
+    txt = _texts(plot_cartilla(_labor(CellTable(CHART, _full_cells())), style=Style(lang=lang)))
+    assert "RMR′ 90" in txt and "85" in txt and "RMR′ 85" not in txt
+    assert sum("RMR′" in s for s in txt) >= 2  # el rótulo de la primera línea y el pie
+
+
+def test_no_aplica_rayado_y_distinto_de_todo_color():
+    fig = plot_cartilla(_labor(CellTable(CHART, _full_cells())))
+    na = [p for p in _grid_patches(fig) if p.get_gid().startswith("dashed:")]
+    assert len(na) == 7
+    soportes = {to_hex(c) for c in Style().support_colors}
+    for p in na:
+        assert p.get_hatch() == "///"
+        assert to_hex(p.get_facecolor()) == "#ffffff" and to_hex(p.get_facecolor()) not in soportes
+
+
+def test_pie_de_rango_trae_la_regla_del_limite():
+    t = RangeTable("RMR", "RMR89", [RangeClass(0, 50, "malo", "S3"), RangeClass(50, 100, "bueno", "S0")])
+    es = " ".join(_texts(plot_cartilla(_labor(t))))
+    assert "un valor en el límite toma la clase peor" in es
+    assert "a value on a boundary takes the worse class" in " ".join(_texts(plot_cartilla(_labor(t), style=Style(lang="en"))))
+    assert "límite" not in " ".join(_texts(plot_cartilla(_labor(CellTable(CHART, _full_cells())))))

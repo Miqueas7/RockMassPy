@@ -69,6 +69,10 @@ def test_pie():
     t = " ".join(_texts(plot_hb_envelopes(SCI, p, sigma3max_mpa=s3, mc=mc)))
     assert "HB-2002" in t and "σci 50 MPa" in t and "c′" in t and "φ′" in t
     assert "c′" not in " ".join(_texts(plot_hb_envelopes(SCI, p, sigma3max_mpa=s3)))
+    assert "GSI" not in t  # sin gsi/mi/d no se inventan
+    full = _texts(plot_hb_envelopes(SCI, p, sigma3max_mpa=s3, mc=mc, gsi=45, mi=10, d=0))
+    assert full == ["HB-2002 · σci 50 MPa · GSI 45, mi 10, D 0 · c′ 0.583 MPa, φ′ 47.2° (σ3max 1.35 MPa)"]
+    assert _texts(plot_hb_envelopes(SCI, p, sigma3max_mpa=s3, gsi=45)) == ["HB-2002 · σci 50 MPa · GSI 45"]
 
 
 def test_idioma():
@@ -93,5 +97,5 @@ def test_muestras():
     # sintéticos: sobre la curva ±7 %, dentro del rango [0, sigma3max] (en este túnel solo ~1.4 MPa)
     tests = [(f * s3, rm.hb_sigma1(f * s3, SCI, p) * m) for f, m in ((0.1, 1.07), (0.3, 0.94), (0.5, 1.05), (0.75, 0.96), (1.0, 1.04))]
     for lang in ("es", "en"):
-        fig = plot_hb_envelopes(SCI, p, sigma3max_mpa=s3, mc=mc, tests=tests, style=Style(lang=lang))
+        fig = plot_hb_envelopes(SCI, p, sigma3max_mpa=s3, mc=mc, tests=tests, style=Style(lang=lang), gsi=45, mi=10, d=0)
         save_figure(fig, Path(d) / f"t4_envelopes_{lang}.png")
