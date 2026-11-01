@@ -96,6 +96,14 @@ _Q2015["SRF"].update({
     "P": (10.0, 15.0, "d) heavy swelling"),
 })
 
+# Categoría del manual (a, b, c...) de cada letra de SRF: 2025 tiene 5 (Tabla 3-6), 2015 tiene 4 (Tabla 6).
+SRF_CATEGORIES = {
+    "Q-NGI-2025": {**dict.fromkeys("ABCDE", "a"), **dict.fromkeys("FG", "b"), **dict.fromkeys("HJKL", "c"),
+                   **dict.fromkeys("MN", "d"), **dict.fromkeys("OP", "e")},
+    "Q-NGI-2015": {**dict.fromkeys("ABCDE", "a"), **dict.fromkeys("FGHJKL", "b"),
+                   **dict.fromkeys("MN", "c"), **dict.fromkeys("OP", "d")},
+}
+
 Q_TABLES = {"Q-NGI-2025": _Q2025, "Q-NGI-2015": _Q2015}
 
 

@@ -3,4 +3,4 @@
 from ._rockmasspy_core import *  # noqa: F401,F403
 
 __version__ = "0.1.0"
-from .q_tables import Q_TABLES, q_lookup  # noqa: E402,F401
+from .q_tables import Q_TABLES, SRF_CATEGORIES, q_lookup  # noqa: E402,F401

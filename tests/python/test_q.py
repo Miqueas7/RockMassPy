@@ -37,5 +37,21 @@ def test_lookup_unknown_letter_lists_valid():
         rm.q_lookup("Jw", "A", "Q-1974")
 
 
-def test_srf_categories_differ_between_editions():
-    assert rm.Q_TABLES["Q-NGI-2025"]["SRF"] != rm.Q_TABLES["Q-NGI-2015"]["SRF"]
+def test_srf_values_equal_across_editions():
+    a, b = rm.Q_TABLES["Q-NGI-2025"]["SRF"], rm.Q_TABLES["Q-NGI-2015"]["SRF"]
+    assert a.keys() == b.keys()
+    for letter in a:
+        assert a[letter][:2] == b[letter][:2], letter
+
+
+def test_srf_category_counts():
+    assert len(set(rm.SRF_CATEGORIES["Q-NGI-2025"].values())) == 5
+    assert len(set(rm.SRF_CATEGORIES["Q-NGI-2015"].values())) == 4
+
+
+def test_srf_category_differs_for_h_to_p():
+    c25, c15 = rm.SRF_CATEGORIES["Q-NGI-2025"], rm.SRF_CATEGORIES["Q-NGI-2015"]
+    for letter in "HJKLMNOP":
+        assert c25[letter] != c15[letter], letter
+    for letter in "ABCDEFG":
+        assert c25[letter] == c15[letter], letter
