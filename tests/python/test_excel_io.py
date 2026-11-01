@@ -294,3 +294,31 @@ def test_puntajes_empty_hasta_only_in_last_interval(tmp_path):
     def middle(wb):
         wb["Puntajes"].cell(row=3, column=6).value = None
     assert "empty 'hasta'" in _excel_error(tmp_path, _rated, middle)
+
+
+def test_puntajes_rows_without_edition_is_an_error(tmp_path):
+    def f(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "edicion_puntajes"), column=2).value = None
+    assert "campo 'edicion_puntajes': required when sheet 'Puntajes' exists" in _excel_error(tmp_path, _rated, f)
+
+    def vacia(wb):  # hoja solo con cabecera y sin edición = sin puntajes propios
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "edicion_puntajes"), column=2).value = None
+        wb["Puntajes"].delete_rows(2, wb["Puntajes"].max_row)
+    assert rm.load_excel(_edit(tmp_path, _rated, vacia)).rating is None
+
+
+def test_puntajes_duplicates_are_errors(tmp_path):
+    def adj(wb):  # última fila = ajuste VeryUnfavourable; se repite el anterior
+        ws = wb["Puntajes"]
+        ws.cell(row=ws.max_row, column=7).value = "Fair"
+    m = _excel_error(tmp_path, _rated, adj)
+    assert "column 'categoria'" in m and "duplicate" in m and "Fair" in m
+
+    def cat(wb):
+        ws = wb["Puntajes"]
+        fila = next(r[0].row for r in ws.iter_rows(min_row=2) if r[0].value == "water")
+        ws.cell(row=fila + 1, column=7).value = "Dry"
+    m = _excel_error(tmp_path, _rated, cat)
+    assert "duplicate" in m and "Dry" in m

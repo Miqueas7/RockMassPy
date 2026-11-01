@@ -188,6 +188,8 @@ def _load(wb) -> LaborTable:
         _corr(n, r) for n, r in _sheet_rows(wb, "Correlaciones", CORRELACIONES, {"nombre", "desde", "hacia", "forma"},
                                             {"a", "b", "valido_min", "valido_max"})]
     ed = campos.get("edicion_puntajes")
+    if ed is None and "Puntajes" in wb.sheetnames and _sheet_rows(wb, "Puntajes", PUNTAJES, set(), set()):
+        raise ValueError("sheet 'Tabla', campo 'edicion_puntajes': required when sheet 'Puntajes' exists")
     d["rating"] = None if ed is None else _puntajes(wb, ed)
     try:
         return from_dict(d)
@@ -222,6 +224,8 @@ def _puntajes(wb, edicion):
         if tipo == "ajuste":
             if r["categoria"] is None:
                 raise ValueError(f"{_where(hoja, n, 'categoria')}: required value is empty")
+            if r["categoria"] in ajustes:
+                raise ValueError(f"{_where(hoja, n, 'categoria')}: duplicate adjustment '{r['categoria']}'")
             ajustes[r["categoria"]] = r["puntos"]
             continue
         nombre = r["parametro"]
@@ -233,6 +237,8 @@ def _puntajes(wb, edicion):
             if r["categoria"] is None:
                 raise ValueError(f"{_where(hoja, n, 'categoria')}: required value is empty")
             p = params.setdefault(nombre, {"name": nombre, "kind": "categorical", "points": {}})
+            if r["categoria"] in p["points"]:
+                raise ValueError(f"{_where(hoja, n, 'categoria')}: duplicate category '{r['categoria']}' in '{nombre}'")
             p["points"][r["categoria"]] = r["puntos"]
             continue
         if r["desde"] is None:

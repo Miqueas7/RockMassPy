@@ -166,7 +166,7 @@ def rating_from_dict(r, path: str = "rating") -> RatingTable:
             bins = []
             for j, b in enumerate(_get(p, "bins", pp, "list")):
                 bp = f"{pp}.bins[{j}]"
-                hi = math.inf if _get(b, "hi", bp) == "inf" else _get(b, "hi", bp, "number")
+                hi = math.inf if str(_get(b, "hi", bp)).strip().lower() == "inf" else _get(b, "hi", bp, "number")
                 bins.append(_at(bp, RatingBin, _get(b, "lo", bp, "number"), hi, _get(b, "points", bp, "number")))
             params.append(_at(pp, NumericParam, name, _opt(p, "unit", pp, "str", ""), bins, _get(p, "better", pp, "str")))
         elif kind == "categorical":

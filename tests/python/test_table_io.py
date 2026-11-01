@@ -257,3 +257,9 @@ def test_rating_errors_name_the_path():
     assert "rating.params[5].kind" in err(lambda r: r["params"][5].update(kind="x"))
     assert "rating.adjustments.Fair" in err(lambda r: r["adjustments"].update(Fair="x"))
     assert "rating.params[0]" in err(lambda r: r["params"][0].update(better="up"))
+
+
+def test_inf_string_is_case_insensitive_and_trimmed():
+    d = rm.to_dict(rated_lt())
+    d["rating"]["params"][0]["bins"][-1]["hi"] = " INF "
+    assert rm.from_dict(d) == rated_lt()
