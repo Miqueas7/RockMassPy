@@ -24,3 +24,8 @@ def test_ambiguous_raises():
     in_.rqd_pct = 80
     with pytest.raises(ValueError):
         rm.rmr89(in_)
+
+
+def test_rmr_class_rejects_nan():
+    with pytest.raises(ValueError):
+        rm.rmr_class(float("nan"))

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -54,4 +55,18 @@ TEST(Rmr89, InvalidInputsThrow) {
     in.spacing_m = 0.5; in.ucs_mpa.reset(); in.is50_mpa = 1.0; EXPECT_THROW(rmr89(in), std::invalid_argument);
     EXPECT_THROW(tunnel_orientation_class(StrikeRelation::Parallel, 91), std::invalid_argument);
     EXPECT_THROW(jcond89({-1.0, 0.0, Roughness::Rough, Infilling::None, Weathering::Unweathered}), std::invalid_argument);
+}
+TEST(Rmr89, OrientationBoundaryIsConservative) {
+    using S = StrikeRelation; using O = OrientationClass;
+    EXPECT_EQ(tunnel_orientation_class(S::PerpendicularDriveWithDip, 20), O::Fair);
+    EXPECT_EQ(tunnel_orientation_class(S::PerpendicularDriveWithDip, 45), O::Favourable);
+    EXPECT_EQ(tunnel_orientation_class(S::PerpendicularDriveAgainstDip, 20), O::Unfavourable);
+    EXPECT_EQ(tunnel_orientation_class(S::PerpendicularDriveAgainstDip, 45), O::Unfavourable);
+    EXPECT_EQ(tunnel_orientation_class(S::Parallel, 20), O::Fair);
+    EXPECT_EQ(tunnel_orientation_class(S::Parallel, 45), O::VeryUnfavourable);
+    EXPECT_EQ(tunnel_orientation_class(S::PerpendicularDriveAgainstDip, 60), O::Fair);
+}
+TEST(Rmr89, RmrClassRejectsNonFinite) {
+    EXPECT_THROW(rmr_class(std::nan("")), std::invalid_argument);
+    EXPECT_THROW(rmr_class(std::numeric_limits<double>::infinity()), std::invalid_argument);
 }

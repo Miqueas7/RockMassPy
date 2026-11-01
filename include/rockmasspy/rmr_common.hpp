@@ -27,15 +27,16 @@ struct RmrClass {
 /// Clase de orientación de las discontinuidades respecto al eje del túnel; dip_deg en [0, 90].
 inline OrientationClass tunnel_orientation_class(StrikeRelation rel, double dip_deg) {
     validation::require_in_range(dip_deg, 0.0, 90.0, "dip_deg");
-    if (dip_deg < 20.0) return OrientationClass::Fair;
-    const bool steep = dip_deg >= 45.0;
+    // En 20 y 45 grados cada relación toma la clase menos favorable de las dos vecinas.
     switch (rel) {
         case StrikeRelation::PerpendicularDriveWithDip:
-            return steep ? OrientationClass::VeryFavourable : OrientationClass::Favourable;
+            if (dip_deg <= 20.0) return OrientationClass::Fair;
+            return dip_deg <= 45.0 ? OrientationClass::Favourable : OrientationClass::VeryFavourable;
         case StrikeRelation::PerpendicularDriveAgainstDip:
-            return steep ? OrientationClass::Fair : OrientationClass::Unfavourable;
+            if (dip_deg < 20.0) return OrientationClass::Fair;
+            return dip_deg <= 45.0 ? OrientationClass::Unfavourable : OrientationClass::Fair;
         default:
-            return steep ? OrientationClass::VeryUnfavourable : OrientationClass::Fair;
+            return dip_deg < 45.0 ? OrientationClass::Fair : OrientationClass::VeryUnfavourable;
     }
 }
 
@@ -46,6 +47,7 @@ inline int orientation_adjustment(OrientationClass c, Application app) {
 }
 
 inline RmrClass rmr_class(double rmr) {
+    validation::require_finite(rmr, "rmr");
     if (rmr > 80.0) return {1, "I", "Very good"};
     if (rmr > 60.0) return {2, "II", "Good"};
     if (rmr > 40.0) return {3, "III", "Fair"};
