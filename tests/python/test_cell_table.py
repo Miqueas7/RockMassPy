@@ -62,3 +62,18 @@ def test_validate_no_and_unknown_support():
     c = rm.SupportCatalog([rm.SupportType("I", 1, mesh="m")])
     kinds = [i.kind for i in t.validate(c)]
     assert "no_support" in kinds and "unknown_support" in kinds and "not_monotonic" not in kinds
+
+
+HM = "GSI-Hoek-Marinos"
+
+
+def test_hoek_marinos_chart():
+    ch = rm.GSI_CHARTS[HM]
+    assert [s for s, _ in ch.structures] == ["IM", "B", "VB", "BD", "D", "LS"]
+    assert [c for c, _ in ch.conditions] == ["VG", "G", "F", "P", "VP"]
+    assert ch.verification == "secondary" and ch.chart_id == HM
+    # 30 celdas menos las 4 marcadas N/A en la carta
+    assert len(ch.valid_cells) == 26
+    assert not {"IM/P", "IM/VP", "LS/VG", "LS/G"} & ch.valid_cells
+    t = rm.CellTable(ch, [rm.CellClass(c, "II") for c in sorted(ch.valid_cells)])
+    assert not any(i.kind in ("invalid_cell", "missing_cell") for i in t.validate())

@@ -187,3 +187,23 @@ def test_texto_de_fuente_igual_a_la_constante():
     from rockmasspy.vallejo_lines import VALLEJO_LINES_SOURCE
     from rockmasspy.viz import text
     assert text("lines_source", "en") == VALLEJO_LINES_SOURCE
+
+
+def test_cartilla_hoek_marinos():
+    ch = GSI_CHARTS["GSI-Hoek-Marinos"]
+    cells = [CellClass(c, "S0") for c in sorted(ch.valid_cells)]
+    fig = plot_cartilla(_labor(CellTable(ch, cells)))
+    patches = _grid_patches(fig)
+    assert len(patches) == 30 and sum(1 for p in patches if p.get_gid().startswith("dashed:")) == 4
+    assert "bloques" in " ".join(_ticks(fig)) and not _rmr_lines(fig)
+
+
+def test_muestra_hoek_marinos():
+    d = os.environ.get("RMP_SAMPLES_DIR")
+    if not d:
+        pytest.skip("RMP_SAMPLES_DIR no definido")
+    ch = GSI_CHARTS["GSI-Hoek-Marinos"]
+    cells = [CellClass(c, ["S0", "S1", "S2", "S3"][i % 4]) for i, c in enumerate(sorted(ch.valid_cells))]
+    base = dict(span_m=(3.0, 4.0), author="Área de Geomecánica", date="2026-11-01")
+    save_figure(plot_cartilla(_labor(CellTable(ch, cells), **base), style=Style(size="cartilla")),
+                Path(d) / "t8_cartilla_hoek_marinos_es.png")
