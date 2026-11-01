@@ -29,3 +29,17 @@ def test_chaining_blocked_but_explicit_value_allowed():
 def test_gsi_rqd_fraction_warns():
     w = rm.gsi_from_jcond89_rqd(18, 0.7).warnings
     assert w == ["rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction"]
+
+
+def test_custom_correlation():
+    c = rm.CustomCorrelation(name="mineA-RMR-Q", from_="Q", to="RMR89", form=rm.CorrelationForm.LogLinear,
+                             a=7.5, b=47.0, valid_min=0.01, valid_max=100.0, source="site fit")
+    r = rm.correlate_custom(c, 4.5)
+    assert r.info.method_id == "site:mineA-RMR-Q" and r.info.verification == rm.Verification.UserDefined
+    assert r.from_ == "Q" and r.warnings == []
+    assert len(rm.correlate_custom(c, 500.0).warnings) == 1
+    with pytest.raises(ValueError):
+        rm.correlate_custom(c, r)
+    with pytest.raises(ValueError):
+        rm.correlate_custom(c, 0.0)
+    assert c == rm.CustomCorrelation("mineA-RMR-Q", "Q", "RMR89", rm.CorrelationForm.LogLinear, 7.5, 47.0, 0.01, 100.0, "site fit")

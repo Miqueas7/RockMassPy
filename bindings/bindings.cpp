@@ -29,7 +29,8 @@ NB_MODULE(_rockmasspy_core, m) {
                "Verified in the original source (or a faithful reproduction of its equations by a cited author)")
         .value("PrimaryLaterAuthors", Verification::PrimaryLaterAuthors,
                "Verified in a later publication by the same authors")
-        .value("Secondary", Verification::Secondary, "Secondary source only");
+        .value("Secondary", Verification::Secondary, "Secondary source only")
+        .value("UserDefined", Verification::UserDefined, "Calibrated by the user on site data");
 
     nb::class_<MethodInfo>(m, "MethodInfo", "Method id, verification level and source of a result.")
         .def_ro("method_id", &MethodInfo::method_id)
@@ -229,6 +230,29 @@ NB_MODULE(_rockmasspy_core, m) {
           nb::arg("previous"), "Always raises: correlations must not be chained.");
     m.def("correlate", nb::overload_cast<Correlation, double>(&correlate), nb::arg("correlation"), nb::arg("value"),
           "Global correlation from a measured value.");
+
+    nb::enum_<CorrelationForm>(m, "CorrelationForm", "LogLinear is a*ln(x)+b; Linear is a*x+b.")
+        .value("LogLinear", CorrelationForm::LogLinear).value("Linear", CorrelationForm::Linear);
+    nb::class_<CustomCorrelation>(m, "CustomCorrelation", "Correlation calibrated by the user on site data.")
+        .def(nb::init<>())
+        .def("__init__",
+             [](CustomCorrelation* self, std::string name, std::string from, std::string to, CorrelationForm form,
+                double a, double b, double valid_min, double valid_max, std::string source) {
+                 new (self) CustomCorrelation{std::move(name), std::move(from), std::move(to), form, a, b,
+                                              valid_min, valid_max, std::move(source)};
+             },
+             nb::arg("name"), nb::arg("from_"), nb::arg("to"), nb::arg("form"), nb::arg("a"), nb::arg("b"),
+             nb::arg("valid_min"), nb::arg("valid_max"), nb::arg("source") = "")
+        .def_rw("name", &CustomCorrelation::name).def_rw("from_", &CustomCorrelation::from)
+        .def_rw("to", &CustomCorrelation::to).def_rw("form", &CustomCorrelation::form)
+        .def_rw("a", &CustomCorrelation::a).def_rw("b", &CustomCorrelation::b)
+        .def_rw("valid_min", &CustomCorrelation::valid_min).def_rw("valid_max", &CustomCorrelation::valid_max)
+        .def_rw("source", &CustomCorrelation::source)
+        .def("__eq__", [](const CustomCorrelation& x, const CustomCorrelation& y) { return x == y; });
+    m.def("correlate_custom", nb::overload_cast<const CustomCorrelation&, const CorrelationResult&>(&correlate_custom),
+          nb::arg("correlation"), nb::arg("previous"), "Always raises: correlations must not be chained.");
+    m.def("correlate_custom", nb::overload_cast<const CustomCorrelation&, double>(&correlate_custom),
+          nb::arg("correlation"), nb::arg("value"), "Site-calibrated correlation from a measured value.");
 
     nb::enum_<HbEdition>(m, "HbEdition", "Hoek-Brown criterion edition.")
         .value("HB2002", HbEdition::HB2002).value("HB2018", HbEdition::HB2018);
