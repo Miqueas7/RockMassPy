@@ -48,7 +48,8 @@ Every result carries `info.method_id` and a verification mark: **Primary** (chec
 | RMR14 | Celada et al. 2014 | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Q system, NGI editions (2025 is the default) | Primary |
 | GSI-2013 | Quantified GSI (Hoek, Carter & Diederichs) | Primary |
-| HB-2002 / HB-2018 | Hoek-Brown criterion (2018 is the default) | Primary |
+| HB-2002 / HB-2018 | Hoek-Brown criterion parameters (`hb_params`) and equivalent Mohr-Coulomb (`hb_mohr_coulomb`); 2018 is the default | Primary |
+| HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Rock mass modulus (Hoek & Diederichs) | Primary |
 | Correlations (enum name, e.g. `RmrFromQ_Bieniawski1976`) | Global correlations, never chained | Primary or Secondary, see `rm.correlate(...).info` |
 

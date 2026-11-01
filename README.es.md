@@ -49,7 +49,8 @@ Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** 
 | RMR14 | Celada et al. 2014 | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Sistema Q, ediciones NGI (2025 por defecto) | Primary |
 | GSI-2013 | GSI cuantificado (Hoek, Carter y Diederichs) | Primary |
-| HB-2002 / HB-2018 | Criterio de Hoek-Brown (2018 por defecto) | Primary |
+| HB-2002 / HB-2018 | Parámetros del criterio de Hoek-Brown (`hb_params`) y Mohr-Coulomb equivalente (`hb_mohr_coulomb`); 2018 por defecto | Primary |
+| HB-2002 | Módulo del macizo Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Módulo del macizo (Hoek y Diederichs) | Primary |
 | Correlaciones (nombre del enum, p. ej. `RmrFromQ_Bieniawski1976`) | Correlaciones globales, sin encadenar | Primary o Secondary, ver `rm.correlate(...).info` |
 
