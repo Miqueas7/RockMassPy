@@ -44,6 +44,19 @@ TEXTS: dict[str, dict[str, str]] = {
     "mc_line": {"es": "Mohr-Coulomb (ajuste)", "en": "Mohr-Coulomb (fit)"},
     "lab_tests": {"es": "Ensayos de laboratorio", "en": "Lab tests"},
     "gsi_label": {"es": "GSI", "en": "GSI"},
+    "bolt": {"es": "Perno", "en": "Bolt"},
+    "shotcrete": {"es": "shotcrete", "en": "shotcrete"},
+    "with_fiber": {"es": "con fibra", "en": "with fibre"},
+    "without_fiber": {"es": "sin fibra", "en": "without fibre"},
+    "mesh": {"es": "malla", "en": "mesh"},
+    "arch": {"es": "cimbra", "en": "steel arch"},
+    "span": {"es": "Luz", "en": "Span"},
+    "author": {"es": "Autor", "en": "Author"},
+    "date": {"es": "Fecha", "en": "Date"},
+    "support_legend": {"es": "Tipos de sostenimiento", "en": "Support types"},
+    "structure_axis": {"es": "Estructura", "en": "Structure"},
+    "condition_axis": {"es": "Condición de la superficie", "en": "Surface condition"},
+    "range_axis": {"es": "Valor", "en": "Value"},
 }
 
 
