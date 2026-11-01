@@ -8,6 +8,8 @@ import pytest
 
 RAIZ = Path(__file__).resolve().parents[2]
 SECCIONES = [("README.md", "## Per-labor support tables"), ("README.es.md", "## Tablas de sostenimiento por labor")]
+GRAFICOS = [("README.md", "## Per-labor support tables", "## Charts"),
+            ("README.es.md", "## Tablas de sostenimiento por labor", "## Gráficos")]
 
 
 def bloques(archivo, titulo):
@@ -27,3 +29,19 @@ def test_readme_per_labor_example(archivo, titulo):
         with contextlib.redirect_stdout(salida):
             exec(compile(bloque, archivo, "exec"), {})
         assert salida.getvalue().splitlines() == esperado
+
+
+@pytest.mark.parametrize("archivo,previo,titulo", GRAFICOS)
+def test_readme_charts_example(archivo, previo, titulo, tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
+    monkeypatch.chdir(tmp_path)  # el bloque guarda figs/cartilla.png
+    monkeypatch.setenv("MPLBACKEND", "Agg")
+    codigo = bloques(archivo, previo) + bloques(archivo, titulo)  # el bloque de gráficos usa `labor` del anterior
+    assert len(codigo) == 2, f"{archivo}: expected one block per section"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[1].splitlines() if ln.startswith("print(") and "#" in ln]
+    espacio, salida = {}, io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        for bloque in codigo:
+            exec(compile(bloque, archivo, "exec"), espacio)
+    assert salida.getvalue().splitlines()[-len(esperado):] == esperado
+    assert (tmp_path / "figs" / "cartilla.png").stat().st_size > 0

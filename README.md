@@ -53,8 +53,26 @@ print(labor.classify(40).label)     # IV
 A value exactly on a class boundary (RMR 40) takes the worse class. The library recommends, the engineer decides.
 See `examples/02-tabla-por-labor/`.
 
-`RatingTable` (your own ratings per parameter, RMR89 by default) is available in Python. Saving it in the labor-table
-files (JSON, YAML, Excel) and importing it from CSV are deferred to phase 1C.
+`RatingTable` (your own ratings per parameter, RMR89 by default) is available in Python and is saved with the labor table
+(`LaborTable.rating`) in JSON, YAML, Excel and CSV (`save_csv_dir` / `load_csv_dir`).
+
+## Charts
+
+Needs the optional extra `pip install "rockmasspy[viz]"` (matplotlib 3.8 or newer). Without it, `import rockmasspy` still
+works and any `rockmasspy.viz` call raises an `ImportError` that names the extra. Figures are plain matplotlib `Figure`
+objects (no global state, no windows).
+
+```python
+import rockmasspy.viz as viz
+
+style = viz.Style(lang="en", size="cartilla", brand="My company")   # lang "es" (default) or "en"; size "cartilla", "A4" or "A3"
+fig = viz.plot_cartilla(labor, style=style)                         # `labor` comes from the block above
+path = viz.save_figure(fig, "figs/cartilla.png")                    # creates the folder; png, svg or pdf
+print(path.name)                                                    # cartilla.png
+```
+
+The same module draws the quantified GSI chart, Hoek-Brown envelopes, Q-RMR scatter and class histograms; every figure
+states its source in the footer. The library recommends, the engineer decides. See `examples/03-cartillas/`.
 
 ## Methods
 
