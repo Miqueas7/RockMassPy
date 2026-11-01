@@ -76,6 +76,7 @@ if(ROCKMASSPY_BUILD_TESTS)
     add_executable(rockmasspy_tests
         tests/cpp/test_validation.cpp
         tests/cpp/test_rqd.cpp
+        tests/cpp/test_rmr89.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core
