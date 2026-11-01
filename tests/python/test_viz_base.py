@@ -65,3 +65,14 @@ def test_import_and_call_without_matplotlib_in_fresh_interpreter():
             "try:\n    v.save_figure(None, 'x.png')\nexcept ImportError as e:\n    print(e)")
     r = subprocess.run([sys.executable, "-I", "-c", code], check=True, capture_output=True, text=True)
     assert "rockmasspy[viz]" in r.stdout
+
+
+def _luminance(hex_color):
+    c = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def test_support_colors_luminance_strictly_decreasing():
+    lums = [_luminance(c) for c in viz.DEFAULT_SUPPORT_COLORS]
+    assert all(a - b >= 0.03 for a, b in zip(lums, lums[1:])), lums

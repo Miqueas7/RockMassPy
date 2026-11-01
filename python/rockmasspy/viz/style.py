@@ -7,19 +7,19 @@ from dataclasses import dataclass
 from ..table_io import _optional
 
 # Del sostenimiento más liviano al más pesado: verde, amarillo, naranja, rojo, morado.
-# Elección: una rampa de tono con luminosidad decreciente (cada color es más oscuro que el
-# anterior), así se distinguen también en escala de grises y con daltonismo rojo-verde, donde
-# el orden lo da el brillo y no solo el tono. No se simuló con una herramienta externa.
+# Elección: el tono sigue ese orden y la luminosidad relativa (WCAG) baja de forma estricta,
+# con al menos 0.04 entre vecinos, de 0.85 (verde pálido) a 0.02 (morado oscuro). Así el orden
+# sobrevive al imprimir en blanco y negro. No se simuló daltonismo con una herramienta externa.
 DEFAULT_SUPPORT_COLORS: tuple[str, ...] = (
-    "#1B9E50",  # verde
-    "#8CC63F",  # verde lima
-    "#F2D024",  # amarillo
-    "#F5A623",  # ámbar
-    "#EE7B22",  # naranja
-    "#DB4A2B",  # rojo anaranjado
-    "#B2182B",  # rojo
-    "#8E3A8F",  # morado rojizo
-    "#4B2A7B",  # morado oscuro
+    "#E5F5B0",  # verde pálido
+    "#FFE680",  # amarillo
+    "#FDC456",  # ámbar
+    "#FB9A3C",  # naranja claro
+    "#F26A2E",  # naranja
+    "#E03A2C",  # rojo
+    "#BC1A40",  # rojo carmín
+    "#862280",  # morado
+    "#3F0F4F",  # morado oscuro
 )
 
 # (ancho, alto) en cm: la cartilla es vertical; A4 y A3 son horizontales.
