@@ -4,6 +4,7 @@ En 1B la cartilla de una tabla de celdas se serializa solo por su id (debe exist
 """
 
 import datetime
+import importlib
 import json
 from collections.abc import Mapping
 
@@ -80,14 +81,10 @@ def _opt(d, key, path, kind=None, default=None):
     return default if d.get(key) is None else _get(d, key, path, kind)
 
 
-def from_dict(d: Mapping) -> LaborTable:
-    if _get(d, "schema", "") != SCHEMA:
-        raise ValueError(f"schema: expected {SCHEMA!r}, got {d['schema']!r}")
-    if _get(d, "version", "") != SCHEMA_VERSION:
-        raise ValueError(f"version: expected {SCHEMA_VERSION}, got {d['version']!r}")
-
+def catalog_from_dicts(items: list) -> SupportCatalog:
+    """Arma el catálogo desde la lista `support_types` (también la usa excel_io)."""
     types = []
-    for i, s in enumerate(_get(d, "support_types", "", "list")):
+    for i, s in enumerate(items):
         p = f"support_types[{i}]"
         bolt = shot = None
         if s.get("bolt") is not None:
@@ -100,7 +97,16 @@ def from_dict(d: Mapping) -> LaborTable:
         types.append(SupportType(
             _get(s, "code", p, "str"), _get(s, "order", p, "number"), _opt(s, "description", p, "str", ""),
             bolt, shot, s.get("mesh"), s.get("arch"), _opt(s, "relative_cost", p, "number")))
-    catalog = SupportCatalog(types)
+    return SupportCatalog(types)
+
+
+def from_dict(d: Mapping) -> LaborTable:
+    if _get(d, "schema", "") != SCHEMA:
+        raise ValueError(f"schema: expected {SCHEMA!r}, got {d['schema']!r}")
+    if _get(d, "version", "") != SCHEMA_VERSION:
+        raise ValueError(f"version: expected {SCHEMA_VERSION}, got {d['version']!r}")
+
+    catalog = catalog_from_dicts(_get(d, "support_types", "", "list"))
 
     td = _get(d, "table", "")
     kind = _get(td, "kind", "table", "str")
@@ -155,12 +161,16 @@ def load_json(path) -> LaborTable:
         return from_dict(json.load(f))
 
 
-def _yaml():
+def _optional(name: str):
+    """Importa una dependencia opcional; si falta, el error nombra el extra [io]."""
     try:
-        import yaml
+        return importlib.import_module(name)
     except ImportError as e:
         raise ImportError("install the optional extra: pip install rockmasspy[io]") from e
-    return yaml
+
+
+def _yaml():
+    return _optional("yaml")
 
 
 def save_yaml(t: LaborTable, path) -> None:
