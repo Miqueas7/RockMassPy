@@ -57,6 +57,11 @@ Ver `examples/02-tabla-por-labor/`.
 `RatingTable` (puntajes propios por parámetro, RMR89 por defecto) ya está disponible en Python y se guarda con la tabla por labor
 (`LaborTable.rating`) en JSON, YAML, Excel y CSV (`save_csv_dir` / `load_csv_dir`).
 
+El CSV es una carpeta con un archivo por hoja (UTF-8 con BOM). `save_csv_dir(t, ruta)` escribe `,` con punto decimal,
+que Excel configurado en español (Perú) o en inglés abre en columnas; `separator=";"` escribe coma decimal para Excel
+en español (España). `load_csv_dir` lee los dos, reconoce los nombres de archivo sin importar mayúsculas (`TABLA.CSV`
+es `Tabla`) y acepta también la fecha como `d/m/aaaa` (día primero).
+
 ## Gráficos
 
 Necesitan el extra opcional `pip install "rockmasspy[viz]"` (matplotlib 3.8 o superior). Sin él, `import rockmasspy`
@@ -70,6 +75,8 @@ estilo = viz.Style(lang="es", size="cartilla", brand="Mi empresa")   # lang "es"
 fig = viz.plot_cartilla(labor, style=estilo)                        # `labor` viene del bloque anterior
 ruta = viz.save_figure(fig, "figs/cartilla.png")                    # crea la carpeta; png, svg o pdf
 print(ruta.name)                                                    # cartilla.png
+p = rm.hb_params(45, 10, 0)                                         # HbParams no guarda GSI, mi ni D...
+env = viz.plot_hb_envelopes(50.0, p, sigma3max_mpa=1.35, gsi=45, mi=10, d=0)  # ...así que pásalos para el pie
 ```
 
 El mismo módulo dibuja la carta GSI cuantificada, las envolventes Hoek-Brown, la dispersión Q–RMR y los histogramas por
