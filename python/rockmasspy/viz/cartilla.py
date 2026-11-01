@@ -8,9 +8,11 @@ from ..cell_table import CellTable
 from ..labor_table import LaborTable
 from ..range_table import RANGE_METHODS
 from ..support import SupportType
+from ..vallejo_lines import RMR_PRIME_LINES
 from .style import TEXTS, Style, footer, new_figure, support_color, text
 
 _DASHED, _UNDEFINED = "#E6E6E6", "#BDBDBD"
+_LINES_CHART = "GSI-Vallejo-Osinergmin2017"  # la única cartilla con líneas RMR′ digitalizadas
 
 
 def _ink(color: str) -> str:
@@ -80,7 +82,7 @@ def _header(fig, table: LaborTable, title, style):
         fig.text(0.5, y - 0.027, "   ·   ".join(bits), ha="center", va="top", fontsize=style.font_size)
 
 
-def _cells(fig, table: LaborTable, rect, colors, style):
+def _cells(fig, table: LaborTable, rect, colors, style, show_lines):
     chart, ct = table.table.chart, table.table
     by_cell = {c.cell: c for c in ct.cells}
     ax = fig.add_axes(rect)
@@ -105,6 +107,8 @@ def _cells(fig, table: LaborTable, rect, colors, style):
             second = cell.support if known else text("undefined", style.lang)
             ax.text(k + 0.5, r + 0.5, f"{code}\n{second}", ha="center", va="center", color=_ink(bg),
                     fontsize=style.font_size)
+    if show_lines:
+        _rmr_lines(ax, ns, nc, style)
     ax.set_xticks([k + 0.5 for k in range(nc)], [f"{c}\n{_axis_label('cond', c, lbl, style.lang)}" for c, lbl in chart.conditions],
                   fontsize=style.font_size - 1)
     ax.set_yticks([r + 0.5 for r in range(ns)], [f"{s}\n{_axis_label('struct', s, lbl, style.lang)}" for s, lbl in chart.structures],
@@ -116,6 +120,21 @@ def _cells(fig, table: LaborTable, rect, colors, style):
     ax.tick_params(length=0)
     for sp in ax.spines.values():
         sp.set_visible(False)
+
+
+def _rmr_lines(ax, ns, nc, style):
+    """Líneas RMR′ finas y oscuras, con su valor en el extremo superior."""
+    from matplotlib.patheffects import withStroke
+
+    halo = [withStroke(linewidth=1.8, foreground="white")]  # sin el halo, la línea se pierde en las celdas moradas
+    for ln in RMR_PRIME_LINES:
+        x0, y0, x1, y1 = ln.x0 * nc, ln.y0 * ns, ln.x1 * nc, ln.y1 * ns
+        ax.plot([x0, x1], [y0, y1], color="0.15", linewidth=0.7, gid=f"rmr_line:{ln.value:g}", path_effects=halo)
+        # el rótulo va sobre la línea, un poco hacia adentro para no pisar el borde de la cuadrícula
+        k = 0.12 / math.hypot(x1 - x0, y1 - y0)
+        ax.text(x1 - k * (x1 - x0), y1 - k * (y1 - y0), f"{ln.value:g}", ha="center", va="center",
+                fontsize=style.font_size - 2, color="0.15",
+                bbox=dict(boxstyle="round,pad=0.1", facecolor="white", edgecolor="none", alpha=0.8))
 
 
 def _ranges(fig, table: LaborTable, rect, colors, style):
@@ -151,8 +170,11 @@ def _ranges(fig, table: LaborTable, rect, colors, style):
 
 
 def plot_cartilla(table: LaborTable, *, style: Style = Style(size="cartilla"), title: str | None = None,
-                  show_lines: bool = True):  # show_lines: lo usa la tarea 6 al dibujar las líneas RMR′
-    """Cartilla de la tabla por labor: cuadrícula de celdas o barra de rangos, más leyenda del catálogo."""
+                  show_lines: bool = True):
+    """Cartilla de la tabla por labor: cuadrícula de celdas o barra de rangos, más leyenda del catálogo.
+
+    Con show_lines=True, la cartilla de Vallejo lleva las líneas RMR′ digitalizadas y su fuente en el pie.
+    """
     ordered = table.catalog.ordered()
     n = len(ordered)
     # el color sale de la posición en el catálogo ordenado: el `order` puede tener huecos
@@ -164,8 +186,14 @@ def plot_cartilla(table: LaborTable, *, style: Style = Style(size="cartilla"), t
     bottom = 0.07 + legend_h + 0.05
     top = 0.87 if title else 0.90
     body = [0.26, bottom, 0.70, top - bottom - (0.05 if is_cells else 0.02)]
-    (_cells if is_cells else _ranges)(fig, table, body, colors, style)
+    lines = show_lines and is_cells and table.table.chart.chart_id == _LINES_CHART
+    if is_cells:
+        _cells(fig, table, body, colors, style, lines)
+    else:
+        _ranges(fig, table, body, colors, style)
     _legend(fig, [0.04, 0.07, 0.92, legend_h], ordered, colors, style)
     source = f"{table.table.base_edition} · {text('engineer_decides', style.lang)}"
+    if lines:
+        source += "\n" + text("lines_source", style.lang)
     footer(fig, source, style)
     return fig

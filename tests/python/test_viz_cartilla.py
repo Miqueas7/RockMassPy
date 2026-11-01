@@ -149,3 +149,41 @@ def test_muestras():
                 d / "t5_cartilla_celdas_en.png")
     inc = CellTable(CHART, [CellClass("F/R", "S1"), CellClass("F/B", "S2"), CellClass("LF/MB", "S0"), CellClass("MF/P", "ZZ")])
     save_figure(plot_cartilla(_labor(inc, **base), style=Style(size="cartilla")), d / "t5_cartilla_incompleta_es.png")
+    save_figure(plot_cartilla(_labor(full, **base), style=Style(size="cartilla", brand="Señal SAC"), title="Tajeo norte",
+                              show_lines=True), d / "t6_cartilla_lineas_es.png")
+
+
+def _rmr_lines(fig):
+    return [ln for ln in fig.axes[0].lines if str(ln.get_gid()).startswith("rmr_line:")]
+
+
+def test_lineas_rmr_y_fuente_en_el_pie():
+    from rockmasspy.vallejo_lines import RMR_PRIME_LINES
+    t = _labor(CellTable(CHART, _full_cells()))
+    fig = plot_cartilla(t)
+    assert [ln.get_gid() for ln in _rmr_lines(fig)] == [f"rmr_line:{ln.value:g}" for ln in RMR_PRIME_LINES]
+    txt = _texts(fig)
+    assert "90" in txt and "5" in txt  # rótulo en el extremo superior de cada línea
+    assert any("digitalizado de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)" in s for s in txt)
+    en = " ".join(_texts(plot_cartilla(t, style=Style(lang="en"))))
+    assert "digitized from Osinergmin (2017), Annex A.17 (Vallejo chart, 2011)" in en
+
+
+def test_sin_lineas_no_dibuja_ni_cita():
+    fig = plot_cartilla(_labor(CellTable(CHART, _full_cells())), show_lines=False)
+    assert _rmr_lines(fig) == []
+    assert not any("Anexo A.17" in s for s in _texts(fig))
+
+
+def test_otra_cartilla_nunca_lleva_lineas():
+    from dataclasses import replace
+    other = replace(CHART, chart_id="GSI-propia")
+    fig = plot_cartilla(_labor(CellTable(other, [CellClass("F/R", "S1")])))
+    assert _rmr_lines(fig) == []
+    assert not any("Anexo A.17" in s for s in _texts(fig))
+
+
+def test_texto_de_fuente_igual_a_la_constante():
+    from rockmasspy.vallejo_lines import VALLEJO_LINES_SOURCE
+    from rockmasspy.viz import text
+    assert text("lines_source", "en") == VALLEJO_LINES_SOURCE

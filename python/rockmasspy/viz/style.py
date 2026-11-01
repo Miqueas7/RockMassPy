@@ -68,6 +68,10 @@ TEXTS: dict[str, dict[str, str]] = {
     "structure_axis": {"es": "Estructura", "en": "Structure"},
     "condition_axis": {"es": "Condición de la superficie", "en": "Surface condition"},
     "range_axis": {"es": "Valor", "en": "Value"},
+    "lines_source": {
+        "es": "digitalizado de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)",
+        "en": "digitized from Osinergmin (2017), Annex A.17 (Vallejo chart, 2011)",
+    },
 }
 
 
