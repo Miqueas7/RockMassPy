@@ -8,7 +8,7 @@ from ..cell_table import CellTable
 from ..labor_table import LaborTable
 from ..range_table import RANGE_METHODS
 from ..support import SupportType
-from .style import Style, footer, new_figure, support_color, text
+from .style import TEXTS, Style, footer, new_figure, support_color, text
 
 _DASHED, _UNDEFINED = "#E6E6E6", "#BDBDBD"
 
@@ -19,6 +19,12 @@ def _ink(color: str) -> str:
 
     r, g, b = (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in to_rgb(color))
     return "black" if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 else "white"
+
+
+def _axis_label(kind: str, code: str, label: str, lang: str) -> str:
+    """Rótulo de estructura o condición en el idioma pedido; si el código no está en TEXTS, el de la cartilla."""
+    key = f"gsi_{kind}_{code}"
+    return TEXTS[key][lang] if key in TEXTS else label
 
 
 def _rect(x, y, w, h, color):
@@ -38,7 +44,7 @@ def _describe(t: SupportType, lang: str) -> str:
         parts.append(text("mesh", lang))
     if t.arch:
         parts.append(text("arch", lang))
-    return "; ".join(parts) or "—"
+    return (lambda d: d[:1].upper() + d[1:])("; ".join(parts) or text("no_support", lang))
 
 
 def _legend(fig, rect, ordered, colors, style):
@@ -98,9 +104,9 @@ def _cells(fig, table: LaborTable, rect, colors, style):
             second = cell.support if known else text("undefined", style.lang)
             ax.text(k + 0.5, r + 0.5, f"{code}\n{second}", ha="center", va="center", color=_ink(bg),
                     fontsize=style.font_size)
-    ax.set_xticks([k + 0.5 for k in range(nc)], [f"{c}\n{lbl}" for c, lbl in chart.conditions],
+    ax.set_xticks([k + 0.5 for k in range(nc)], [f"{c}\n{_axis_label("cond", c, lbl, style.lang)}" for c, lbl in chart.conditions],
                   fontsize=style.font_size - 1)
-    ax.set_yticks([r + 0.5 for r in range(ns)], [f"{s}\n{lbl}" for s, lbl in chart.structures],
+    ax.set_yticks([r + 0.5 for r in range(ns)], [f"{s}\n{_axis_label("struct", s, lbl, style.lang)}" for s, lbl in chart.structures],
                   fontsize=style.font_size - 1)
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position("top")
@@ -144,7 +150,7 @@ def _ranges(fig, table: LaborTable, rect, colors, style):
 
 
 def plot_cartilla(table: LaborTable, *, style: Style = Style(size="cartilla"), title: str | None = None,
-                  show_lines: bool = True):
+                  show_lines: bool = True):  # show_lines: lo usa la tarea 6 al dibujar las líneas RMR′
     """Cartilla de la tabla por labor: cuadrícula de celdas o barra de rangos, más leyenda del catálogo."""
     ordered = table.catalog.ordered()
     n = len(ordered)
@@ -155,16 +161,10 @@ def plot_cartilla(table: LaborTable, *, style: Style = Style(size="cartilla"), t
     is_cells = isinstance(table.table, CellTable)
     legend_h = min(0.42, 0.035 * (n + 1.5))
     bottom = 0.07 + legend_h + 0.05
-    top = 0.86 if title else 0.89
-    body = [0.17, bottom, 0.79, top - bottom - (0.08 if is_cells else 0.02)]
+    top = 0.87 if title else 0.90
+    body = [0.26, bottom, 0.70, top - bottom - (0.05 if is_cells else 0.02)]
     (_cells if is_cells else _ranges)(fig, table, body, colors, style)
     _legend(fig, [0.04, 0.07, 0.92, legend_h], ordered, colors, style)
     source = f"{table.table.base_edition} · {text('engineer_decides', style.lang)}"
-    try:
-        from ..vallejo_lines import RMR_PRIME_LINES, VALLEJO_LINES_SOURCE
-    except ImportError:  # la tarea 6 aún no existe
-        RMR_PRIME_LINES = ()
-    if show_lines and is_cells and table.table.base_edition == "GSI-Vallejo-Osinergmin2017" and RMR_PRIME_LINES:
-        source += f" · {VALLEJO_LINES_SOURCE}"  # shortcut: el trazo de las líneas se suma cuando exista la tarea 6
     footer(fig, source, style)
     return fig

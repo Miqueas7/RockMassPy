@@ -37,6 +37,11 @@ def _texts(fig):
     return [t.get_text() for t in fig.findobj(lambda a: hasattr(a, "get_text"))]
 
 
+def _ticks(fig):
+    ax = fig.axes[0]
+    return [t.get_text() for t in ax.get_xticklabels() + ax.get_yticklabels()]
+
+
 def _grid_patches(fig):
     return [p for p in fig.axes[0].patches if p.get_gid()]
 
@@ -65,6 +70,19 @@ def test_leyenda_una_entrada_por_tipo_y_pie():
     assert "Perno helicoidal 2.1 m @ 1.2 m; shotcrete 50 mm con fibra; malla" in txt
     assert "GSI-Vallejo-Osinergmin2017" in txt
     assert "la librería recomienda, el ingeniero decide" in txt
+
+
+def test_rotulos_de_ejes_en_el_idioma_pedido():
+    t = _labor(CellTable(CHART, _full_cells()))
+    es = " ".join(_ticks(plot_cartilla(t)))
+    assert "levemente fracturada" in es and "slightly" not in es
+    en = " ".join(_ticks(plot_cartilla(t, style=Style(lang="en"))))
+    assert "slightly fractured" in en and "levemente" not in en
+
+
+def test_tipo_sin_elementos_y_mayuscula_inicial():
+    txt = _texts(plot_cartilla(_labor(CellTable(CHART, _full_cells()))))
+    assert "Sin sostenimiento" in txt and "Shotcrete 100 mm sin fibra; cimbra" in txt
 
 
 def test_ingles():
