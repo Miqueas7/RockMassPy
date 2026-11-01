@@ -4,7 +4,7 @@ Open-source rock mass engineering library for mining: rock mass classifications 
 Hoek-Brown strength, site-customizable classification tables, charts, ground support recommendation, per-country
 regulatory profiles, open-pit slope analysis and data-driven support prediction. C++20 core with a Python API.
 
-**Status:** phase 1A (calculation core) done on branch `fase-1a`; no release yet. The library recommends, the engineer decides.
+**Status:** phase 1A (calculation core) and 1B (per-labor tables) done on branches `fase-1a` and `fase-1b`; no release yet. The library recommends, the engineer decides.
 
 ## Install (from source)
 
@@ -31,6 +31,23 @@ print(mc.phi_deg, mc.cohesion_mpa)                       # 52.75 2.633
 ```
 
 A full synthetic walk-through is in `examples/01-tramo-sintetico/`.
+
+## Per-labor support tables
+
+Each labor type (gallery, stope...) gets its own table: a catalog of support types plus RMR/Q/GSI classes or GSI chart cells.
+Tables validate (warn, never block), classify, and round-trip through JSON, YAML and Excel. YAML and Excel need the optional extra: `pip install "rockmasspy[io]"`.
+
+```python
+import rockmasspy as rm
+
+cat = rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("II", 2, bolt=rm.Bolt("split-set", 1.8, 1.5))])
+table = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(50, 100, "good", "I"), rm.RangeClass(0, 50, "poor", "II")])
+labor = rm.LaborTable("gallery", cat, table, span_m=(3, 4))
+print(labor.validate())             # []
+print(labor.classify(53).support)   # SupportType(code='I', ...)
+```
+
+The library recommends, the engineer decides. See `examples/02-tabla-por-labor/`.
 
 ## Methods
 

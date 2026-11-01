@@ -33,6 +33,23 @@ print(mc.phi_deg, mc.cohesion_mpa)                       # 52.75 2.633
 
 El recorrido completo con datos sintéticos está en `examples/01-tramo-sintetico/`.
 
+## Tablas de sostenimiento por labor
+
+Cada tipo de labor (galería, tajeo...) tiene su propia tabla: un catálogo de sostenimientos más clases RMR/Q/GSI o celdas de la cartilla GSI.
+Las tablas validan (avisan, nunca bloquean), clasifican y van y vienen por JSON, YAML y Excel. YAML y Excel necesitan el extra opcional: `pip install "rockmasspy[io]"`.
+
+```python
+import rockmasspy as rm
+
+cat = rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("II", 2, bolt=rm.Bolt("split-set", 1.8, 1.5))])
+table = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(50, 100, "buena", "I"), rm.RangeClass(0, 50, "mala", "II")])
+labor = rm.LaborTable("galería", cat, table, span_m=(3, 4))
+print(labor.validate())             # []
+print(labor.classify(53).support)   # SupportType(code='I', ...)
+```
+
+La librería recomienda, el ingeniero decide. Ver `examples/02-tabla-por-labor/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
