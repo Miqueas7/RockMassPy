@@ -95,3 +95,60 @@ def test_missing_openpyxl_gives_helpful_importerror(monkeypatch, tmp_path):
         rm.load_excel(tmp_path / "t.xlsx")
     with pytest.raises(ImportError, match=r"rockmasspy\[io\]"):
         rm.load_support_catalog_excel(tmp_path / "t.xlsx")
+
+
+def test_loaders_release_the_file(tmp_path):
+    rm.save_excel(range_lt(), tmp_path / "t.xlsx")
+    rm.load_excel(tmp_path / "t.xlsx")
+    (tmp_path / "t.xlsx").unlink()
+    p = libro(tmp_path, [["I", 1, "", None, None, None, None, None, None, None, None]])
+    rm.load_support_catalog_excel(p)
+    p.unlink()
+
+
+def _edit(tmp_path, make, fn):
+    rm.save_excel(make(), tmp_path / "t.xlsx")
+    wb = openpyxl.load_workbook(tmp_path / "t.xlsx")
+    fn(wb)
+    wb.save(tmp_path / "t.xlsx")
+    return tmp_path / "t.xlsx"
+
+
+def _campo_row(ws, campo):
+    return next(r[0].row for r in ws.iter_rows(min_row=2) if r[0].value == campo)
+
+
+def test_native_excel_date_in_fecha(tmp_path):
+    import datetime
+
+    def f(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "fecha"), column=2).value = datetime.datetime(2026, 11, 1)
+    assert rm.load_excel(_edit(tmp_path, range_lt, f)).date == "2026-11-01"
+
+
+def test_tabla_numeric_error_has_excel_row(tmp_path):
+    def f(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "luz_min_m"), column=2).value = "3,5"
+    p = _edit(tmp_path, range_lt, f)
+    n = _campo_row(openpyxl.load_workbook(p)["Tabla"], "luz_min_m")
+    with pytest.raises(ValueError) as e:
+        rm.load_excel(p)
+    assert str(e.value) == f"sheet 'Tabla', row {n}, column 'valor': expected a number, got '3,5'"
+
+
+def test_validation_error_locates_row_after_blank_row(tmp_path):
+    p = libro(tmp_path, [["I", 1, "", None, None, None, None, None, None, None, None], [None] * 11,
+                         ["II", 2, "", "Split Set", -3, 1.2, None, None, None, None, None]])
+    with pytest.raises(ValueError, match=r"sheet 'Tipos_sostenimiento', row 4: .*length_m"):
+        rm.load_support_catalog_excel(p)
+
+
+def test_validation_error_in_classes_row(tmp_path):
+    def f(wb):
+        wb["Clases"].insert_rows(2)  # fila vacía; la clase real baja a la 3
+        wb["Clases"].cell(row=3, column=1).value = 90
+        wb["Clases"].cell(row=3, column=2).value = 10
+    with pytest.raises(ValueError, match=r"sheet 'Clases', row 3: "):
+        rm.load_excel(_edit(tmp_path, range_lt, f))

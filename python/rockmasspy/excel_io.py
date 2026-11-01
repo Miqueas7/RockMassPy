@@ -5,9 +5,13 @@ las reglas de validación viven allá. Un número escrito a mano con coma ("3,5"
 lanza ValueError con la hoja, la fila (de Excel, la cabecera es la 1) y la columna.
 """
 
+import datetime
 import math
 
+from . import _rockmasspy_core as _rm
+from .cell_table import CellClass
 from .labor_table import LaborTable
+from .range_table import RangeClass
 from .support import SupportCatalog
 from .table_io import _bool, _optional, catalog_from_dicts, from_dict, to_dict
 
@@ -37,6 +41,10 @@ def _num(v, sheet, row, col):
 
 
 def _text(v):
+    if isinstance(v, datetime.datetime):  # fecha nativa de Excel
+        v = v.date()
+    if isinstance(v, datetime.date):
+        return v.isoformat()
     if isinstance(v, float) and v.is_integer():
         v = int(v)
     return str(v).strip()
@@ -75,13 +83,21 @@ def _sheet_rows(wb, sheet, cols, required, numeric, boolean=()):
     return out
 
 
+def _row(sheet, n, build, *args):
+    """Construye el objeto de una fila; si la validación falla, el error ubica la hoja y la fila."""
+    try:
+        return build(*args)
+    except (ValueError, KeyError) as e:
+        raise ValueError(f"sheet '{sheet}', row {n}: {e}") from e
+
+
 def _support_dicts(wb, sheet):
     rows = _sheet_rows(wb, sheet, TIPOS, {"codigo_tipo", "orden"},
                        {"orden", "perno_longitud_m", "perno_espaciamiento_m", "shotcrete_espesor_mm", "costo_relativo"},
                        {"shotcrete_fibra"})
     out = []
-    for _, r in rows:
-        out.append({
+    for n, r in rows:
+        out.append((n, {
             "code": r["codigo_tipo"], "order": r["orden"], "description": r["descripcion"] or "",
             "bolt": None if r["perno_tipo"] is None else
             {"kind": r["perno_tipo"], "length_m": r["perno_longitud_m"], "spacing_m": r["perno_espaciamiento_m"]},
@@ -89,7 +105,7 @@ def _support_dicts(wb, sheet):
             "shotcrete": None if not r["shotcrete_espesor_mm"] else
             {"thickness_mm": r["shotcrete_espesor_mm"], "fiber": bool(r["shotcrete_fibra"])},
             "mesh": r["malla"], "arch": r["cimbra"], "relative_cost": r["costo_relativo"],
-        })
+        }))
     return out
 
 
@@ -97,50 +113,90 @@ def _open(path):
     return _optional("openpyxl").load_workbook(path, read_only=True, data_only=True)
 
 
+def _catalog(wb, sheet):
+    pairs = _support_dicts(wb, sheet)
+    for n, d in pairs:  # valida fila por fila para ubicar la celda
+        _row(sheet, n, catalog_from_dicts, [d])
+    catalog_from_dicts([d for _, d in pairs])  # duplicados entre filas
+    return [d for _, d in pairs]
+
+
 def load_support_catalog_excel(path, sheet: str = "Tipos_sostenimiento") -> SupportCatalog:
     """Lee solo esa hoja; sirve también para la plantilla del histórico ya llena."""
-    return catalog_from_dicts(_support_dicts(_open(path), sheet))
+    wb = _open(path)
+    try:
+        return catalog_from_dicts(_catalog(wb, sheet))
+    finally:
+        wb.close()
 
 
 def load_excel(path) -> LaborTable:
     wb = _open(path)
-    campos = {r["campo"]: r["valor"] for _, r in _sheet_rows(wb, "Tabla", ("campo", "valor"), {"campo"}, set())}
+    try:
+        return _load(wb)
+    finally:
+        wb.close()
+
+
+def _load(wb) -> LaborTable:
+    filas = {r["campo"]: (n, r["valor"]) for n, r in _sheet_rows(wb, "Tabla", ("campo", "valor"), {"campo"}, set())}
+    campos = {k: v for k, (_, v) in filas.items()}
     for k in ("tipo_tabla",):
         if campos.get(k) is None:
             raise ValueError(f"sheet 'Tabla': missing value for '{k}'")
 
     def numero(k):
         v = campos.get(k)
-        return None if v is None else _num(v, "Tabla", k, "valor")
+        return None if v is None else _num(v, "Tabla", filas[k][0], "valor")
 
     lo, hi = numero("luz_min_m"), numero("luz_max_m")
     if (lo is None) != (hi is None):
         raise ValueError("sheet 'Tabla': luz_min_m and luz_max_m must come together")
+    tipos = _catalog(wb, "Tipos_sostenimiento")  # ubica errores de validación por fila
     d = {"schema": campos.get("schema"), "version": numero("version"), "labor_type": campos.get("labor_type"),
          "span_m": None if lo is None else [lo, hi], "author": campos.get("autor"), "date": campos.get("fecha"),
-         "notes": campos.get("notas"), "support_types": _support_dicts(wb, "Tipos_sostenimiento")}
+         "notes": campos.get("notas"), "support_types": tipos}
     kind = campos["tipo_tabla"]
     if kind == "range":
         d["table"] = {"kind": "range", "method": campos.get("metodo"), "base_edition": campos.get("edicion_base"),
                       "classes": [{"lo": r["desde"], "hi": r["hasta"], "label": r["clase"], "support": r["tipo"]}
-                                  for _, r in _sheet_rows(wb, "Clases", CLASES, {"desde", "hasta", "clase"},
-                                                          {"desde", "hasta"})]}
+                                  for _, r in _clases(wb)]}
     elif kind == "cells":
         cells = []
         for n, r in _sheet_rows(wb, "Celdas", CELDAS, {"celda"}, {"gsi_min", "gsi_max"}):
             if (r["gsi_min"] is None) != (r["gsi_max"] is None):
                 raise ValueError(f"{_where('Celdas', n, 'gsi_max')}: gsi_min and gsi_max must come together")
+            _row("Celdas", n, CellClass, r["celda"], r["tipo"], None if r["gsi_min"] is None else (r["gsi_min"], r["gsi_max"]),
+                 r["rotulo"] or "")
             cells.append({"cell": r["celda"], "support": r["tipo"], "label": r["rotulo"] or "",
                           "gsi_range": None if r["gsi_min"] is None else [r["gsi_min"], r["gsi_max"]]})
         d["table"] = {"kind": "cells", "chart": campos.get("cartilla"), "cells": cells}
     else:
         raise ValueError(f"sheet 'Tabla': tipo_tabla must be 'range' or 'cells', got '{kind}'")
     d["correlations"] = [] if "Correlaciones" not in wb.sheetnames else [
-        {"name": r["nombre"], "from": r["desde"], "to": r["hacia"], "form": r["forma"], "a": r["a"], "b": r["b"],
-         "valid_min": r["valido_min"], "valid_max": r["valido_max"], "source": r["fuente"] or ""}
-        for _, r in _sheet_rows(wb, "Correlaciones", CORRELACIONES, {"nombre", "desde", "hacia", "forma"},
-                                {"a", "b", "valido_min", "valido_max"})]
+        _corr(n, r) for n, r in _sheet_rows(wb, "Correlaciones", CORRELACIONES, {"nombre", "desde", "hacia", "forma"},
+                                            {"a", "b", "valido_min", "valido_max"})]
     return from_dict(d)
+
+
+def _clases(wb):
+    pairs = _sheet_rows(wb, "Clases", CLASES, {"desde", "hasta", "clase"}, {"desde", "hasta"})
+    for n, r in pairs:
+        _row("Clases", n, RangeClass, r["desde"], r["hasta"], r["clase"], r["tipo"])
+    return pairs
+
+
+def _corr(n, r):
+    d = {"name": r["nombre"], "from": r["desde"], "to": r["hacia"], "form": r["forma"], "a": r["a"], "b": r["b"],
+         "valid_min": r["valido_min"], "valid_max": r["valido_max"], "source": r["fuente"] or ""}
+
+    def build():  # misma construcción que from_dict, solo para ubicar la fila
+        if d["form"] not in _rm.CorrelationForm.__members__:
+            raise ValueError(f"form: expected one of {list(_rm.CorrelationForm.__members__)}, got {d['form']!r}")
+        _rm.CustomCorrelation(name=d["name"], from_=d["from"], to=d["to"], form=_rm.CorrelationForm.__members__[d["form"]],
+                              a=d["a"], b=d["b"], valid_min=d["valid_min"], valid_max=d["valid_max"], source=d["source"])
+    _row("Correlaciones", n, build)
+    return d
 
 
 def save_excel(t: LaborTable, path) -> None:
