@@ -17,24 +17,39 @@ def carpeta(tmp_path, tipos_filas, sep=";", enc="utf-8-sig"):
     return tmp_path
 
 
+@pytest.mark.parametrize("sep", [",", ";"])
 @pytest.mark.parametrize("make", [range_lt, cells_lt])
-def test_roundtrip_csv(make, tmp_path):
+def test_roundtrip_csv(make, sep, tmp_path):
     t = make()
-    rm.save_csv_dir(t, tmp_path / "c")
+    rm.save_csv_dir(t, tmp_path / "c", separator=sep)
     assert rm.load_csv_dir(tmp_path / "c") == t
 
 
-def test_roundtrip_with_rating(tmp_path):
+@pytest.mark.parametrize("sep", [",", ";"])
+def test_roundtrip_with_rating(sep, tmp_path):
     t = rm.LaborTable("galería", CAT, rtab(), rating=rm.RatingTable.rmr89_default())
-    rm.save_csv_dir(t, tmp_path / "c")
+    rm.save_csv_dir(t, tmp_path / "c", separator=sep)
     assert rm.load_csv_dir(tmp_path / "c") == t
 
 
-def test_written_format(tmp_path):
+def test_written_format_default_comma_and_point(tmp_path):
+    # por defecto, lo que abre bien Excel en es-PE: ',' como separador de listas y punto decimal
     out = rm.save_csv_dir(range_lt(), tmp_path / "c")
-    raw = (out / "Tipos_sostenimiento.csv").read_bytes()
-    assert raw.startswith(b"\xef\xbb\xbf") and raw.split(b"\n")[0].count(b";") == 10
-    assert b"." not in b"".join(raw.split(b"\n")[1:2])  # decimales con coma
+    lines = (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")
+    assert lines[0].startswith(b"\xef\xbb\xbf") and lines[0].count(b",") == 10
+    assert lines[3].startswith(b"III,3,,split set,2.1,1.5,")  # decimales con punto
+
+
+def test_written_format_semicolon_decimal_comma(tmp_path):
+    out = rm.save_csv_dir(range_lt(), tmp_path / "c", separator=";")
+    lines = (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")
+    assert lines[0].startswith(b"\xef\xbb\xbf") and lines[0].count(b";") == 10
+    assert lines[3].startswith(b"III;3;;split set;2,1;1,5;")  # decimales con coma
+
+
+def test_bad_separator(tmp_path):
+    with pytest.raises(ValueError, match="separator must be ',' or ';'"):
+        rm.save_csv_dir(range_lt(), tmp_path / "c", separator="\t")
 
 
 def test_semicolon_decimal_comma_bom(tmp_path):
@@ -80,3 +95,58 @@ def test_works_without_openpyxl(tmp_path, monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "openpyxl", None)
     rm.save_csv_dir(range_lt(), tmp_path / "c")
     assert rm.load_csv_dir(tmp_path / "c") == range_lt()
+
+
+def _fecha(carpeta, valor):
+    tabla = carpeta / "Tabla.csv"
+    filas = tabla.read_text(encoding="utf-8-sig").splitlines()
+    tabla.write_text("\n".join(f"fecha,{valor}" if f.startswith("fecha,") else f for f in filas) + "\n",
+                     encoding="utf-8-sig")
+
+
+def test_fecha_dia_primero(tmp_path):
+    for valor in ("1/11/2026", "01/11/2026"):
+        rm.save_csv_dir(range_lt(), tmp_path)
+        _fecha(tmp_path, valor)
+        assert rm.load_csv_dir(tmp_path).date == "2026-11-01"
+
+
+def test_fecha_mes_primero_es_error_con_ubicacion(tmp_path):
+    rm.save_csv_dir(range_lt(), tmp_path)
+    _fecha(tmp_path, "13/31/2026")
+    with pytest.raises(ValueError, match="sheet 'Tabla', campo 'fecha': expected yyyy-mm-dd, got '13/31/2026'"):
+        rm.load_csv_dir(tmp_path)
+
+
+def test_nombres_sin_importar_mayusculas(tmp_path):
+    t = range_lt()
+    rm.save_csv_dir(t, tmp_path / "a")
+    b = tmp_path / "b"
+    b.mkdir()
+    for i, f in enumerate(sorted((tmp_path / "a").iterdir())):
+        nombre = f.name.lower() if i % 2 else f.name.upper()  # tabla.csv, TIPOS_SOSTENIMIENTO.CSV...
+        (b / nombre).write_bytes(f.read_bytes())
+    nombres = [f.name for f in b.iterdir()]
+    assert any(n == n.lower() for n in nombres) and any(n == n.upper() for n in nombres)
+    assert rm.load_csv_dir(b) == t
+    next(f for f in b.iterdir() if f.stem.lower() == "clases").unlink()
+    with pytest.raises(ValueError, match="missing file 'Clases.csv'"):  # el mensaje usa el nombre canónico
+        rm.load_csv_dir(b)
+
+
+def test_byte_indescifrable(tmp_path):
+    rm.save_csv_dir(range_lt(), tmp_path)
+    (tmp_path / "Tabla.csv").write_bytes(b"campo,valor\nnotas,\x81\n")  # 0x81: ni UTF-8 ni cp1252
+    with pytest.raises(ValueError, match=r"^Tabla\.csv: could not decode as UTF-8 or cp1252$"):
+        rm.load_csv_dir(tmp_path)
+
+
+def test_puntajes_con_tildes_y_mayusculas(tmp_path):
+    t = rm.LaborTable("galería", CAT, rtab(), rating=rm.RatingTable.rmr89_default())
+    rm.save_csv_dir(t, tmp_path)
+    f = tmp_path / "Puntajes.csv"
+    txt = f.read_text(encoding="utf-8-sig")
+    assert ",numerico," in txt and ",mayor," in txt and ",menor," in txt
+    f.write_text(txt.replace(",numerico,", ",Numérico,").replace(",mayor,", ",Mayor,").replace(",menor,", ",MENOR,"),
+                 encoding="utf-8-sig")
+    assert rm.load_csv_dir(tmp_path) == t

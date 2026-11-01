@@ -13,6 +13,7 @@ from .labor_table import LaborTable
 from .range_table import RangeClass
 from .rating_table import RatingBin
 from .support import SupportCatalog
+from .intact_rock import _strip
 from .table_io import _at, _bool, _optional, correlation_from_dict, from_dict, support_from_dict, to_dict
 
 TIPOS = ("codigo_tipo", "orden", "descripcion", "perno_tipo", "perno_longitud_m", "perno_espaciamiento_m",
@@ -78,6 +79,9 @@ class _ExcelSource:
 
     def missing(self, sheet):
         return f"missing sheet '{sheet}'"
+
+    def date(self, v):
+        return v  # Excel da fechas nativas (ya pasan a aaaa-mm-dd en _text); el texto se valida tal cual
 
 
 def _sheet_rows(wb, sheet, cols, required, numeric, boolean=()):
@@ -187,7 +191,7 @@ def _load(wb) -> LaborTable:
         raise ValueError("sheet 'Tabla': luz_min_m and luz_max_m must come together")
     tipos = _catalog(wb, "Tipos_sostenimiento")[0]  # ubica errores de validación por fila
     d = {"schema": campos.get("schema"), "version": numero("version"), "labor_type": campos.get("labor_type"),
-         "span_m": None if lo is None else [lo, hi], "author": campos.get("autor"), "date": campos.get("fecha"),
+         "span_m": None if lo is None else [lo, hi], "author": campos.get("autor"), "date": wb.date(campos.get("fecha")),
          "notes": campos.get("notas"), "support_types": tipos}
     kind = campos["tipo_tabla"]
     if kind == "range":
@@ -241,9 +245,11 @@ def _puntajes(wb, edicion):
     filas = _sheet_rows(wb, hoja, PUNTAJES, {"tipo", "puntos"}, {"desde", "puntos"})
     params, ajustes = {}, {}
     for n, r in filas:
-        tipo = r["tipo"]
+        # «numérico», «Mayor»: tildes y mayúsculas no importan (se compara la forma limpia)
+        tipo = _strip(r["tipo"]).lower()
+        mejor = None if r["mejor"] is None else _strip(r["mejor"]).lower()
         if tipo not in ("numerico", "categoria", "ajuste"):
-            raise ValueError(f"{_where(hoja, n, 'tipo')}: expected 'numerico', 'categoria' or 'ajuste', got '{tipo}'")
+            raise ValueError(f"{_where(hoja, n, 'tipo')}: expected 'numerico', 'categoria' or 'ajuste', got '{r['tipo']}'")
         if tipo == "ajuste":
             if r["categoria"] is None:
                 raise ValueError(f"{_where(hoja, n, 'categoria')}: required value is empty")
@@ -266,10 +272,10 @@ def _puntajes(wb, edicion):
             continue
         if r["desde"] is None:
             raise ValueError(f"{_where(hoja, n, 'desde')}: required value is empty")
-        if r["mejor"] not in MEJOR:
+        if mejor not in MEJOR:
             raise ValueError(f"{_where(hoja, n, 'mejor')}: expected 'mayor' or 'menor', got '{r['mejor']}'")
         p = params.setdefault(nombre, {"name": nombre, "kind": "numeric", "unit": r["unidad"] or "",
-                                       "better": MEJOR[r["mejor"]], "bins": []})
+                                       "better": MEJOR[mejor], "bins": []})
         hi = r["hasta"]  # vacío = infinito, pero solo en el último intervalo (se revisa abajo)
         hi = None if hi is None else math.inf if hi.lower() == "inf" else _num(hi, hoja, n, "hasta", wb.decimal_comma(hoja))
         p["bins"].append({"lo": r["desde"], "hi": hi, "points": r["puntos"]})
