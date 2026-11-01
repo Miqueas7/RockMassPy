@@ -6,6 +6,7 @@ En 1B la cartilla de una tabla de celdas se serializa solo por su id (debe exist
 import datetime
 import importlib
 import json
+import math
 from collections.abc import Mapping
 
 from . import _rockmasspy_core as _rm
@@ -13,10 +14,25 @@ from .cell_table import CellClass, CellTable
 from .gsi_charts import GSI_CHARTS
 from .labor_table import LaborTable
 from .range_table import RangeClass, RangeTable
+from .rating_table import CategoricalParam, NumericParam, RatingBin, RatingTable
 from .support import Bolt, Shotcrete, SupportCatalog, SupportType
 
 SCHEMA = "rockmasspy.labor_table"
 SCHEMA_VERSION = 1
+
+
+def rating_to_dict(r: RatingTable) -> dict:
+    def param(p):
+        if isinstance(p, NumericParam):
+            # JSON no tiene infinito: se escribe como "inf"
+            return {"name": p.name, "kind": "numeric", "unit": p.unit,
+                    "better": p.better,
+                    "bins": [{"lo": b.lo, "hi": "inf" if b.hi == math.inf else b.hi, "points": b.points}
+                             for b in p.bins]}
+        return {"name": p.name, "kind": "categorical", "points": dict(p.points)}
+
+    return {"base_edition": r.base_edition, "params": [param(p) for p in r.params],
+            "adjustments": dict(r.adjustments)}
 
 
 def to_dict(t: LaborTable) -> dict:
@@ -45,6 +61,7 @@ def to_dict(t: LaborTable) -> dict:
         "correlations": [{"name": c.name, "from": c.from_, "to": c.to, "form": c.form.name, "a": c.a, "b": c.b,
                           "valid_min": c.valid_min, "valid_max": c.valid_max, "source": c.source}
                          for c in t.correlations],
+        "rating": None if t.rating is None else rating_to_dict(t.rating),
     }
 
 
@@ -133,6 +150,33 @@ def correlation_from_dict(c, path: str = ""):
                source=_opt(c, "source", path, "str", ""))
 
 
+def _numbers(m, path):
+    """Un objeto {nombre: número}; el error nombra la ruta del valor malo."""
+    if not isinstance(m, Mapping):
+        raise ValueError(f"{path}: expected an object")
+    return {k: _get(m, k, path, "number") for k in m}
+
+
+def rating_from_dict(r, path: str = "rating") -> RatingTable:
+    params = []
+    for i, p in enumerate(_get(r, "params", path, "list")):
+        pp = f"{path}.params[{i}]"
+        kind, name = _get(p, "kind", pp, "str"), _get(p, "name", pp, "str")
+        if kind == "numeric":
+            bins = []
+            for j, b in enumerate(_get(p, "bins", pp, "list")):
+                bp = f"{pp}.bins[{j}]"
+                hi = math.inf if _get(b, "hi", bp) == "inf" else _get(b, "hi", bp, "number")
+                bins.append(_at(bp, RatingBin, _get(b, "lo", bp, "number"), hi, _get(b, "points", bp, "number")))
+            params.append(_at(pp, NumericParam, name, _opt(p, "unit", pp, "str", ""), bins, _get(p, "better", pp, "str")))
+        elif kind == "categorical":
+            params.append(_at(pp, CategoricalParam, name, _numbers(_get(p, "points", pp), f"{pp}.points")))
+        else:
+            raise ValueError(f"{pp}.kind: expected 'numeric' or 'categorical', got {kind!r}")
+    adj = _numbers(_opt(r, "adjustments", path, default={}), f"{path}.adjustments")
+    return _at(path, RatingTable, _get(r, "base_edition", path, "str"), params, adj)
+
+
 def from_dict(d: Mapping) -> LaborTable:
     if _get(d, "schema", "") != SCHEMA:
         raise ValueError(f"schema: expected {SCHEMA!r}, got {d['schema']!r}")
@@ -174,9 +218,10 @@ def from_dict(d: Mapping) -> LaborTable:
         date = date.date()
     if isinstance(date, datetime.date):  # YAML escrito a mano: `date: 2026-11-01` sin comillas
         d = {**d, "date": date.isoformat()}
+    rating = None if d.get("rating") is None else rating_from_dict(d["rating"])
     return _at("", LaborTable,
                _get(d, "labor_type", "", "str"), catalog, table, _pair(d, "span_m", ""), corrs,
-               _opt(d, "author", "", "str", ""), _opt(d, "date", "", "str", ""), _opt(d, "notes", "", "str", ""))
+               _opt(d, "author", "", "str", ""), _opt(d, "date", "", "str", ""), _opt(d, "notes", "", "str", ""), rating)
 
 
 def save_json(t: LaborTable, path) -> None:

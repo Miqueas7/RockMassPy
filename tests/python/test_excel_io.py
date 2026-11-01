@@ -3,6 +3,7 @@ import sys
 import pytest
 
 import rockmasspy as rm
+from test_labor_table import CAT, rtab
 from test_table_io import cells_lt, range_lt
 
 openpyxl = pytest.importorskip("openpyxl")
@@ -254,3 +255,42 @@ def test_empty_texts_survive_excel(tmp_path):
                                                     [rm.CellClass("F/R", "II", label=" ")]))
     rm.save_excel(t, tmp_path / "t.xlsx")
     assert rm.load_excel(tmp_path / "t.xlsx") == t
+
+
+def test_roundtrip_rating_excel(tmp_path):
+    t = rm.LaborTable("galería", CAT, rtab(), rating=rm.RatingTable.rmr89_default())
+    rm.save_excel(t, tmp_path / "t.xlsx")
+    assert rm.load_excel(tmp_path / "t.xlsx") == t
+    rm.save_excel(range_lt(), tmp_path / "s.xlsx")
+    assert rm.load_excel(tmp_path / "s.xlsx").rating is None
+
+
+def _rated():
+    return rm.LaborTable("galería", CAT, rtab(), rating=rm.RatingTable.rmr89_default())
+
+
+def test_puntajes_comma_decimal_names_sheet_row_column(tmp_path):
+    def f(wb):
+        wb["Puntajes"].cell(row=3, column=5).value = "3,5"
+    msg = _excel_error(tmp_path, _rated, f)
+    assert "sheet 'Puntajes', row 3, column 'desde'" in msg
+
+
+def test_puntajes_row_errors_locate_the_row(tmp_path):
+    def f(wb):
+        wb["Puntajes"].cell(row=2, column=4).value = "arriba"  # mejor
+    assert "sheet 'Puntajes', row 2" in _excel_error(tmp_path, _rated, f)
+
+    def g(wb):
+        wb["Puntajes"].cell(row=2, column=2).value = "raro"  # tipo
+    assert "sheet 'Puntajes', row 2, column 'tipo'" in _excel_error(tmp_path, _rated, g)
+
+
+def test_puntajes_empty_hasta_only_in_last_interval(tmp_path):
+    def last(wb):  # ucs: filas 2-8, la 8 es el último intervalo
+        wb["Puntajes"].cell(row=8, column=6).value = None
+    assert rm.load_excel(_edit(tmp_path, _rated, last)) == _rated()
+
+    def middle(wb):
+        wb["Puntajes"].cell(row=3, column=6).value = None
+    assert "empty 'hasta'" in _excel_error(tmp_path, _rated, middle)

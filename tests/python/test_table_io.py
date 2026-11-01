@@ -220,3 +220,40 @@ def test_cells_base_edition_written_and_checked():
     d["table"]["base_edition"] = "GSI-2013"
     with pytest.raises(ValueError, match=r"^table\.base_edition: expected the chart id"):
         rm.from_dict(d)
+
+
+def rated_lt():
+    return rm.LaborTable("galería", CAT, rtab(), rating=rm.RatingTable.rmr89_default())
+
+
+def test_roundtrip_rating_dict_json_yaml(tmp_path):
+    pytest.importorskip("yaml")
+    t = rated_lt()
+    assert rm.from_dict(rm.to_dict(t)) == t
+    rm.save_json(t, tmp_path / "t.json")
+    assert "Infinity" not in (tmp_path / "t.json").read_text(encoding="utf-8")
+    assert rm.load_json(tmp_path / "t.json") == t
+    rm.save_yaml(t, tmp_path / "t.yaml")
+    assert rm.load_yaml(tmp_path / "t.yaml") == t
+
+
+def test_file_without_rating_still_loads():
+    d = rm.to_dict(range_lt())
+    assert d["rating"] is None
+    del d["rating"]
+    assert rm.from_dict(d).rating is None
+
+
+def test_rating_errors_name_the_path():
+    def err(fn):
+        d = rm.to_dict(rated_lt())
+        fn(d["rating"])
+        with pytest.raises(ValueError) as e:
+            rm.from_dict(d)
+        return str(e.value)
+
+    assert "rating.params[0].bins[1].lo" in err(lambda r: r["params"][0]["bins"][1].update(lo="3,5"))
+    assert "rating.params[0].bins[0].lo" in err(lambda r: r["params"][0]["bins"][0].update(lo="inf"))
+    assert "rating.params[5].kind" in err(lambda r: r["params"][5].update(kind="x"))
+    assert "rating.adjustments.Fair" in err(lambda r: r["adjustments"].update(Fair="x"))
+    assert "rating.params[0]" in err(lambda r: r["params"][0].update(better="up"))

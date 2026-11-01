@@ -14,6 +14,7 @@ from .cell_table import CellTable
 from .intact_rock import _strip
 from .issues import TableIssue
 from .range_table import RangeTable
+from .rating_table import RatingTable
 from .support import SupportCatalog, SupportType
 
 
@@ -35,6 +36,7 @@ class LaborTable:
     author: str = ""
     date: str = ""
     notes: str = ""
+    rating: RatingTable | None = None  # puntajes propios; None = los de la edición base
 
     def __post_init__(self):
         if self.span_m is not None:
@@ -72,7 +74,8 @@ class LaborTable:
         return Classification(label, support, self.table.base_edition, tuple(warnings))
 
     def validate(self) -> list[TableIssue]:
-        return self.catalog.validate() + self.table.validate(self.catalog)
+        issues = self.catalog.validate() + self.table.validate(self.catalog)
+        return issues + (self.rating.validate() if self.rating is not None else [])
 
 
 def _key(labor_type: str) -> str:

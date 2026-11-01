@@ -81,6 +81,14 @@ class RatingTable:
     params = property(lambda self: self._params)
     adjustments = property(lambda self: self._adjustments)
 
+    def __eq__(self, other):
+        if not isinstance(other, RatingTable):
+            return NotImplemented
+        # el orden de params importa: es el orden del dict de puntos de rate()
+        return (self._edition, self._params, self._adjustments) == (other._edition, other._params, other._adjustments)
+
+    __hash__ = None
+
     @classmethod
     def rmr89_default(cls) -> "RatingTable":
         inf = math.inf

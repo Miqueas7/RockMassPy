@@ -105,3 +105,11 @@ def test_select_table_ignores_accents():
     t = lab("Galería", (3, 4))
     assert rm.select_table([t], "galeria", 3.5) is t
     assert rm.select_table([lab("galeria", (3, 4))], " GALERÍA ", 3.5).labor_type == "galeria"
+
+
+def test_rating_is_optional_last_field_and_validate_adds_its_issues():
+    assert lab().rating is None
+    t = rm.LaborTable("galería", CAT, rtab(), None, (), "", "", "", rm.RatingTable("Propia", []))
+    assert "no_reference" in [i.kind for i in t.validate()]
+    assert rm.RatingTable.rmr89_default() == rm.RatingTable.rmr89_default()
+    assert rm.RatingTable("Propia", []) != rm.RatingTable("Otra", [])

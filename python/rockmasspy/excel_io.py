@@ -11,6 +11,7 @@ import math
 from .cell_table import CellClass
 from .labor_table import LaborTable
 from .range_table import RangeClass
+from .rating_table import RatingBin
 from .support import SupportCatalog
 from .table_io import _at, _bool, _optional, correlation_from_dict, from_dict, support_from_dict, to_dict
 
@@ -19,11 +20,14 @@ TIPOS = ("codigo_tipo", "orden", "descripcion", "perno_tipo", "perno_longitud_m"
 CLASES = ("desde", "hasta", "clase", "tipo")
 CELDAS = ("celda", "tipo", "gsi_min", "gsi_max", "rotulo")
 CORRELACIONES = ("nombre", "desde", "hacia", "forma", "a", "b", "valido_min", "valido_max", "fuente")
+PUNTAJES = ("parametro", "tipo", "unidad", "mejor", "desde", "hasta", "categoria", "puntos")
+MEJOR = {"mayor": "higher", "menor": "lower"}
 PERNO = ("perno_tipo", "perno_longitud_m", "perno_espaciamiento_m")
 # campo de la hoja Tabla para cada ruta de from_dict (los errores se ubican con el nombre en español)
 CAMPOS = {"schema": "schema", "version": "version", "labor_type": "labor_type", "span_m": "luz_min_m/luz_max_m",
           "author": "autor", "date": "fecha", "notes": "notas", "table.kind": "tipo_tabla", "table.method": "metodo",
-          "table.base_edition": "edicion_base", "table.chart": "cartilla"}
+          "table.base_edition": "edicion_base", "table.chart": "cartilla",
+          "rating.base_edition": "edicion_puntajes"}
 
 
 def _where(sheet, row, col):
@@ -183,10 +187,14 @@ def _load(wb) -> LaborTable:
     d["correlations"] = [] if "Correlaciones" not in wb.sheetnames else [
         _corr(n, r) for n, r in _sheet_rows(wb, "Correlaciones", CORRELACIONES, {"nombre", "desde", "hacia", "forma"},
                                             {"a", "b", "valido_min", "valido_max"})]
+    ed = campos.get("edicion_puntajes")
+    d["rating"] = None if ed is None else _puntajes(wb, ed)
     try:
         return from_dict(d)
     except ValueError as e:  # lo que queda por validar es de la hoja Tabla (o de la tabla de celdas entera)
         ruta, _, resto = str(e).partition(": ")
+        if ruta.startswith("rating") and ruta not in CAMPOS:
+            raise ValueError(f"sheet 'Puntajes': {str(e)}") from e
         if ruta in CAMPOS:
             raise ValueError(f"sheet 'Tabla', campo '{CAMPOS[ruta]}': {resto}") from e
         if ruta == "table":
@@ -200,6 +208,54 @@ def _clases(wb):
     for n, r in pairs:
         _row("Clases", n, RangeClass, r["desde"], r["hasta"], r["clase"], r["tipo"])
     return pairs
+
+
+def _puntajes(wb, edicion):
+    """Hoja Puntajes -> dict de rating; cada fila se valida con su constructor para ubicar hoja, fila y columna."""
+    hoja = "Puntajes"
+    filas = _sheet_rows(wb, hoja, PUNTAJES, {"tipo", "puntos"}, {"desde", "puntos"})
+    params, ajustes = {}, {}
+    for n, r in filas:
+        tipo = r["tipo"]
+        if tipo not in ("numerico", "categoria", "ajuste"):
+            raise ValueError(f"{_where(hoja, n, 'tipo')}: expected 'numerico', 'categoria' or 'ajuste', got '{tipo}'")
+        if tipo == "ajuste":
+            if r["categoria"] is None:
+                raise ValueError(f"{_where(hoja, n, 'categoria')}: required value is empty")
+            ajustes[r["categoria"]] = r["puntos"]
+            continue
+        nombre = r["parametro"]
+        if nombre is None:
+            raise ValueError(f"{_where(hoja, n, 'parametro')}: required value is empty")
+        if nombre in params and params[nombre]["kind"] != ("numeric" if tipo == "numerico" else "categorical"):
+            raise ValueError(f"{_where(hoja, n, 'tipo')}: parameter '{nombre}' mixes numeric and category rows")
+        if tipo == "categoria":
+            if r["categoria"] is None:
+                raise ValueError(f"{_where(hoja, n, 'categoria')}: required value is empty")
+            p = params.setdefault(nombre, {"name": nombre, "kind": "categorical", "points": {}})
+            p["points"][r["categoria"]] = r["puntos"]
+            continue
+        if r["desde"] is None:
+            raise ValueError(f"{_where(hoja, n, 'desde')}: required value is empty")
+        if r["mejor"] not in MEJOR:
+            raise ValueError(f"{_where(hoja, n, 'mejor')}: expected 'mayor' or 'menor', got '{r['mejor']}'")
+        p = params.setdefault(nombre, {"name": nombre, "kind": "numeric", "unit": r["unidad"] or "",
+                                       "better": MEJOR[r["mejor"]], "bins": []})
+        hi = r["hasta"]  # vacío = infinito, pero solo en el último intervalo (se revisa abajo)
+        hi = None if hi is None else math.inf if hi.lower() == "inf" else _num(hi, hoja, n, "hasta")
+        p["bins"].append({"lo": r["desde"], "hi": hi, "points": r["puntos"]})
+        _row(hoja, n, RatingBin, r["desde"], math.inf if hi is None else hi, r["puntos"])
+    for nombre, p in params.items():
+        if p["kind"] != "numeric":
+            continue
+        for b in p["bins"][:-1]:
+            if b["hi"] is None:
+                raise ValueError(f"sheet '{hoja}', parameter '{nombre}': empty 'hasta' is only allowed in the last interval")
+        if p["bins"][-1]["hi"] is None:
+            p["bins"][-1]["hi"] = math.inf
+        for b in p["bins"]:
+            b["hi"] = "inf" if b["hi"] == math.inf else b["hi"]
+    return {"base_edition": edicion, "params": list(params.values()), "adjustments": ajustes}
 
 
 def _corr(n, r):
@@ -232,6 +288,8 @@ def save_excel(t: LaborTable, path) -> None:
         campos += [("metodo", tb["method"]), ("edicion_base", tb["base_edition"])]
     else:  # la edición base de una tabla de celdas es la cartilla
         campos += [("edicion_base", tb["chart"]), ("cartilla", tb["chart"])]
+    rt = d["rating"]
+    campos.append(("edicion_puntajes", rt and rt["base_edition"] or None))
     sheet("Tabla", ("campo", "valor"), campos)
     sheet("Tipos_sostenimiento", TIPOS, [
         (s["code"], s["order"], s["description"] or None,
@@ -248,4 +306,14 @@ def save_excel(t: LaborTable, path) -> None:
         sheet("Correlaciones", CORRELACIONES, [
             (c["name"], c["from"], c["to"], c["form"], c["a"], c["b"], c["valid_min"], c["valid_max"], c["source"] or None)
             for c in d["correlations"]])
+    if rt:
+        filas = []
+        for p in rt["params"]:
+            if p["kind"] == "numeric":
+                filas += [(p["name"], "numerico", p["unit"] or None, "mayor" if p["better"] == "higher" else "menor",
+                           b["lo"], b["hi"], None, b["points"]) for b in p["bins"]]
+            else:
+                filas += [(p["name"], "categoria", None, None, None, None, k, v) for k, v in p["points"].items()]
+        filas += [(None, "ajuste", None, None, None, None, k, v) for k, v in rt["adjustments"].items()]
+        sheet("Puntajes", PUNTAJES, filas)
     wb.save(path)
