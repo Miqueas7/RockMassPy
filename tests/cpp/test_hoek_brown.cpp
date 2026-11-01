@@ -95,3 +95,22 @@ TEST(HoekBrown, MohrCoulombCarriesDWarning) {
     EXPECT_EQ(mc.warnings[0], p.warnings[0]);
     EXPECT_TRUE(hb_mohr_coulomb(50, hb_params(45, 10, 0), 1.0).warnings.empty());
 }
+TEST(HoekBrown, HugeSigmaCiWarnsAboutUnits) {
+    auto p = hb_params(45, 10, 0);
+    auto mc = hb_mohr_coulomb(401, p, 1.0);
+    ASSERT_EQ(mc.warnings.size(), 1u);
+    EXPECT_EQ(mc.warnings[0], "sigma_ci_mpa > 400: check the unit is MPa (not kg/cm2)");
+    EXPECT_TRUE(hb_mohr_coulomb(400, p, 1.0).warnings.empty());
+}
+// El texto exacto del aviso de D de HB-2018.
+TEST(HoekBrown, DWarningText) {
+    auto p = hb_params(45, 10, 0.5);
+    ASSERT_EQ(p.warnings.size(), 1u);
+    EXPECT_EQ(p.warnings[0],
+              "D applies only to the blast-damaged zone, never to the whole rock mass (Hoek & Brown 2019, Table 2)");
+}
+// Valores con d = 0.5 calculados por nosotros con la fórmula publicada (no publicados).
+TEST(HoekBrown, ModuliWithDamage) {
+    EXPECT_NEAR(erm_hoek_diederichs_generalized(45, 0.5, 20000).value, 2117.687, 0.001);
+    EXPECT_NEAR(em_hoek2002(45, 0.5, 50).value, 3.976915, 1e-5);
+}

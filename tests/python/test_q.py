@@ -14,8 +14,8 @@ def test_default_constructor_and_fields():
 
 
 def test_wall_and_de_via_python():
-    assert rm.wall_q(10, 5, 10, False) == 25
-    assert rm.wall_q(0.5, 5, 10, False, rm.QEdition.NGI2015) == 1.25
+    assert rm.wall_q(10, 5, 10, False).q_wall == 25
+    assert rm.wall_q(0.5, 5, 10, False, rm.QEdition.NGI2015).q_wall == 1.25
     assert rm.equivalent_dimension(15, 1.6, 4.5, "C").de_m == pytest.approx(9.375)
     with pytest.raises(ValueError):
         rm.equivalent_dimension(15, 1.6, 4.5, "Z")
@@ -59,3 +59,31 @@ def test_srf_category_differs_for_h_to_p():
         assert c25[letter] != c15[letter], letter
     for letter in "ABCDEFG":
         assert c25[letter] == c15[letter], letter
+
+
+def test_wall_q_factor_and_equivalent_dimension_info():
+    w = rm.wall_q(20, 5, 10, False)
+    assert w.q_wall == 100 and w.factor == 5
+    assert rm.wall_q(5, 5, 10, False).factor == 2.5 and rm.wall_q(5, 5, 10, True).factor == 1
+    d = rm.equivalent_dimension(15, 1.6, 4.5, "C")
+    assert d.info.method_id == "Q-NGI-2025"
+    assert d.info.source == "NGI (2025) Using the Q-system, Table 4-1"
+    d15 = rm.equivalent_dimension(15, 1.6, 4.5, "C", rm.QEdition.NGI2015)
+    assert d15.info.method_id == "Q-NGI-2015" and d15.info.verification == rm.Verification.Primary
+
+
+def test_repr_is_readable():
+    text = repr(rm.q_value(rm.QInput(90, 4, 3, 1, 1, 15)))
+    assert text.startswith("QResult(") and "q=4.5" in text
+    assert "info=MethodInfo(method_id='Q-NGI-2025', " in text and "warnings=[]" in text
+    for obj in (rm.rmr_class(59), rm.hb_params(45, 10, 0), rm.hb_mohr_coulomb(50, rm.hb_params(45, 10, 0), 1.0),
+                rm.equivalent_dimension(15, 1.6, 4.5, "C"), rm.wall_q(20, 5, 10, False),
+                rm.rqd_priest_hudson(5.0), rm.QInput(90, 4, 3, 1, 1, 15)):
+        assert repr(obj).startswith(type(obj).__name__ + "(") and "0x" not in repr(obj)
+
+
+def test_typing_files_are_installed():
+    from importlib import resources
+    pkg = resources.files("rockmasspy")
+    assert pkg.joinpath("_rockmasspy_core.pyi").is_file()
+    assert pkg.joinpath("py.typed").is_file()

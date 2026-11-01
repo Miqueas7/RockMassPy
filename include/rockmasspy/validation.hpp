@@ -64,6 +64,11 @@ inline void require_in_range(double value, double lo, double hi, const std::stri
         detail::fail(name, "must be within [" + detail::num(lo) + ", " + detail::num(hi) + "]", value);
 }
 
+/// Condición propia: si `ok` es falso lanza con el nombre, el motivo y el valor recibido.
+inline void require(bool ok, const std::string& name, const std::string& what, double value) {
+    if (!ok) detail::fail(name, what, value);
+}
+
 /// value <= hi, con un mensaje propio (por ejemplo, para sugerir la unidad correcta).
 inline void require_max(double value, double hi, const std::string& name, const std::string& hint) {
     require_finite(value, name);

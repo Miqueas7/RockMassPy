@@ -50,6 +50,15 @@ if(ROCKMASSPY_BUILD_PYTHON)
             RUNTIME DESTINATION rockmasspy
             ARCHIVE DESTINATION rockmasspy
         )
+
+        # Stubs .pyi para editores y mypy; se generan al instalar (la ruta es relativa al prefijo del wheel).
+        # python/rockmasspy/py.typed marca el paquete como tipado.
+        nanobind_add_stub(_rockmasspy_core_stub
+            MODULE _rockmasspy_core
+            OUTPUT rockmasspy/_rockmasspy_core.pyi
+            PYTHON_PATH rockmasspy
+            INSTALL_TIME
+        )
     else()
         message(FATAL_ERROR
             "nanobind not found, so the Python package would be incomplete.\n"

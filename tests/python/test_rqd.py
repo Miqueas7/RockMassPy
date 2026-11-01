@@ -29,3 +29,8 @@ def test_core_sum_rounding_stays_at_100():
     inp = rm.Rmr89Input()
     inp.ucs_mpa, inp.rqd_pct, inp.spacing_m, inp.joint_condition_rating, inp.water = 120, rqd, 0.5, 20, rm.Water.Dry
     rm.rmr89(inp)
+
+
+def test_long_run_warns_about_units():
+    assert rm.rqd_from_core([0.5, 0.4], 7.0).warnings == ["run_length_m > 6: check lengths are in metres"]
+    assert rm.rqd_from_core([0.5, 0.4], 6.0).warnings == []

@@ -121,7 +121,7 @@ inline Rmr14Result rmr14(const Rmr14Input& in) {
         r.warnings.push_back("Fs not evaluated (no ICE): elastic face assumed");
     }
     r.rmr = (r.basic + r.f0) * r.fe * r.fs;
-    if (r.rmr > 100.0) r.warnings.push_back("rmr outside 0-100 after adjustments");
+    if (r.rmr < 0.0 || r.rmr > 100.0) r.warnings.push_back("rmr outside 0-100 after adjustments");
     r.rmr_class = rmr_class(r.rmr);
     r.info = {"RMR14", Verification::Secondary, "Celada et al. (2014), as transcribed in Osinergmin (2017), Annex A.14"};
     return r;

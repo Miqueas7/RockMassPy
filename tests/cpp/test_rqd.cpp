@@ -26,3 +26,10 @@ TEST(Rqd, CoreSumRoundingClampedTo100) {
     Rmr89Input in; in.ucs_mpa = 120; in.rqd_pct = rqd; in.spacing_m = 0.5; in.joint_condition_rating = 20; in.water = Water::Dry;
     EXPECT_NO_THROW(rmr89(in));
 }
+
+TEST(Rqd, LongRunWarnsAboutUnits) {
+    auto r = rqd_from_core({0.5, 0.4}, 7.0);
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0], "run_length_m > 6: check lengths are in metres");
+    EXPECT_TRUE(rqd_from_core({0.5, 0.4}, 6.0).warnings.empty());
+}

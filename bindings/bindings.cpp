@@ -189,20 +189,24 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("warnings", &QResult::warnings);
     m.def("q_value", &q_value, nb::arg("input"), nb::arg("edition") = QEdition::NGI2025,
           "Q and Q' with rock class (NGI 2025 by default).");
+    nb::class_<WallQResult>(m, "WallQResult", "Wall Q with the factor applied (5, 2.5 or 1).")
+        .def_ro("q_wall", &WallQResult::q_wall).def_ro("factor", &WallQResult::factor)
+        .def_ro("info", &WallQResult::info);
     m.def("wall_q", &wall_q, nb::arg("q"), nb::arg("wall_height_m"), nb::arg("span_m"), nb::arg("high_stress"),
           nb::arg("edition") = QEdition::NGI2025, "Q to use for wall support design.");
     nb::class_<EquivalentDimension>(m, "EquivalentDimension")
         .def_ro("de_m", &EquivalentDimension::de_m).def_ro("esr_used", &EquivalentDimension::esr_used)
-        .def_ro("warnings", &EquivalentDimension::warnings);
+        .def_ro("warnings", &EquivalentDimension::warnings).def_ro("info", &EquivalentDimension::info);
     // El caster de char de nanobind da TypeError con "" o "CC": se recibe str para que salga ValueError.
     m.def("equivalent_dimension",
-          [](double span_or_height_m, double esr, double q, const std::string& esr_category) {
+          [](double span_or_height_m, double esr, double q, const std::string& esr_category, QEdition edition) {
               if (esr_category.size() != 1)
                   throw std::invalid_argument(
                       "Domain error [RockMassPy]: parameter 'esr_category' must be one of A-G");
-              return equivalent_dimension(span_or_height_m, esr, q, esr_category[0]);
+              return equivalent_dimension(span_or_height_m, esr, q, esr_category[0], edition);
           },
           nb::arg("span_or_height_m"), nb::arg("esr"), nb::arg("q"), nb::arg("esr_category"),
+          nb::arg("edition") = QEdition::NGI2025,
           "Equivalent dimension De = span or height / ESR (ESR category A-G, any case).");
 
     nb::class_<GsiResult>(m, "GsiResult")

@@ -39,3 +39,15 @@ def test_condition_rating_accepts_excel_float_and_rejects_nan():
     inp.joint_condition_rating = float("nan")
     with pytest.raises(ValueError, match="joint_condition_rating"):
         rm.rmr89(inp)
+
+
+def test_ucs_over_400_warns_about_units_in_rmr89_and_rmr76():
+    msg = "ucs_mpa > 400: check the unit is MPa (not kg/cm2)"
+    i = rm.Rmr89Input()
+    i.ucs_mpa, i.rqd_pct, i.spacing_m, i.joint_condition_rating, i.water = 401, 80, 0.5, 20, rm.Water.Dry
+    i.orientation = rm.OrientationClass.Fair
+    assert rm.rmr89(i).warnings == [msg]
+    j = rm.Rmr76Input()
+    j.ucs_mpa, j.rqd_pct, j.spacing_m = 401, 80, 0.5
+    j.condition, j.water, j.orientation = rm.JointCondition76.VeryRoughTight, rm.Water76.CompletelyDry, rm.OrientationClass.Fair
+    assert rm.rmr76(j).warnings == [msg]

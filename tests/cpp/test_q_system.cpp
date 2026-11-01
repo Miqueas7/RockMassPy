@@ -39,11 +39,26 @@ TEST(QSystem, RqdFractionWarns) {
     EXPECT_EQ(r.warnings[0], "rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction");
 }
 TEST(QSystem, WallQ) {
-    EXPECT_DOUBLE_EQ(wall_q(20, 5, 10, false), 100);  EXPECT_DOUBLE_EQ(wall_q(5, 5, 10, false), 12.5);
-    EXPECT_DOUBLE_EQ(wall_q(0.5, 5, 10, false), 0.5); EXPECT_DOUBLE_EQ(wall_q(0.5, 5, 10, false, QEdition::NGI2015), 1.25);
-    EXPECT_DOUBLE_EQ(wall_q(20, 12, 10, false), 20);  EXPECT_DOUBLE_EQ(wall_q(5, 5, 10, true), 5);
-    EXPECT_DOUBLE_EQ(wall_q(10, 5, 10, false), 25);   // límite: 2.5·Q, no 5·Q
+    EXPECT_DOUBLE_EQ(wall_q(20, 5, 10, false).q_wall, 100);  EXPECT_DOUBLE_EQ(wall_q(5, 5, 10, false).q_wall, 12.5);
+    EXPECT_DOUBLE_EQ(wall_q(0.5, 5, 10, false).q_wall, 0.5); EXPECT_DOUBLE_EQ(wall_q(0.5, 5, 10, false, QEdition::NGI2015).q_wall, 1.25);
+    EXPECT_DOUBLE_EQ(wall_q(20, 12, 10, false).q_wall, 20);  EXPECT_DOUBLE_EQ(wall_q(5, 5, 10, true).q_wall, 5);
+    EXPECT_DOUBLE_EQ(wall_q(10, 5, 10, false).q_wall, 25);   // límite: 2.5·Q, no 5·Q
     EXPECT_THROW(wall_q(0, 5, 10, false), std::invalid_argument);
+}
+TEST(QSystem, WallQFactorAndInfo) {
+    EXPECT_DOUBLE_EQ(wall_q(20, 5, 10, false).factor, 5.0);
+    EXPECT_DOUBLE_EQ(wall_q(5, 5, 10, false).factor, 2.5);
+    EXPECT_DOUBLE_EQ(wall_q(5, 5, 10, true).factor, 1.0);
+    EXPECT_EQ(wall_q(5, 5, 10, false).info.method_id, "Q-NGI-2025");
+    EXPECT_EQ(wall_q(5, 5, 10, false, QEdition::NGI2015).info.method_id, "Q-NGI-2015");
+}
+TEST(QSystem, EquivalentDimensionInfo) {
+    auto d25 = equivalent_dimension(15, 1.6, 4.5, 'C');
+    EXPECT_EQ(d25.info.method_id, "Q-NGI-2025"); EXPECT_EQ(d25.info.verification, Verification::Primary);
+    EXPECT_EQ(d25.info.source, "NGI (2025) Using the Q-system, Table 4-1");
+    auto d15 = equivalent_dimension(15, 1.6, 4.5, 'C', QEdition::NGI2015);
+    EXPECT_EQ(d15.info.method_id, "Q-NGI-2015");
+    EXPECT_EQ(d15.info.source, "NGI (2015, rev. 2022) Using the Q-system, Table 7");
 }
 TEST(QSystem, EsrRuleLowQ) {
     auto d = equivalent_dimension(10, 1.6, 0.05, 'C'); EXPECT_DOUBLE_EQ(d.esr_used, 1.0); EXPECT_DOUBLE_EQ(d.de_m, 10); EXPECT_EQ(d.warnings.size(), 1u);

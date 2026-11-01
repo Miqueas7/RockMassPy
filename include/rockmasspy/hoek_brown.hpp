@@ -65,8 +65,8 @@ inline double hb_tensile(double sigma_ci_mpa, const HbParams& p) {
 /// redondeo y pow daría NaN: se recorta a 0.
 inline double hb_sigma1(double sigma3_mpa, double sigma_ci_mpa, const HbParams& p) {
     validation::require_finite(sigma3_mpa, "sigma3_mpa");
-    if (sigma3_mpa < hb_tensile(sigma_ci_mpa, p))
-        validation::detail::fail("sigma3_mpa", "must be >= the tensile strength of the rock mass", sigma3_mpa);
+    validation::require(sigma3_mpa >= hb_tensile(sigma_ci_mpa, p), "sigma3_mpa",
+                        "must be >= the tensile strength of the rock mass", sigma3_mpa);
     return sigma3_mpa + sigma_ci_mpa * std::pow(std::max(0.0, p.mb * sigma3_mpa / sigma_ci_mpa + p.s), p.a);
 }
 
@@ -117,6 +117,7 @@ inline MohrCoulombFit hb_mohr_coulomb(double sigma_ci_mpa, const HbParams& p, do
     r.sigma3max_mpa = sigma3max_mpa;
     r.info = p.info;
     r.warnings = p.warnings;
+    if (sigma_ci_mpa > 400.0) r.warnings.push_back("sigma_ci_mpa > 400: check the unit is MPa (not kg/cm2)");
     return r;
 }
 

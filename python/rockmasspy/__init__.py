@@ -3,6 +3,34 @@
 from ._rockmasspy_core import *  # noqa: F401,F403
 
 __version__ = "0.1.0"
+
+
+def _install_reprs():
+    """Da a cada estructura del núcleo un __repr__ armado con sus propiedades públicas."""
+    import enum
+    from . import _rockmasspy_core as core
+
+    def show(value):
+        if isinstance(value, core.MethodInfo):  # anidado: solo el identificador
+            return f"MethodInfo(method_id={value.method_id!r}, ...)"
+        return repr(value)
+
+    def make(names):
+        def __repr__(self):
+            body = ", ".join(f"{n}={show(getattr(self, n))}" for n in names)
+            return f"{type(self).__name__}({body})"
+        return __repr__
+
+    for cls in vars(core).values():
+        if not isinstance(cls, type) or issubclass(cls, enum.Enum):
+            continue
+        names = [n for n, v in vars(cls).items() if not n.startswith("_") and isinstance(v, property)]
+        if names:
+            cls.__repr__ = make(names)
+
+
+_install_reprs()
+del _install_reprs
 from .q_tables import Q_TABLES, SRF_CATEGORIES, q_lookup  # noqa: E402,F401
 from .issues import TableIssue  # noqa: E402,F401
 from .intact_rock import (  # noqa: E402,F401

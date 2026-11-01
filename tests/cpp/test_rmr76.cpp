@@ -67,3 +67,20 @@ TEST(Rmr76, UnsetFieldsThrowWithTheirName) {
         EXPECT_NE(error_of([&] { rmr76(in); }).find("'" + name + "'"), std::string::npos) << name;
     }
 }
+TEST(Rmr76, HugeUcsWarnsAboutUnits) {
+    auto in = base76(); in.ucs_mpa = 401; in.orientation = OrientationClass::Fair;
+    auto r = rmr76(in);
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0], "ucs_mpa > 400: check the unit is MPa (not kg/cm2)");
+    in.ucs_mpa = 400;
+    EXPECT_TRUE(rmr76(in).warnings.empty());
+}
+TEST(Rmr76, OutOfRangeWarns) {
+    Rmr76Input in; in.ucs_mpa = 1; in.rqd_pct = 10; in.spacing_m = 0.03;
+    in.condition = JointCondition76::SoftGougeOrWide; in.water = Water76::Severe;
+    in.orientation = OrientationClass::VeryUnfavourable;
+    auto r = rmr76(in);
+    EXPECT_LT(r.rmr, 0);
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0], "rmr outside 0-100 after adjustments");
+}

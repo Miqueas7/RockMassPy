@@ -57,4 +57,13 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 
 Fuera de la fase 1A: Fe de tuneladora, Q 1974, ecuación 3 del GSI, tablas de mi/MR, presión de soporte y luz máxima.
 
+## Notas de Python
+
+Algunos nombres de C++ son palabras reservadas de Python, así que llevan un guion bajo al final:
+
+- `Infilling.None_` (sin relleno), como en `JointCondition89(..., rm.Infilling.None_, ...)`.
+- `CorrelationResult.from_` y `CustomCorrelation.from_` (el argumento `from_` de su constructor).
+
+Los resultados se imprimen de forma legible (`QResult(q=4.5, ...)`) y el paquete trae stubs de tipos (`py.typed`).
+
 Licencia: MIT.

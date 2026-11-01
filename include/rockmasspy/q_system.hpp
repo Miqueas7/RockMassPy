@@ -39,6 +39,14 @@ struct QResult {
     std::vector<std::string> warnings;
 };
 
+/// Identificador y fuente de la edición; `table` nombra la tabla del manual (vacío = sin tabla).
+inline MethodInfo qed_info(QEdition edition, const std::string& table = "") {
+    const bool v2025 = edition == QEdition::NGI2025;
+    std::string src = v2025 ? "NGI (2025) Using the Q-system" : "NGI (2015, rev. 2022) Using the Q-system";
+    if (!table.empty()) src += ", " + table;
+    return {v2025 ? "Q-NGI-2025" : "Q-NGI-2015", Verification::Primary, src};
+}
+
 inline QResult q_value(const QInput& in, QEdition edition = QEdition::NGI2025) {
     validation::require_in_range(in.rqd_pct, 0.0, 100.0, "rqd_pct");
     validation::require_positive(in.jn, "jn");
@@ -69,31 +77,39 @@ inline QResult q_value(const QInput& in, QEdition edition = QEdition::NGI2025) {
         r.warnings.push_back("rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction");
     if (q < 0.001 || q > 1000.0) r.warnings.push_back("Q outside 0.001-1000");
 
-    r.info = {v2025 ? "Q-NGI-2025" : "Q-NGI-2015", Verification::Primary,
-              v2025 ? "NGI (2025) Using the Q-system" : "NGI (2015, rev. 2022) Using the Q-system"};
+    r.info = qed_info(edition);
     return r;
 }
 
+struct WallQResult {
+    double q_wall, factor;  ///< factor = q_wall / q: 5, 2.5 o 1
+    MethodInfo info;
+};
+
 /// Q para dimensionar las paredes (NGI 2025 Tabla 4-2; 2015 Tabla 8, sin la regla de altura).
-inline double wall_q(double q, double wall_height_m, double span_m, bool high_stress,
+inline WallQResult wall_q(double q, double wall_height_m, double span_m, bool high_stress,
                      QEdition edition = QEdition::NGI2025) {
     validation::require_positive(q, "q");
     validation::require_positive(wall_height_m, "wall_height_m");
     validation::require_positive(span_m, "span_m");
     const bool v2025 = edition == QEdition::NGI2025;
-    if (v2025 && wall_height_m > span_m) return q;
-    if (q > 10.0) return 5.0 * q;
-    if (q > (v2025 ? 1.0 : 0.1)) return high_stress ? q : 2.5 * q;
-    return q;
+    double factor = 1.0;
+    if (!(v2025 && wall_height_m > span_m)) {
+        if (q > 10.0) factor = 5.0;
+        else if (q > (v2025 ? 1.0 : 0.1) && !high_stress) factor = 2.5;
+    }
+    return {factor * q, factor, qed_info(edition, v2025 ? "Table 4-2" : "Table 8")};
 }
 
 struct EquivalentDimension {
     double de_m, esr_used;
     std::vector<std::string> warnings;
+    MethodInfo info;
 };
 
 /// De = luz o altura / ESR. Categoría ESR 'A'-'G' (NGI Tabla 4-1); se acepta en minúscula.
-inline EquivalentDimension equivalent_dimension(double span_or_height_m, double esr, double q, char esr_category) {
+inline EquivalentDimension equivalent_dimension(double span_or_height_m, double esr, double q, char esr_category,
+                                                QEdition edition = QEdition::NGI2025) {
     validation::require_positive(span_or_height_m, "span_or_height_m");
     validation::require_positive(esr, "esr");
     validation::require_positive(q, "q");
@@ -107,6 +123,7 @@ inline EquivalentDimension equivalent_dimension(double span_or_height_m, double 
         d.warnings.push_back("ESR set to 1.0 because Q <= 0.1 (NGI Table 4-1)");
     }
     d.de_m = span_or_height_m / d.esr_used;
+    d.info = qed_info(edition, edition == QEdition::NGI2025 ? "Table 4-1" : "Table 7");
     return d;
 }
 

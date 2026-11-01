@@ -42,9 +42,11 @@ inline RqdResult rqd_from_core(const std::vector<double>& piece_lengths_m, doubl
         throw std::invalid_argument(
             "Domain error [RockMassPy]: parameter 'piece_lengths_m' sums to more than 'run_length_m'");
     // La tolerancia de arriba deja pasar sumas apenas mayores que la corrida: se recorta a 100.
-    return {std::min(100.0, 100.0 * sound / run_length_m),
-            {"RQD-Deere", Verification::Secondary, "Deere (1964); Deere & Deere (1988)"},
-            {}};
+    RqdResult r{std::min(100.0, 100.0 * sound / run_length_m),
+                {"RQD-Deere", Verification::Secondary, "Deere (1964); Deere & Deere (1988)"},
+                {}};
+    if (run_length_m > 6.0) r.warnings.push_back("run_length_m > 6: check lengths are in metres");
+    return r;
 }
 
 /// RQD = 100 e^(-t lambda) (t lambda + 1), lambda en discontinuidades por metro.

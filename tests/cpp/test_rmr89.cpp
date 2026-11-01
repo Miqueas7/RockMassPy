@@ -118,3 +118,12 @@ TEST(Rmr89, OutOfRangeAfterAdjustmentWarns) {
     ASSERT_EQ(r.warnings.size(), 1u);
     EXPECT_EQ(r.warnings[0], "rmr outside 0-100 after adjustments");
 }
+TEST(Rmr89, HugeUcsWarnsAboutUnits) {
+    Rmr89Input in; in.ucs_mpa = 401; in.rqd_pct = 80; in.spacing_m = 0.5; in.joint_condition_rating = 20; in.water = Water::Dry;
+    in.orientation = OrientationClass::Fair;
+    auto r = rmr89(in);
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0], "ucs_mpa > 400: check the unit is MPa (not kg/cm2)");
+    in.ucs_mpa = 400;
+    EXPECT_TRUE(rmr89(in).warnings.empty());
+}

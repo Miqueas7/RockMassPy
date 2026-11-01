@@ -136,6 +136,8 @@ inline Rmr89Result rmr89(const Rmr89Input& in) {
     r.r_water = rating_water89(validation::require_set(in.water, "water"));
     r.basic = r.r_strength + r.r_rqd + r.r_spacing + r.r_condition + r.r_water;
 
+    if (in.ucs_mpa && *in.ucs_mpa > 400.0)
+        r.warnings.push_back("ucs_mpa > 400: check the unit is MPa (not kg/cm2)");
     if (in.rqd_pct > 0.0 && in.rqd_pct <= 1.0)
         r.warnings.push_back("rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction");
     if (in.orientation) {

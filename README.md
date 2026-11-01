@@ -56,4 +56,13 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 
 Out of phase 1A: TBM Fe, Q 1974, GSI equation 3, mi/MR tables, support pressure and maximum span.
 
+## Python notes
+
+Some C++ names are reserved words in Python, so they get a trailing underscore:
+
+- `Infilling.None_` (no infilling), as in `JointCondition89(..., rm.Infilling.None_, ...)`.
+- `CorrelationResult.from_` and `CustomCorrelation.from_` (the `from_` argument of its constructor).
+
+Results print readably (`QResult(q=4.5, ...)`) and the package ships type stubs (`py.typed`).
+
 License: MIT.

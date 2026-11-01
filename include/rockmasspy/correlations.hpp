@@ -66,14 +66,14 @@ inline CorrelationResult correlate(Correlation c, double x) {
             break;
         case Correlation::GsiFromRmr89Prime_HoekDiederichs2006:
             require_in_range(x, 0.0, 100.0, "rmr89_prime");
-            if (x <= 23.0) validation::detail::fail("rmr89_prime", "must be > 23 for this correlation", x);
+            validation::require(x > 23.0, "rmr89_prime", "must be > 23 for this correlation", x);
             v = x - 5.0;
             set("GsiFromRmr89Prime_HoekDiederichs2006", Verification::Primary, "Hoek & Diederichs (2006)",
                 "RMR89'", "GSI");
             break;
         case Correlation::GsiFromRmr76Prime_HoekDiederichs2006:
             require_in_range(x, 0.0, 100.0, "rmr76_prime");
-            if (x <= 18.0) validation::detail::fail("rmr76_prime", "must be > 18 for this correlation", x);
+            validation::require(x > 18.0, "rmr76_prime", "must be > 18 for this correlation", x);
             v = x;
             set("GsiFromRmr76Prime_HoekDiederichs2006", Verification::Primary, "Hoek & Diederichs (2006)",
                 "RMR76'", "GSI");
@@ -129,7 +129,7 @@ inline CorrelationResult correlate_custom(const CustomCorrelation& c, double val
     require_finite(c.b, "b");
     require_finite(c.valid_min, "valid_min");
     require_finite(c.valid_max, "valid_max");
-    if (c.valid_min >= c.valid_max) detail::fail("valid_min", "must be smaller than valid_max", c.valid_min);
+    require(c.valid_min < c.valid_max, "valid_min", "must be smaller than valid_max", c.valid_min);
     require_finite(value, "value");
     if (c.form == CorrelationForm::LogLinear) require_positive(value, "value");
 

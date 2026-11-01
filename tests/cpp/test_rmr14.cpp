@@ -97,3 +97,12 @@ TEST(Rmr14, OverHundredWarns) {
     ASSERT_EQ(r.warnings.size(), 1u);
     EXPECT_EQ(r.warnings[0], "rmr outside 0-100 after adjustments");
 }
+TEST(Rmr14, NegativeWarns) {
+    Rmr14Input in; in.strength_rating = 0; in.joints_per_m_rating = 0; in.continuity_m = 30;
+    in.roughness = Roughness14::Slickensided; in.infilling = Infilling14::SoftOver5mm; in.alteration = Alteration14::Decomposed;
+    in.water = Water::Flowing; in.id2_pct = 0; in.orientation = OrientationClass::VeryUnfavourable; in.ice = 10.0;
+    auto r = rmr14(in);
+    EXPECT_LT(r.rmr, 0.0);
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0], "rmr outside 0-100 after adjustments");
+}

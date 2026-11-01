@@ -29,3 +29,14 @@ def test_mohr_coulomb_carries_d_warning():
     p = rm.hb_params(45, 10, 0.5, rm.HbEdition.HB2018)
     mc = rm.hb_mohr_coulomb(50, p, 1.0)
     assert len(mc.warnings) == 1 and "blast-damaged zone" in mc.warnings[0]
+
+
+def test_moduli_with_damage():
+    # d = 0.5: valores calculados por nosotros con la fórmula publicada (no publicados).
+    assert rm.erm_hoek_diederichs_generalized(45, 0.5, 20000).value == pytest.approx(2117.687, abs=0.001)
+    assert rm.em_hoek2002(45, 0.5, 50).value == pytest.approx(3.976915, abs=1e-5)
+
+
+def test_unit_warning_sigma_ci():
+    mc = rm.hb_mohr_coulomb(401, rm.hb_params(45, 10, 0), 1.0)
+    assert mc.warnings == ["sigma_ci_mpa > 400: check the unit is MPa (not kg/cm2)"]

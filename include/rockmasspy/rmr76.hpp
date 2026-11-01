@@ -92,6 +92,8 @@ inline Rmr76Result rmr76(const Rmr76Input& in) {
     r.r_water = water[static_cast<int>(validation::require_set(in.water, "water"))];
     r.basic = r.r_strength + r.r_rqd + r.r_spacing + r.r_condition + r.r_water;
 
+    if (in.ucs_mpa && *in.ucs_mpa > 400.0)
+        r.warnings.push_back("ucs_mpa > 400: check the unit is MPa (not kg/cm2)");
     if (in.rqd_pct > 0.0 && in.rqd_pct <= 1.0)
         r.warnings.push_back("rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction");
     if (in.orientation) {
