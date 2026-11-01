@@ -12,3 +12,4 @@ from .support import Bolt, Shotcrete, SupportCatalog, SupportType  # noqa: E402,
 from .range_table import EDITION_BOUNDARIES, RANGE_METHODS, RangeClass, RangeTable  # noqa: E402,F401
 from .gsi_charts import GSI_CHARTS, GsiChart, normalize_cell  # noqa: E402,F401
 from .cell_table import CellClass, CellTable  # noqa: E402,F401
+from .rating_table import CategoricalParam, NumericParam, RatingBin, RatingResult, RatingTable  # noqa: E402,F401
