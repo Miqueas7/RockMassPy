@@ -79,6 +79,15 @@ TEXTS: dict[str, dict[str, str]] = {
     "structure_axis": {"es": "Estructura", "en": "Structure"},
     "condition_axis": {"es": "Condición de la superficie", "en": "Surface condition"},
     "range_axis": {"es": "Valor", "en": "Value"},
+    "correlation_title": {"es": "Correlaciones entre sistemas", "en": "Correlations between systems"},
+    "scatter_points": {"es": "Datos del sitio", "en": "Site data"},
+    "global_scatter_note": {
+        "es": "las correlaciones globales tienen mucha dispersión; calibra una correlación propia del sitio",
+        "en": "global correlations have high scatter; calibrate a site correlation",
+    },
+    "class_hist_title": {"es": "Valores por clase", "en": "Values per class"},
+    "count_axis": {"es": "Cantidad", "en": "Count"},
+    "outside_classes": {"es": "Fuera de toda clase", "en": "Outside every class"},
     "lines_source": {
         "es": "digitalizado de Osinergmin (2017), Anexo A.17 (cartilla de Vallejo, 2011)",
         "en": "digitized from Osinergmin (2017), Annex A.17 (Vallejo chart, 2011)",
