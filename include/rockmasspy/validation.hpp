@@ -48,4 +48,10 @@ inline void require_in_range(double value, double lo, double hi, const std::stri
         detail::fail(name, "must be within [" + std::to_string(lo) + ", " + std::to_string(hi) + "]", value);
 }
 
+/// value <= hi, con un mensaje propio (por ejemplo, para sugerir la unidad correcta).
+inline void require_max(double value, double hi, const std::string& name, const std::string& hint) {
+    require_finite(value, name);
+    if (value > hi) throw std::invalid_argument("Domain error [RockMassPy]: parameter '" + name + "': " + hint);
+}
+
 }  // namespace rockmasspy::validation

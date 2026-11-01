@@ -10,6 +10,7 @@
 
 #include "rockmasspy/correlations.hpp"
 #include "rockmasspy/gsi.hpp"
+#include "rockmasspy/hoek_brown.hpp"
 #include "rockmasspy/method_info.hpp"
 #include "rockmasspy/q_system.hpp"
 #include "rockmasspy/rmr14.hpp"
@@ -219,4 +220,32 @@ NB_MODULE(_rockmasspy_core, m) {
           nb::arg("previous"), "Always raises: correlations must not be chained.");
     m.def("correlate", nb::overload_cast<Correlation, double>(&correlate), nb::arg("correlation"), nb::arg("value"),
           "Global correlation from a measured value.");
+
+    nb::enum_<HbEdition>(m, "HbEdition", "Hoek-Brown criterion edition.")
+        .value("HB2002", HbEdition::HB2002).value("HB2018", HbEdition::HB2018);
+    nb::enum_<HbApplication>(m, "HbApplication", "Application for the sigma3max limit.")
+        .value("Tunnel", HbApplication::Tunnel).value("Slope", HbApplication::Slope);
+    nb::class_<HbParams>(m, "HbParams", "Hoek-Brown mb, s, a with method info and warnings.")
+        .def_ro("mb", &HbParams::mb).def_ro("s", &HbParams::s).def_ro("a", &HbParams::a)
+        .def_ro("info", &HbParams::info).def_ro("warnings", &HbParams::warnings);
+    nb::class_<MohrCoulombFit>(m, "MohrCoulombFit", "Equivalent Mohr-Coulomb parameters.")
+        .def_ro("phi_deg", &MohrCoulombFit::phi_deg).def_ro("cohesion_mpa", &MohrCoulombFit::cohesion_mpa)
+        .def_ro("sigma3max_mpa", &MohrCoulombFit::sigma3max_mpa).def_ro("info", &MohrCoulombFit::info)
+        .def_ro("warnings", &MohrCoulombFit::warnings);
+    nb::class_<ModulusResult>(m, "ModulusResult", "Rock mass modulus with its unit.")
+        .def_ro("value", &ModulusResult::value).def_ro("unit", &ModulusResult::unit)
+        .def_ro("info", &ModulusResult::info).def_ro("warnings", &ModulusResult::warnings);
+    m.def("hb_params", &hb_params, nb::arg("gsi"), nb::arg("mi"), nb::arg("d"), nb::arg("edition") = HbEdition::HB2018,
+          "Hoek-Brown mb, s, a from GSI, mi and D.");
+    m.def("hb_sigma1", &hb_sigma1, nb::arg("sigma3_mpa"), nb::arg("sigma_ci_mpa"), nb::arg("params"));
+    m.def("hb_ucs", &hb_ucs, nb::arg("sigma_ci_mpa"), nb::arg("params"));
+    m.def("hb_tensile", &hb_tensile, nb::arg("sigma_ci_mpa"), nb::arg("params"));
+    m.def("hb_global_strength", &hb_global_strength, nb::arg("sigma_ci_mpa"), nb::arg("params"));
+    m.def("hb_sigma3max", &hb_sigma3max, nb::arg("sigma_cm_mpa"), nb::arg("unit_weight_mn_m3"),
+          nb::arg("depth_or_height_m"), nb::arg("application"));
+    m.def("hb_mohr_coulomb", &hb_mohr_coulomb, nb::arg("sigma_ci_mpa"), nb::arg("params"), nb::arg("sigma3max_mpa"));
+    m.def("em_hoek2002", &em_hoek2002, nb::arg("gsi"), nb::arg("d"), nb::arg("sigma_ci_mpa"));
+    m.def("erm_hoek_diederichs_simplified", &erm_hoek_diederichs_simplified, nb::arg("gsi"), nb::arg("d"));
+    m.def("erm_hoek_diederichs_generalized", &erm_hoek_diederichs_generalized, nb::arg("gsi"), nb::arg("d"),
+          nb::arg("ei_mpa"));
 }
