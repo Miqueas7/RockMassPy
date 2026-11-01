@@ -189,12 +189,12 @@ def load_json(path) -> LaborTable:
         return from_dict(json.load(f))
 
 
-def _optional(name: str):
-    """Importa una dependencia opcional; si falta, el error nombra el extra [io]."""
+def _optional(name: str, extra: str = "io"):
+    """Importa una dependencia opcional; si falta, el error nombra el extra ([io] por defecto, [viz] en gráficos)."""
     try:
         return importlib.import_module(name)
     except ImportError as e:
-        raise ImportError("install the optional extra: pip install rockmasspy[io]") from e
+        raise ImportError("install the optional extra: pip install rockmasspy[" + extra + "]") from e
 
 
 def _yaml():

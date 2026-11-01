@@ -1,7 +1,17 @@
 cmake==4.4.4
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.68.0
 hypothesis==6.170.14
+kiwisolver==1.5.1
+matplotlib==3.11.2
 nanobind==3.1.0
+numpy==2.5.4
 openpyxl==3.1.5
+packaging==26.3
+pillow==13.0.0
+pyparsing==3.3.3
 pytest==9.2.0
+python-dateutil==4.0.0
 PyYAML==6.0.3
 scikit_build_core==1.1.1
