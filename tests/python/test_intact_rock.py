@@ -9,6 +9,7 @@ def test_mi_known_values():
     assert rm.mi_lookup("Arenisca").mi == 17 and rm.mi_lookup("sandstone").plus_minus == 4
     assert rm.mi_lookup(" claystone ").mi == 4
     assert rm.mi_lookup("conglomerate").estimate is True  # entre paréntesis en la tabla 3
+    assert rm.mi_lookup("volcanic breccia").plus_minus == 5
 
 
 def test_mr_known_values():

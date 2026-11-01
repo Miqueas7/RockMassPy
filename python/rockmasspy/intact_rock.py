@@ -76,7 +76,7 @@ _MI = {
     "basalt": (25, 5, True, "igneous volcanic", "lava", "fine"),
     "obsidian": (19, 3, True, "igneous volcanic", "lava", "very fine"),
     "agglomerate": (19, 3, True, "igneous volcanic", "pyroclastic", "coarse"),
-    "volcanic breccia": (19, 3, True, "igneous volcanic", "pyroclastic", "medium"),
+    "volcanic breccia": (19, 5, True, "igneous volcanic", "pyroclastic", "medium"),
     "tuff": (13, 5, True, "igneous volcanic", "pyroclastic", "fine"),
 }
 
