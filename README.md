@@ -41,13 +41,20 @@ Tables validate (warn, never block), classify, and round-trip through JSON, YAML
 import rockmasspy as rm
 
 cat = rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("II", 2, bolt=rm.Bolt("split-set", 1.8, 1.5))])
-table = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(50, 100, "good", "I"), rm.RangeClass(0, 50, "poor", "II")])
+classes = [(80, "I", "I"), (60, "II", "I"), (40, "III", "II"), (20, "IV", "II"), (0, "V", "II")]
+table = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(lo, lo + 20, label, sup) for lo, label, sup in classes])
 labor = rm.LaborTable("gallery", cat, table, span_m=(3, 4))
 print(labor.validate())             # []
-print(labor.classify(53).support)   # SupportType(code='I', ...)
+c = labor.classify(53)
+print(c.label, c.support.code)      # III II
+print(labor.classify(40).label)     # IV
 ```
 
-The library recommends, the engineer decides. See `examples/02-tabla-por-labor/`.
+A value exactly on a class boundary (RMR 40) takes the worse class. The library recommends, the engineer decides.
+See `examples/02-tabla-por-labor/`.
+
+`RatingTable` (your own ratings per parameter, RMR89 by default) is available in Python. Saving it in the labor-table
+files (JSON, YAML, Excel) and importing it from CSV are deferred to phase 1C.
 
 ## Methods
 

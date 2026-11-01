@@ -48,7 +48,14 @@ def test_default_validates_clean():
 
 def test_gap_and_monotonic():
     t = rm.RatingTable("X", [rm.NumericParam("a", "u", (rm.RatingBin(0, 1, 5), rm.RatingBin(2, math.inf, 1)), "higher")])
-    assert {i.kind for i in t.validate()} == {"gap", "not_monotonic"}
+    assert {i.kind for i in t.validate()} == {"gap", "not_monotonic", "no_reference"}
+
+
+def test_unknown_edition_warns_no_reference():
+    t = rm.RatingTable("rmr89", rm.RatingTable.rmr89_default().params, rm.RatingTable.rmr89_default().adjustments)
+    issues = t.validate()
+    assert [(i.kind, i.message, i.edition) for i in issues] == [
+        ("no_reference", "no reference maxima for edition 'rmr89'; max_points not checked", "rmr89")]
 
 
 def test_missing_value_raises():

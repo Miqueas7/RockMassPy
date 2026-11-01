@@ -4,7 +4,7 @@ Librería open source de ingeniería de macizo rocoso para minería: clasificaci
 resistencia de Hoek-Brown, tablas personalizables por labor, gráficos, recomendación de sostenimiento, perfiles
 normativos por país, tajo abierto y predicción de sostenimiento con datos históricos. Núcleo en C++20 con API en Python.
 
-**Estado:** fase 1A (núcleo de cálculo) terminada en la rama `fase-1a`; aún sin versión publicada.
+**Estado:** fases 1A (núcleo de cálculo) y 1B (tablas por labor) terminadas en las ramas `fase-1a` y `fase-1b`; aún sin versión publicada.
 La librería recomienda, el ingeniero decide.
 
 ## Instalación (desde el código)
@@ -42,13 +42,20 @@ Las tablas validan (avisan, nunca bloquean), clasifican y van y vienen por JSON,
 import rockmasspy as rm
 
 cat = rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("II", 2, bolt=rm.Bolt("split-set", 1.8, 1.5))])
-table = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(50, 100, "buena", "I"), rm.RangeClass(0, 50, "mala", "II")])
+clases = [(80, "I", "I"), (60, "II", "I"), (40, "III", "II"), (20, "IV", "II"), (0, "V", "II")]
+table = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(lo, lo + 20, rotulo, tipo) for lo, rotulo, tipo in clases])
 labor = rm.LaborTable("galería", cat, table, span_m=(3, 4))
 print(labor.validate())             # []
-print(labor.classify(53).support)   # SupportType(code='I', ...)
+c = labor.classify(53)
+print(c.label, c.support.code)      # III II
+print(labor.classify(40).label)     # IV
 ```
 
-La librería recomienda, el ingeniero decide. Ver `examples/02-tabla-por-labor/`.
+Un valor justo en el límite de dos clases (RMR 40) toma la clase peor. La librería recomienda, el ingeniero decide.
+Ver `examples/02-tabla-por-labor/`.
+
+`RatingTable` (puntajes propios por parámetro, RMR89 por defecto) ya está disponible en Python. Guardarla en los archivos
+de la tabla por labor (JSON, YAML, Excel) e importarla desde CSV quedan para la fase 1C.
 
 ## Métodos
 

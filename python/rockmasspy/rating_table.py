@@ -172,4 +172,6 @@ class RatingTable:
                     issue("max_points", f"{p.name}: maximum is {mx:g}, RMR89 uses {ref}")
             if total != 100:
                 issue("max_points", f"total of maximum points is {total:g}, RMR89 totals 100")
+        else:  # esquema propio del usuario: se permite, pero no hay máximos contra qué comparar
+            issue("no_reference", f"no reference maxima for edition '{ed}'; max_points not checked")
         return out
