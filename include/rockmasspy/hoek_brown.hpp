@@ -70,6 +70,23 @@ inline double hb_sigma1(double sigma3_mpa, double sigma_ci_mpa, const HbParams& 
     return sigma3_mpa + sigma_ci_mpa * std::pow(std::max(0.0, p.mb * sigma3_mpa / sigma_ci_mpa + p.s), p.a);
 }
 
+struct NormalShear {
+    double sigma_n_mpa;
+    double tau_mpa;
+};
+
+/// Esfuerzos normal y de corte sobre la envolvente (Balmer; Hoek et al. 2002, ec. 8-10).
+/// En σ3 = σt la derivada dσ1/dσ3 es infinita: se devuelve el límite (σt, 0). Lanza si σ3 < σt.
+inline NormalShear hb_normal_shear(double sigma3_mpa, double sigma_ci_mpa, const HbParams& p) {
+    const double s1 = hb_sigma1(sigma3_mpa, sigma_ci_mpa, p);  // valida σ3 y σci
+    const double st = hb_tensile(sigma_ci_mpa, p);
+    if (std::abs(sigma3_mpa - st) <= 1e-12 * std::max(1.0, std::abs(st))) return {st, 0.0};
+    const double base = std::max(0.0, p.mb * sigma3_mpa / sigma_ci_mpa + p.s);
+    const double d = 1.0 + p.a * p.mb * std::pow(base, p.a - 1.0);
+    return {(s1 + sigma3_mpa) / 2.0 - (s1 - sigma3_mpa) / 2.0 * (d - 1.0) / (d + 1.0),
+            (s1 - sigma3_mpa) * std::sqrt(d) / (d + 1.0)};
+}
+
 /// σcm: resistencia global del macizo (rango σt < σ3 < σci/4).
 inline double hb_global_strength(double sigma_ci_mpa, const HbParams& p) {
     validation::require_positive(sigma_ci_mpa, "sigma_ci_mpa");

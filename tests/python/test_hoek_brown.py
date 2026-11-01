@@ -40,3 +40,16 @@ def test_moduli_with_damage():
 def test_unit_warning_sigma_ci():
     mc = rm.hb_mohr_coulomb(401, rm.hb_params(45, 10, 0), 1.0)
     assert mc.warnings == ["sigma_ci_mpa > 400: check the unit is MPa (not kg/cm2)"]
+
+
+def test_normal_shear_python():
+    p = rm.hb_params(45, 10, 0, rm.HbEdition.HB2002)
+    r = rm.hb_normal_shear(1.0, 50, p)
+    s1 = rm.hb_sigma1(1.0, 50, p)
+    assert (r.sigma_n_mpa - (s1 + 1) / 2) ** 2 + r.tau_mpa**2 == pytest.approx(((s1 - 1) / 2) ** 2, abs=1e-9)
+    st = rm.hb_tensile(50, p)
+    e = rm.hb_normal_shear(st, 50, p)
+    assert (e.sigma_n_mpa, e.tau_mpa) == (st, 0.0)
+    assert "tau_mpa" in repr(r)
+    with pytest.raises(ValueError):
+        rm.hb_normal_shear(st - 0.01, 50, p)

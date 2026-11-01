@@ -114,3 +114,29 @@ TEST(HoekBrown, ModuliWithDamage) {
     EXPECT_NEAR(erm_hoek_diederichs_generalized(45, 0.5, 20000).value, 2117.687, 0.001);
     EXPECT_NEAR(em_hoek2002(45, 0.5, 50).value, 3.976915, 1e-5);
 }
+// Balmer (Hoek 2002, ec. 8-10): el punto (σn, τ) es tangente al círculo de Mohr de diámetro σ1 − σ3.
+TEST(HoekBrown, NormalShearMohrIdentity) {
+    auto p = hb_params(45, 10, 0, HbEdition::HB2002);
+    double s1 = hb_sigma1(1.0, 50, p);
+    auto r = hb_normal_shear(1.0, 50, p);
+    double lhs = std::pow(r.sigma_n_mpa - (s1 + 1.0) / 2, 2) + r.tau_mpa * r.tau_mpa;
+    EXPECT_NEAR(lhs, std::pow((s1 - 1.0) / 2, 2), 1e-9);
+}
+TEST(HoekBrown, NormalShearTauGrowsWithSigmaN) {
+    auto p = hb_params(45, 10, 0, HbEdition::HB2002);
+    double st = hb_tensile(50, p), prev_n = st, prev_t = 0;
+    for (int i = 1; i <= 20; ++i) {
+        auto r = hb_normal_shear(st + (10.0 - st) * i / 20.0, 50, p);
+        EXPECT_GT(r.sigma_n_mpa, prev_n);
+        EXPECT_GT(r.tau_mpa, prev_t);
+        prev_n = r.sigma_n_mpa; prev_t = r.tau_mpa;
+    }
+}
+TEST(HoekBrown, NormalShearAtTensileLimit) {
+    auto p = hb_params(45, 10, 0, HbEdition::HB2002);
+    double st = hb_tensile(50, p);
+    auto r = hb_normal_shear(st, 50, p);
+    EXPECT_EQ(r.sigma_n_mpa, st);
+    EXPECT_EQ(r.tau_mpa, 0.0);
+    EXPECT_THROW(hb_normal_shear(st - 0.01, 50, p), std::invalid_argument);
+}

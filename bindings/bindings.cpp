@@ -277,6 +277,9 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("hb_params", &hb_params, nb::arg("gsi"), nb::arg("mi"), nb::arg("d"), nb::arg("edition") = HbEdition::HB2018,
           "Hoek-Brown mb, s, a from GSI, mi and D.");
     m.def("hb_sigma1", &hb_sigma1, nb::arg("sigma3_mpa"), nb::arg("sigma_ci_mpa"), nb::arg("params"));
+    nb::class_<NormalShear>(m, "NormalShear", "Normal and shear stress (MPa) on the Hoek-Brown envelope.")
+        .def_ro("sigma_n_mpa", &NormalShear::sigma_n_mpa).def_ro("tau_mpa", &NormalShear::tau_mpa);
+    m.def("hb_normal_shear", &hb_normal_shear, nb::arg("sigma3_mpa"), nb::arg("sigma_ci_mpa"), nb::arg("params"));
     m.def("hb_ucs", &hb_ucs, nb::arg("sigma_ci_mpa"), nb::arg("params"));
     m.def("hb_tensile", &hb_tensile, nb::arg("sigma_ci_mpa"), nb::arg("params"));
     m.def("hb_global_strength", &hb_global_strength, nb::arg("sigma_ci_mpa"), nb::arg("params"));
