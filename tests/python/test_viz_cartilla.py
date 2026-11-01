@@ -207,3 +207,38 @@ def test_muestra_hoek_marinos():
     base = dict(span_m=(3.0, 4.0), author="Área de Geomecánica", date="2026-11-01")
     save_figure(plot_cartilla(_labor(CellTable(ch, cells), **base), style=Style(size="cartilla")),
                 Path(d) / "t8_cartilla_hoek_marinos_es.png")
+
+
+def _textos(fig):
+    return [t.get_text() for t in fig.findobj(lambda a: hasattr(a, "get_text"))]
+
+
+def _tabla_label_igual_codigo():
+    import rockmasspy as rm
+    cat = rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("V", 2)])
+    rt = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 20, "V", "V"), rm.RangeClass(20, 100, "I", "I")])
+    return rm.LaborTable("galería", cat, rt), rt, cat
+
+
+def test_rango_no_repite_codigo_cuando_label_igual_support():
+    from rockmasspy.viz import plot_cartilla
+    t, _, _ = _tabla_label_igual_codigo()
+    txt = _textos(plot_cartilla(t))
+    assert not any(s.strip().endswith("V") and "(0–20)" in s and s.strip().startswith("V") and s.count("V") > 1
+                   for s in txt)
+    assert any(s.strip() == "V  (0–20)" for s in txt)
+
+
+def test_histograma_no_repite_codigo_cuando_label_igual_support():
+    from rockmasspy.viz import plot_class_histogram
+    _, rt, cat = _tabla_label_igual_codigo()
+    txt = _textos(plot_class_histogram([5, 50], rt, catalog=cat))
+    assert "V · V" not in txt and "V" in txt
+
+
+def test_subtitulo_oculto_si_el_titulo_trae_el_tipo_de_labor():
+    from rockmasspy.viz import plot_cartilla
+    t, _, _ = _tabla_label_igual_codigo()
+    assert "galería" not in _textos(plot_cartilla(t, title="Galeria (sintético)"))
+    assert "galería" in _textos(plot_cartilla(t, title="Otro título"))
+    assert "galería" in _textos(plot_cartilla(t))

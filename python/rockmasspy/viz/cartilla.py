@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from ..cell_table import CellTable
+from ..intact_rock import _strip
 from ..labor_table import LaborTable
 from ..range_table import RANGE_METHODS
 from ..support import SupportType
@@ -70,7 +71,9 @@ def _header(fig, table: LaborTable, title, style):
     if title:
         fig.text(0.5, y, title, ha="center", va="top", fontsize=style.font_size + 5, fontweight="bold")
         y -= 0.03
-    fig.text(0.5, y, table.labor_type, ha="center", va="top", fontsize=style.font_size + 3, fontweight="bold")
+    # el subtítulo se omite si el título ya trae el tipo de labor (sin mayúsculas ni tildes)
+    if not (title and _strip(table.labor_type).lower() in _strip(title).lower()):
+        fig.text(0.5, y, table.labor_type, ha="center", va="top", fontsize=style.font_size + 3, fontweight="bold")
     bits = []
     if table.span_m:
         bits.append(f"{text('span', lang)} {table.span_m[0]:.1f}–{table.span_m[1]:.1f} m")
@@ -83,6 +86,8 @@ def _header(fig, table: LaborTable, title, style):
 
 
 def _cells(fig, table: LaborTable, rect, colors, style, show_lines):
+    from matplotlib.patheffects import withStroke
+
     chart, ct = table.table.chart, table.table
     by_cell = {c.cell: c for c in ct.cells}
     ax = fig.add_axes(rect)
@@ -97,7 +102,7 @@ def _cells(fig, table: LaborTable, rect, colors, style, show_lines):
                 p = _rect(k, r, 1, 1, _DASHED)
                 p.set_gid(f"dashed:{code}")
                 ax.add_patch(p)
-                ax.plot([k, k + 1], [r + 1, r], color="0.45", linewidth=0.8)
+                ax.plot([k, k + 1], [r + 1, r], color="0.75", linewidth=0.8, linestyle=(0, (3, 3)))
                 continue
             known = cell is not None and cell.support in colors
             bg = colors[cell.support] if known else _UNDEFINED
@@ -105,8 +110,11 @@ def _cells(fig, table: LaborTable, rect, colors, style, show_lines):
             p.set_gid(code)
             ax.add_patch(p)
             second = cell.support if known else text("undefined", style.lang)
-            ax.text(k + 0.5, r + 0.5, f"{code}\n{second}", ha="center", va="center", color=_ink(bg),
-                    fontsize=style.font_size)
+            ink = _ink(bg)
+            # contorno del color opuesto y zorder alto: las líneas RMR′ no cortan el texto
+            halo = [withStroke(linewidth=3, foreground="white" if ink == "black" else "#222222")]
+            ax.text(k + 0.5, r + 0.5, f"{code}\n{second}", ha="center", va="center", color=ink,
+                    fontsize=style.font_size, zorder=5, path_effects=halo)
     if show_lines:
         _rmr_lines(ax, ns, nc, style)
     ax.set_xticks([k + 0.5 for k in range(nc)], [f"{c}\n{_axis_label('cond', c, lbl, style.lang)}" for c, lbl in chart.conditions],
@@ -152,7 +160,10 @@ def _ranges(fig, table: LaborTable, rect, colors, style):
         known = c.support in colors
         bg = colors[c.support] if known else _UNDEFINED
         ax.add_patch(_rect(lo, i + 0.1, hi - lo, 0.8, bg))
-        label = f"{c.label}  ({c.lo:g}–{c.hi:g})  {c.support if known else text('undefined', style.lang)}"
+        second = c.support if known else text('undefined', style.lang)
+        label = f"{c.label}  ({c.lo:g}–{c.hi:g})"
+        if second != c.label.strip():  # etiqueta igual al código: se muestra una sola vez
+            label += f"  {second}"
         kw = dict(va="center", fontsize=style.font_size)
         mid = (lo * hi) ** 0.5 if log else (lo + hi) / 2
         pad = (lambda v, f: v * f) if log else (lambda v, f: v + (f - 1) * 20)

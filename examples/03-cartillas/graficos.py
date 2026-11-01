@@ -3,6 +3,7 @@
 Necesita el extra de gráficos: pip install "rockmasspy[viz]". La librería recomienda, el ingeniero decide.
 """
 import dataclasses
+import importlib.util
 import math
 import random
 import sys
@@ -12,8 +13,10 @@ import rockmasspy as rm
 import rockmasspy.viz as viz
 
 # Reutiliza el catálogo y las tablas del ejemplo 02 (la carpeta tiene guion: no se puede importar como paquete).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "02-tabla-por-labor"))
-import tabla  # noqa: E402
+_spec = importlib.util.spec_from_file_location(
+    "_ejemplo02_tabla", Path(__file__).resolve().parents[1] / "02-tabla-por-labor" / "tabla.py")
+tabla = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(tabla)
 
 
 def main(out_dir: Path) -> dict:
@@ -27,8 +30,9 @@ def main(out_dir: Path) -> dict:
     a4 = viz.Style(lang="es", size="A4", brand="Ejemplo sintético")
     guardar = viz.save_figure
 
-    guardar(viz.plot_cartilla(tajeo, style=vallejo, title="Tajeo (sintético)"), out_dir / "cartilla_celdas.png")
-    guardar(viz.plot_cartilla(tajeo, style=vallejo, title="Tajeo (sintético)"), out_dir / "cartilla_celdas.pdf")
+    fig = viz.plot_cartilla(tajeo, style=vallejo, title="Tajeo (sintético)")  # una figura, dos formatos
+    guardar(fig, out_dir / "cartilla_celdas.png")
+    guardar(fig, out_dir / "cartilla_celdas.pdf")
     guardar(viz.plot_cartilla(galeria, style=vallejo, title="Galería (sintético)"), out_dir / "cartilla_rango.png")
 
     # Cinco puntos (JCond89, RQD)
