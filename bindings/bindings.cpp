@@ -8,6 +8,8 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include "rockmasspy/correlations.hpp"
+#include "rockmasspy/gsi.hpp"
 #include "rockmasspy/method_info.hpp"
 #include "rockmasspy/q_system.hpp"
 #include "rockmasspy/rmr14.hpp"
@@ -191,4 +193,30 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("warnings", &EquivalentDimension::warnings);
     m.def("equivalent_dimension", &equivalent_dimension, nb::arg("span_or_height_m"), nb::arg("esr"), nb::arg("q"),
           nb::arg("esr_category"), "Equivalent dimension De = span or height / ESR.");
+
+    nb::class_<GsiResult>(m, "GsiResult")
+        .def_ro("gsi", &GsiResult::gsi).def_ro("info", &GsiResult::info).def_ro("warnings", &GsiResult::warnings);
+    m.def("gsi_from_jcond89_rqd", &gsi_from_jcond89_rqd, nb::arg("jcond89"), nb::arg("rqd_pct"),
+          "Quantified GSI (Hoek, Carter & Diederichs 2013): 1.5*JCond89 + RQD/2.");
+    m.def("gsi_from_jcond76_rqd", &gsi_from_jcond76_rqd, nb::arg("jcond76"), nb::arg("rqd_pct"),
+          "Quantified GSI (Hoek, Carter & Diederichs 2013): 2*JCond76 + RQD/2.");
+    m.def("jcond89_from_jr_ja", &jcond89_from_jr_ja, nb::arg("jr"), nb::arg("ja"));
+
+    nb::enum_<Correlation>(m, "Correlation", "Global correlations between systems (high scatter).")
+        .value("RmrFromQ_Bieniawski1976", Correlation::RmrFromQ_Bieniawski1976)
+        .value("RmrFromQ_Huang2026", Correlation::RmrFromQ_Huang2026)
+        .value("GsiFromQPrime_Hoek1995", Correlation::GsiFromQPrime_Hoek1995)
+        .value("GsiFromRmr89Prime_HoekDiederichs2006", Correlation::GsiFromRmr89Prime_HoekDiederichs2006)
+        .value("GsiFromRmr76Prime_HoekDiederichs2006", Correlation::GsiFromRmr76Prime_HoekDiederichs2006)
+        .value("Rmr14FromRmr89_Osinergmin2017", Correlation::Rmr14FromRmr89_Osinergmin2017)
+        .value("Rmr76FromRmr89_Osinergmin2017", Correlation::Rmr76FromRmr89_Osinergmin2017);
+    nb::class_<CorrelationResult>(m, "CorrelationResult")
+        .def_ro("value", &CorrelationResult::value).def_ro("from_", &CorrelationResult::from)
+        .def_ro("to", &CorrelationResult::to).def_ro("info", &CorrelationResult::info)
+        .def_ro("warnings", &CorrelationResult::warnings);
+    // The result overload goes first so a CorrelationResult is never implicitly converted to a float.
+    m.def("correlate", nb::overload_cast<Correlation, const CorrelationResult&>(&correlate), nb::arg("correlation"),
+          nb::arg("previous"), "Always raises: correlations must not be chained.");
+    m.def("correlate", nb::overload_cast<Correlation, double>(&correlate), nb::arg("correlation"), nb::arg("value"),
+          "Global correlation from a measured value.");
 }
