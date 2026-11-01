@@ -8,18 +8,22 @@ lanza ValueError con la hoja, la fila (de Excel, la cabecera es la 1) y la colum
 import datetime
 import math
 
-from . import _rockmasspy_core as _rm
 from .cell_table import CellClass
 from .labor_table import LaborTable
 from .range_table import RangeClass
 from .support import SupportCatalog
-from .table_io import _bool, _optional, catalog_from_dicts, from_dict, to_dict
+from .table_io import _at, _bool, _optional, correlation_from_dict, from_dict, support_from_dict, to_dict
 
 TIPOS = ("codigo_tipo", "orden", "descripcion", "perno_tipo", "perno_longitud_m", "perno_espaciamiento_m",
          "shotcrete_espesor_mm", "shotcrete_fibra", "malla", "cimbra", "costo_relativo")
 CLASES = ("desde", "hasta", "clase", "tipo")
 CELDAS = ("celda", "tipo", "gsi_min", "gsi_max", "rotulo")
 CORRELACIONES = ("nombre", "desde", "hacia", "forma", "a", "b", "valido_min", "valido_max", "fuente")
+PERNO = ("perno_tipo", "perno_longitud_m", "perno_espaciamiento_m")
+# campo de la hoja Tabla para cada ruta de from_dict (los errores se ubican con el nombre en español)
+CAMPOS = {"schema": "schema", "version": "version", "labor_type": "labor_type", "span_m": "luz_min_m/luz_max_m",
+          "author": "autor", "date": "fecha", "notes": "notas", "table.kind": "tipo_tabla", "table.method": "metodo",
+          "table.base_edition": "edicion_base", "table.chart": "cartilla"}
 
 
 def _where(sheet, row, col):
@@ -85,10 +89,7 @@ def _sheet_rows(wb, sheet, cols, required, numeric, boolean=()):
 
 def _row(sheet, n, build, *args):
     """Construye el objeto de una fila; si la validación falla, el error ubica la hoja y la fila."""
-    try:
-        return build(*args)
-    except (ValueError, KeyError) as e:
-        raise ValueError(f"sheet '{sheet}', row {n}: {e}") from e
+    return _at(f"sheet '{sheet}', row {n}", build, *args)
 
 
 def _support_dicts(wb, sheet):
@@ -97,12 +98,18 @@ def _support_dicts(wb, sheet):
                        {"shotcrete_fibra"})
     out = []
     for n, r in rows:
+        # un elemento a medio llenar nunca se descarta en silencio
+        vacias = [c for c in PERNO if r[c] is None]
+        if 0 < len(vacias) < len(PERNO):
+            raise ValueError(f"{_where(sheet, n, vacias[0])}: required when the bolt is given")
+        sin_shot = not r["shotcrete_espesor_mm"]  # espesor vacío o 0 = sin shotcrete, salvo que pidan fibra
+        if sin_shot and r["shotcrete_fibra"]:
+            raise ValueError(f"{_where(sheet, n, 'shotcrete_espesor_mm')}: required when the shotcrete is given")
         out.append((n, {
             "code": r["codigo_tipo"], "order": r["orden"], "description": r["descripcion"] or "",
-            "bolt": None if r["perno_tipo"] is None else
+            "bolt": None if vacias else
             {"kind": r["perno_tipo"], "length_m": r["perno_longitud_m"], "spacing_m": r["perno_espaciamiento_m"]},
-            # espesor vacío o 0 = sin shotcrete
-            "shotcrete": None if not r["shotcrete_espesor_mm"] else
+            "shotcrete": None if sin_shot else
             {"thickness_mm": r["shotcrete_espesor_mm"], "fiber": bool(r["shotcrete_fibra"])},
             "mesh": r["malla"], "arch": r["cimbra"], "relative_cost": r["costo_relativo"],
         }))
@@ -114,18 +121,17 @@ def _open(path):
 
 
 def _catalog(wb, sheet):
+    """(dicts para from_dict, catálogo): valida fila por fila para ubicar la celda."""
     pairs = _support_dicts(wb, sheet)
-    for n, d in pairs:  # valida fila por fila para ubicar la celda
-        _row(sheet, n, catalog_from_dicts, [d])
-    catalog_from_dicts([d for _, d in pairs])  # duplicados entre filas
-    return [d for _, d in pairs]
+    types = [_row(sheet, n, support_from_dict, d) for n, d in pairs]
+    return [d for _, d in pairs], _at(f"sheet '{sheet}'", SupportCatalog, types)  # duplicados entre filas
 
 
 def load_support_catalog_excel(path, sheet: str = "Tipos_sostenimiento") -> SupportCatalog:
     """Lee solo esa hoja; sirve también para la plantilla del histórico ya llena."""
     wb = _open(path)
     try:
-        return catalog_from_dicts(_catalog(wb, sheet))
+        return _catalog(wb, sheet)[1]
     finally:
         wb.close()
 
@@ -152,7 +158,7 @@ def _load(wb) -> LaborTable:
     lo, hi = numero("luz_min_m"), numero("luz_max_m")
     if (lo is None) != (hi is None):
         raise ValueError("sheet 'Tabla': luz_min_m and luz_max_m must come together")
-    tipos = _catalog(wb, "Tipos_sostenimiento")  # ubica errores de validación por fila
+    tipos = _catalog(wb, "Tipos_sostenimiento")[0]  # ubica errores de validación por fila
     d = {"schema": campos.get("schema"), "version": numero("version"), "labor_type": campos.get("labor_type"),
          "span_m": None if lo is None else [lo, hi], "author": campos.get("autor"), "date": campos.get("fecha"),
          "notes": campos.get("notas"), "support_types": tipos}
@@ -170,13 +176,23 @@ def _load(wb) -> LaborTable:
                  r["rotulo"] or "")
             cells.append({"cell": r["celda"], "support": r["tipo"], "label": r["rotulo"] or "",
                           "gsi_range": None if r["gsi_min"] is None else [r["gsi_min"], r["gsi_max"]]})
-        d["table"] = {"kind": "cells", "chart": campos.get("cartilla"), "cells": cells}
+        d["table"] = {"kind": "cells", "chart": campos.get("cartilla"), "base_edition": campos.get("edicion_base"),
+                      "cells": cells}
     else:
         raise ValueError(f"sheet 'Tabla': tipo_tabla must be 'range' or 'cells', got '{kind}'")
     d["correlations"] = [] if "Correlaciones" not in wb.sheetnames else [
         _corr(n, r) for n, r in _sheet_rows(wb, "Correlaciones", CORRELACIONES, {"nombre", "desde", "hacia", "forma"},
                                             {"a", "b", "valido_min", "valido_max"})]
-    return from_dict(d)
+    try:
+        return from_dict(d)
+    except ValueError as e:  # lo que queda por validar es de la hoja Tabla (o de la tabla de celdas entera)
+        ruta, _, resto = str(e).partition(": ")
+        if ruta in CAMPOS:
+            raise ValueError(f"sheet 'Tabla', campo '{CAMPOS[ruta]}': {resto}") from e
+        if ruta == "table":
+            hoja = "sheet 'Tabla', campo 'metodo/edicion_base'" if kind == "range" else "sheet 'Celdas'"
+            raise ValueError(f"{hoja}: {resto}") from e
+        raise
 
 
 def _clases(wb):
@@ -189,13 +205,7 @@ def _clases(wb):
 def _corr(n, r):
     d = {"name": r["nombre"], "from": r["desde"], "to": r["hacia"], "form": r["forma"], "a": r["a"], "b": r["b"],
          "valid_min": r["valido_min"], "valid_max": r["valido_max"], "source": r["fuente"] or ""}
-
-    def build():  # misma construcción que from_dict, solo para ubicar la fila
-        if d["form"] not in _rm.CorrelationForm.__members__:
-            raise ValueError(f"form: expected one of {list(_rm.CorrelationForm.__members__)}, got {d['form']!r}")
-        _rm.CustomCorrelation(name=d["name"], from_=d["from"], to=d["to"], form=_rm.CorrelationForm.__members__[d["form"]],
-                              a=d["a"], b=d["b"], valid_min=d["valid_min"], valid_max=d["valid_max"], source=d["source"])
-    _row("Correlaciones", n, build)
+    _row("Correlaciones", n, correlation_from_dict, d)  # mismo constructor que from_dict, solo para ubicar la fila
     return d
 
 

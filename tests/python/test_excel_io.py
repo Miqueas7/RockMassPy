@@ -152,3 +152,105 @@ def test_validation_error_in_classes_row(tmp_path):
         wb["Clases"].cell(row=3, column=2).value = 10
     with pytest.raises(ValueError, match=r"sheet 'Clases', row 3: "):
         rm.load_excel(_edit(tmp_path, range_lt, f))
+
+
+CORR_COL = {c: i + 1 for i, c in enumerate(("nombre", "desde", "hacia", "forma", "a", "b", "valido_min", "valido_max",
+                                              "fuente"))}
+
+
+def _excel_error(tmp_path, make, fn):
+    with pytest.raises(ValueError) as e:
+        rm.load_excel(_edit(tmp_path, make, fn))
+    return str(e.value)
+
+
+def test_correlation_error_locates_row(tmp_path):
+    def f(wb):
+        wb["Correlaciones"].cell(row=2, column=CORR_COL["valido_min"]).value = 500
+    msg = _excel_error(tmp_path, range_lt, f)
+    assert msg.startswith("sheet 'Correlaciones', row 2: ") and "valid_min" in msg and "correlations[" not in msg
+
+    def g(wb):
+        wb["Correlaciones"].cell(row=2, column=CORR_COL["forma"]).value = "Cubic"
+    assert _excel_error(tmp_path, range_lt, g).startswith("sheet 'Correlaciones', row 2: form: expected one of")
+
+
+def test_cell_error_locates_row(tmp_path):
+    def f(wb):
+        ws = wb["Celdas"]
+        ws.cell(row=3, column=3).value = 60  # gsi_min
+        ws.cell(row=3, column=4).value = 40  # gsi_max
+    assert _excel_error(tmp_path, cells_lt, f).startswith("sheet 'Celdas', row 3: gsi_range must satisfy")
+
+    def g(wb):
+        wb["Celdas"].cell(row=3, column=1).value = "F/R"  # celda repetida
+    assert _excel_error(tmp_path, cells_lt, g) == "sheet 'Celdas': cell F/R is defined twice"
+
+
+def test_half_filled_bolt_is_an_error(tmp_path):
+    p = libro(tmp_path, [["I", 1, "", None, None, None, None, None, None, None, None],
+                         ["II", 2, "", "Split Set", 1.8, None, None, None, None, None, None]])
+    with pytest.raises(ValueError) as e:
+        rm.load_support_catalog_excel(p)
+    assert str(e.value) == "sheet 'Tipos_sostenimiento', row 3, column 'perno_espaciamiento_m': required when the bolt is given"
+    p = libro(tmp_path, [["II", 2, "", None, 1.8, 1.2, None, None, None, None, None]])
+    with pytest.raises(ValueError) as e:
+        rm.load_support_catalog_excel(p)
+    assert str(e.value) == "sheet 'Tipos_sostenimiento', row 2, column 'perno_tipo': required when the bolt is given"
+
+
+def test_fiber_without_thickness_is_an_error(tmp_path):
+    for espesor in (None, 0):
+        p = libro(tmp_path, [["II", 2, "", None, None, None, espesor, "si", None, None, None]])
+        with pytest.raises(ValueError) as e:
+            rm.load_support_catalog_excel(p)
+        assert str(e.value) == ("sheet 'Tipos_sostenimiento', row 2, column 'shotcrete_espesor_mm': "
+                                "required when the shotcrete is given")
+    p = libro(tmp_path, [["I", 1, "", None, None, None, 0, "no", None, None, None]])
+    assert rm.load_support_catalog_excel(p).get("I").shotcrete is None
+
+
+def test_row_validation_has_no_dict_path(tmp_path):
+    p = libro(tmp_path, [["I", 1, "", None, None, None, None, None, None, None, None],
+                         ["II", 2, "", "Split Set", -3, 1.2, None, None, None, None, None]])
+    with pytest.raises(ValueError) as e:
+        rm.load_support_catalog_excel(p)
+    assert str(e.value) == "sheet 'Tipos_sostenimiento', row 3: length_m must be finite and > 0, got -3"
+    p = libro(tmp_path, [["I", 1, "", None, None, None, None, None, None, None, None],
+                         ["I", 2, "", None, None, None, None, None, None, None, None]])
+    with pytest.raises(ValueError) as e:
+        rm.load_support_catalog_excel(p)
+    assert str(e.value) == "sheet 'Tipos_sostenimiento': duplicate support code 'I'"
+
+
+def test_tabla_errors_name_the_campo(tmp_path):
+    def fecha(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "fecha"), column=2).value = "01/11/2026"
+    assert _excel_error(tmp_path, range_lt, fecha) == "sheet 'Tabla', campo 'fecha': expected yyyy-mm-dd, got '01/11/2026'"
+
+    def luz(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "luz_min_m"), column=2).value = 9
+    assert _excel_error(tmp_path, range_lt, luz).startswith("sheet 'Tabla', campo 'luz_min_m/luz_max_m': must satisfy")
+
+    def edicion(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "edicion_base"), column=2).value = "RMR2000"
+    assert _excel_error(tmp_path, range_lt, edicion).startswith("sheet 'Tabla', campo 'metodo/edicion_base': unknown edition")
+
+
+def test_cells_edicion_base_must_match_cartilla(tmp_path):
+    def f(wb):
+        ws = wb["Tabla"]
+        ws.cell(row=_campo_row(ws, "edicion_base"), column=2).value = "GSI-2013"
+    assert _excel_error(tmp_path, cells_lt, f).startswith("sheet 'Tabla', campo 'edicion_base': expected the chart id")
+
+
+def test_empty_texts_survive_excel(tmp_path):
+    cat = rm.SupportCatalog([rm.SupportType("I", 1, " "),
+                             rm.SupportType("II", 2, "x", rm.Bolt("split set", 2, 1), mesh="", arch=" ")])
+    t = rm.LaborTable("galería", cat, rm.CellTable(rm.GSI_CHARTS["GSI-Vallejo-Osinergmin2017"],
+                                                    [rm.CellClass("F/R", "II", label=" ")]))
+    rm.save_excel(t, tmp_path / "t.xlsx")
+    assert rm.load_excel(tmp_path / "t.xlsx") == t

@@ -43,3 +43,10 @@ def test_custom_correlation():
     with pytest.raises(ValueError):
         rm.correlate_custom(c, 0.0)
     assert c == rm.CustomCorrelation("mineA-RMR-Q", "Q", "RMR89", rm.CorrelationForm.LogLinear, 7.5, 47.0, 0.01, 100.0, "site fit")
+
+
+def test_custom_correlation_validated_on_construction():
+    ok = dict(name="g", from_="A", to="B", form=rm.CorrelationForm.Linear, a=1.0, b=0.0, valid_min=0.0, valid_max=1.0)
+    for bad in (dict(valid_min=2.0), dict(name=""), dict(to=""), dict(a=float("nan"))):
+        with pytest.raises(ValueError):
+            rm.CustomCorrelation(**{**ok, **bad})

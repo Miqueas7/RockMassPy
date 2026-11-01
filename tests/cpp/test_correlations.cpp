@@ -86,6 +86,10 @@ TEST(Correlations, CustomValidationAndEquality) {
     EXPECT_THROW(correlate_custom(bad([](auto& c) { c.valid_min = 100; }), 1.0), std::invalid_argument);
     EXPECT_THROW(correlate_custom(CustomCorrelation{}, 1.0), std::invalid_argument);
     EXPECT_THROW(correlate_custom(ok, std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+    EXPECT_NO_THROW(validate_custom(ok));
+    EXPECT_THROW(validate_custom(bad([](auto& c) { c.valid_max = -1; })), std::invalid_argument);
+    EXPECT_THROW(validate_custom(bad([](auto& c) { c.b = std::numeric_limits<double>::infinity(); })), std::invalid_argument);
+    EXPECT_THROW(validate_custom(CustomCorrelation{}), std::invalid_argument);
     EXPECT_TRUE(ok == ok);
     EXPECT_FALSE(ok == bad([](auto& c) { c.a = 2.0; }));
 }

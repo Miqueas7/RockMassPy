@@ -23,8 +23,9 @@ class CellClass:
 
     def __post_init__(self):
         object.__setattr__(self, "cell", normalize_cell(self.cell))
-        if isinstance(self.support, str):
-            object.__setattr__(self, "support", self.support.strip() or None)
+        if self.support is not None:  # un código numérico de YAML (support: 3) pasa a texto
+            object.__setattr__(self, "support", str(self.support).strip() or None)
+        object.__setattr__(self, "label", (self.label or "").strip())
         if self.gsi_range is not None:
             lo, hi = self.gsi_range
             if not (math.isfinite(lo) and math.isfinite(hi) and 0 <= lo < hi <= 100):

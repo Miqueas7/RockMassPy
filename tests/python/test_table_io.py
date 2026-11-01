@@ -125,3 +125,98 @@ def test_equality_by_content():
     assert r == rm.RangeTable("RMR", "RMR89", reversed(r.classes)) and r != rtab("II")
     c = ctab()
     assert c == rm.CellTable(c.chart, reversed(c.cells)) and c != rm.CellTable(c.chart, c.cells[:1])
+
+
+def test_constructor_errors_carry_the_path():
+    d = rm.to_dict(range_lt())
+    d["table"]["classes"][1]["lo"] = 70
+    with pytest.raises(ValueError, match=r"^table\.classes\[1\]: class lo must be < hi"):
+        rm.from_dict(d)
+    d = rm.to_dict(range_lt())
+    d["support_types"] = [1]
+    with pytest.raises(ValueError, match=r"^support_types\[0\]: expected an object$"):
+        rm.from_dict(d)
+    d = rm.to_dict(range_lt())
+    d["support_types"][2]["bolt"]["length_m"] = -1
+    with pytest.raises(ValueError, match=r"^support_types\[2\]\.bolt: length_m must be"):
+        rm.from_dict(d)
+    d["support_types"][2]["bolt"]["kind"] = " "
+    with pytest.raises(ValueError, match=r"^support_types\[2\]\.bolt: kind is required$"):
+        rm.from_dict(d)
+    d = rm.to_dict(range_lt())
+    d["support_types"][1]["code"] = "I"
+    with pytest.raises(ValueError, match=r"^support_types: duplicate support code 'I'$"):
+        rm.from_dict(d)
+    d = rm.to_dict(range_lt())
+    d["table"]["method"] = "RMX"
+    with pytest.raises(ValueError, match=r"^table: unknown method 'RMX'"):
+        rm.from_dict(d)
+
+
+@pytest.mark.parametrize("bad", [["a", "b"], [1, 2, 3], [1], "3-4", [True, 4]])
+def test_span_must_be_two_numbers(bad):
+    d = rm.to_dict(range_lt())
+    d["span_m"] = bad
+    with pytest.raises(ValueError, match=r"^span_m: expected a list"):
+        rm.from_dict(d)
+    d["span_m"] = [4, 3]
+    with pytest.raises(ValueError, match=r"^span_m: must satisfy 0 < lo < hi"):
+        rm.from_dict(d)
+
+
+def test_gsi_range_must_be_two_numbers():
+    d = rm.to_dict(full_lt())
+    d["table"]["cells"][0]["gsi_range"] = ["x", 2]
+    with pytest.raises(ValueError, match=r"^table\.cells\[0\]\.gsi_range: expected a list of 2 numbers"):
+        rm.from_dict(d)
+    d["table"]["cells"][0]["gsi_range"] = [60, 40]
+    with pytest.raises(ValueError, match=r"^table\.cells\[0\]: gsi_range must satisfy"):
+        rm.from_dict(d)
+    d["table"]["cells"] = [5]
+    with pytest.raises(ValueError, match=r"^table\.cells\[0\]: expected an object$"):
+        rm.from_dict(d)
+
+
+def test_correlation_validated_on_load():
+    d = rm.to_dict(range_lt())
+    d["correlations"][0]["valid_min"], d["correlations"][0]["valid_max"] = 100.0, 0.1
+    with pytest.raises(ValueError, match=r"^correlations\[0\]: .*valid_min"):
+        rm.from_dict(d)
+    d = rm.to_dict(range_lt())
+    d["correlations"][0]["name"] = ""
+    with pytest.raises(ValueError, match=r"^correlations\[0\]: .*'name' is required"):
+        rm.from_dict(d)
+    d["correlations"] = ["x"]
+    with pytest.raises(ValueError, match=r"^correlations\[0\]: expected an object$"):
+        rm.from_dict(d)
+
+
+def test_yaml_numeric_support_code(tmp_path):
+    yaml = pytest.importorskip("yaml")
+    d = rm.to_dict(range_lt())
+    d["support_types"] = [{"code": "3", "order": 1}]
+    d["table"]["classes"] = [{"lo": 0, "hi": 100, "label": "única", "support": 3}]
+    (tmp_path / "t.yaml").write_text(yaml.safe_dump(d, allow_unicode=True), encoding="utf-8")
+    assert "support: 3" in (tmp_path / "t.yaml").read_text(encoding="utf-8")
+    t = rm.load_yaml(tmp_path / "t.yaml")
+    assert t.table.classes[0].support == "3" and t.classify(50).support.code == "3"
+
+
+def test_date_validated_and_yaml_datetime():
+    import datetime
+    d = rm.to_dict(range_lt())
+    d["date"] = "2026-13-45"
+    with pytest.raises(ValueError, match=r"^date: expected yyyy-mm-dd, got '2026-13-45'$"):
+        rm.from_dict(d)
+    d["date"] = datetime.datetime(2026, 11, 1, 10, 30)
+    assert rm.from_dict(d).date == "2026-11-01"
+
+
+def test_cells_base_edition_written_and_checked():
+    d = rm.to_dict(cells_lt())
+    assert d["table"]["base_edition"] == d["table"]["chart"] == "GSI-Vallejo-Osinergmin2017"
+    del d["table"]["base_edition"]
+    assert rm.from_dict(d) == cells_lt()  # opcional al leer
+    d["table"]["base_edition"] = "GSI-2013"
+    with pytest.raises(ValueError, match=r"^table\.base_edition: expected the chart id"):
+        rm.from_dict(d)

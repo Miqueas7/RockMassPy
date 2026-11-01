@@ -32,7 +32,7 @@ def to_dict(t: LaborTable) -> dict:
         table = {"kind": "range", "method": t.table.method, "base_edition": t.table.base_edition,
                  "classes": [{"lo": c.lo, "hi": c.hi, "label": c.label, "support": c.support} for c in t.table.classes]}
     else:
-        table = {"kind": "cells", "chart": t.table.base_edition,
+        table = {"kind": "cells", "chart": t.table.base_edition, "base_edition": t.table.base_edition,
                  "cells": [{"cell": c.cell, "support": c.support,
                             "gsi_range": None if c.gsi_range is None else list(c.gsi_range), "label": c.label}
                            for c in t.table.cells]}
@@ -78,26 +78,59 @@ def _bool(v, path):
 
 
 def _opt(d, key, path, kind=None, default=None):
-    return default if d.get(key) is None else _get(d, key, path, kind)
+    # si d no es un objeto, _get lanza «expected an object» con la ruta
+    return default if isinstance(d, Mapping) and d.get(key) is None else _get(d, key, path, kind)
+
+
+def _pair(d, key, path):
+    """[lo, hi] opcional: exactamente dos números, o None."""
+    v = _opt(d, key, path, "list")
+    if v is not None and (len(v) != 2 or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in v)):
+        raise ValueError(f"{f'{path}.{key}' if path else key}: expected a list of 2 numbers, got {v!r}")
+    return None if v is None else tuple(v)
+
+
+def _at(path, build, *args, **kw):
+    """Construye un objeto; cualquier error de sus datos sale como ValueError que nombra la ruta."""
+    try:
+        return build(*args, **kw)
+    except (ValueError, TypeError, AttributeError, KeyError) as e:
+        msg = e.args[0] if isinstance(e, KeyError) and e.args else e  # KeyError agrega comillas en str()
+        raise ValueError(f"{path}: {msg}" if path else str(msg)) from e
+
+
+def _sub(path, key):
+    return f"{path}.{key}" if path else ""  # sin ruta (Excel) no se inventa una
+
+
+def support_from_dict(s, path: str = "") -> SupportType:
+    """Un tipo de sostenimiento; con path="" los errores no llevan ruta (Excel pone hoja y fila)."""
+    b, sc = _opt(s, "bolt", path), _opt(s, "shotcrete", path)
+    bp, sp = _sub(path, "bolt"), _sub(path, "shotcrete")
+    bolt = None if b is None else _at(bp, Bolt, _get(b, "kind", bp, "str"), _get(b, "length_m", bp, "number"),
+                                      _get(b, "spacing_m", bp, "number"))
+    shot = None if sc is None else _at(sp, Shotcrete, _get(sc, "thickness_mm", sp, "number"),
+                                       _bool(sc.get("fiber", False), f"{sp}.fiber" if sp else "fiber"))
+    return _at(path, SupportType, _get(s, "code", path, "str"), _get(s, "order", path, "number"),
+               _opt(s, "description", path, "str", ""), bolt, shot, _opt(s, "mesh", path, "str"),
+               _opt(s, "arch", path, "str"), _opt(s, "relative_cost", path, "number"))
 
 
 def catalog_from_dicts(items: list) -> SupportCatalog:
-    """Arma el catálogo desde la lista `support_types` (también la usa excel_io)."""
-    types = []
-    for i, s in enumerate(items):
-        p = f"support_types[{i}]"
-        bolt = shot = None
-        if s.get("bolt") is not None:
-            b = s["bolt"]
-            bolt = Bolt(_get(b, "kind", p + ".bolt", "str"), _get(b, "length_m", p + ".bolt", "number"),
-                        _get(b, "spacing_m", p + ".bolt", "number"))
-        if s.get("shotcrete") is not None:
-            sc = s["shotcrete"]
-            shot = Shotcrete(_get(sc, "thickness_mm", p + ".shotcrete", "number"), _bool(sc.get("fiber", False), p + ".shotcrete.fiber"))
-        types.append(SupportType(
-            _get(s, "code", p, "str"), _get(s, "order", p, "number"), _opt(s, "description", p, "str", ""),
-            bolt, shot, s.get("mesh"), s.get("arch"), _opt(s, "relative_cost", p, "number")))
-    return SupportCatalog(types)
+    """Arma el catálogo desde la lista `support_types`."""
+    return _at("support_types", SupportCatalog, [support_from_dict(s, f"support_types[{i}]") for i, s in enumerate(items)])
+
+
+def correlation_from_dict(c, path: str = ""):
+    """Una CustomCorrelation; el constructor de C++ valida nombres, números y valid_min < valid_max."""
+    form = _get(c, "form", path, "str")
+    if form not in _rm.CorrelationForm.__members__:
+        raise ValueError(f"{_sub(path, 'form') or 'form'}: expected one of {list(_rm.CorrelationForm.__members__)}, got {form!r}")
+    return _at(path, _rm.CustomCorrelation,
+               name=_get(c, "name", path, "str"), from_=_get(c, "from", path, "str"), to=_get(c, "to", path, "str"),
+               form=_rm.CorrelationForm.__members__[form], a=_get(c, "a", path, "number"), b=_get(c, "b", path, "number"),
+               valid_min=_get(c, "valid_min", path, "number"), valid_max=_get(c, "valid_max", path, "number"),
+               source=_opt(c, "source", path, "str", ""))
 
 
 def from_dict(d: Mapping) -> LaborTable:
@@ -111,44 +144,39 @@ def from_dict(d: Mapping) -> LaborTable:
     td = _get(d, "table", "")
     kind = _get(td, "kind", "table", "str")
     if kind == "range":
-        classes = [RangeClass(_get(c, "lo", f"table.classes[{i}]", "number"), _get(c, "hi", f"table.classes[{i}]", "number"),
-                              _get(c, "label", f"table.classes[{i}]", "str"), c.get("support"))
-                   for i, c in enumerate(_get(td, "classes", "table", "list"))]
-        table = RangeTable(_get(td, "method", "table", "str"), _get(td, "base_edition", "table", "str"), classes)
+        classes = []
+        for i, c in enumerate(_get(td, "classes", "table", "list")):
+            p = f"table.classes[{i}]"
+            classes.append(_at(p, RangeClass, _get(c, "lo", p, "number"), _get(c, "hi", p, "number"),
+                               _get(c, "label", p, "str"), c.get("support")))
+        table = _at("table", RangeTable, _get(td, "method", "table", "str"), _get(td, "base_edition", "table", "str"), classes)
     elif kind == "cells":
         chart_id = _get(td, "chart", "table", "str")
         if chart_id not in GSI_CHARTS:
             raise ValueError(f"table.chart: unknown chart {chart_id!r}; known charts: {list(GSI_CHARTS)}")
+        base = _opt(td, "base_edition", "table", "str")
+        if base is not None and base != chart_id:  # en una tabla de celdas la edición base es la cartilla
+            raise ValueError(f"table.base_edition: expected the chart id {chart_id!r}, got {base!r}")
         cells = []
         for i, c in enumerate(_get(td, "cells", "table", "list")):
             p = f"table.cells[{i}]"
-            rng = c.get("gsi_range")
-            cells.append(CellClass(_get(c, "cell", p, "str"), c.get("support"),
-                                   None if rng is None else tuple(rng), _opt(c, "label", p, "str", "")))
-        table = CellTable(GSI_CHARTS[chart_id], cells)
+            cells.append(_at(p, CellClass, _get(c, "cell", p, "str"), _opt(c, "support", p),
+                             _pair(c, "gsi_range", p), _opt(c, "label", p, "str", "")))
+        table = _at("table", CellTable, GSI_CHARTS[chart_id], cells)
     else:
         raise ValueError(f"table.kind: expected 'range' or 'cells', got {kind!r}")
 
-    corrs = []
-    for i, c in enumerate(d.get("correlations") or []):
-        p = f"correlations[{i}]"
-        form = _get(c, "form", p, "str")
-        if form not in _rm.CorrelationForm.__members__:
-            raise ValueError(f"{p}.form: expected one of {list(_rm.CorrelationForm.__members__)}, got {form!r}")
-        corrs.append(_rm.CustomCorrelation(
-            name=_get(c, "name", p, "str"), from_=_get(c, "from", p, "str"), to=_get(c, "to", p, "str"),
-            form=_rm.CorrelationForm.__members__[form], a=_get(c, "a", p, "number"), b=_get(c, "b", p, "number"),
-            valid_min=_get(c, "valid_min", p, "number"), valid_max=_get(c, "valid_max", p, "number"),
-            source=_opt(c, "source", p, "str", "")))
+    corrs = tuple(correlation_from_dict(c, f"correlations[{i}]")
+                  for i, c in enumerate(_opt(d, "correlations", "", "list", [])))
 
     date = d.get("date")
+    if isinstance(date, datetime.datetime):  # YAML con hora: solo la fecha
+        date = date.date()
     if isinstance(date, datetime.date):  # YAML escrito a mano: `date: 2026-11-01` sin comillas
         d = {**d, "date": date.isoformat()}
-    span = d.get("span_m")
-    return LaborTable(
-        _get(d, "labor_type", "", "str"), catalog, table,
-        None if span is None else tuple(span), tuple(corrs),
-        _opt(d, "author", "", "str", ""), _opt(d, "date", "", "str", ""), _opt(d, "notes", "", "str", ""))
+    return _at("", LaborTable,
+               _get(d, "labor_type", "", "str"), catalog, table, _pair(d, "span_m", ""), corrs,
+               _opt(d, "author", "", "str", ""), _opt(d, "date", "", "str", ""), _opt(d, "notes", "", "str", ""))
 
 
 def save_json(t: LaborTable, path) -> None:

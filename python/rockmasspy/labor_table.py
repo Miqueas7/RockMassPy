@@ -4,12 +4,14 @@ Clasificar nunca lanza por un sostenimiento ausente del catálogo (devuelve supp
 solo lanza ValueError si los argumentos no corresponden al tipo de tabla.
 """
 
+import datetime
 import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .cell_table import CellTable
+from .intact_rock import _strip
 from .issues import TableIssue
 from .range_table import RangeTable
 from .support import SupportCatalog, SupportType
@@ -38,10 +40,15 @@ class LaborTable:
         if self.span_m is not None:
             lo, hi = self.span_m
             if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo < hi):
-                raise ValueError(f"span_m must satisfy 0 < lo < hi, got {self.span_m!r}")
+                raise ValueError(f"span_m: must satisfy 0 < lo < hi, got {self.span_m!r}")
             object.__setattr__(self, "span_m", (lo, hi))
-        if self.date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", self.date):
-            raise ValueError(f"date must be ISO yyyy-mm-dd, got {self.date!r}")
+        if self.date:
+            try:  # la forma exacta y además una fecha que exista (rechaza 2026-13-45)
+                ok = re.fullmatch(r"\d{4}-\d{2}-\d{2}", self.date) and datetime.date.fromisoformat(self.date)
+            except ValueError:
+                ok = False
+            if not ok:
+                raise ValueError(f"date: expected yyyy-mm-dd, got {self.date!r}")
         object.__setattr__(self, "correlations", tuple(self.correlations))
 
     def classify(self, value: float | None = None, *, structure: str | None = None,
@@ -58,8 +65,8 @@ class LaborTable:
             label = c.label or c.cell
         warnings: list[str] = []
         support = None
-        if c.support is not None and c.support.strip() in self.catalog:
-            support = self.catalog.get(c.support.strip())
+        if c.support is not None and c.support in self.catalog:  # las clases ya guardan el código limpio
+            support = self.catalog.get(c.support)
         else:
             warnings.append(f"class {label} has no support type in the catalog")
         return Classification(label, support, self.table.base_edition, tuple(warnings))
@@ -68,13 +75,21 @@ class LaborTable:
         return self.catalog.validate() + self.table.validate(self.catalog)
 
 
+def _key(labor_type: str) -> str:
+    return _strip(labor_type).strip().lower()  # «galeria» encuentra «galería»
+
+
 def select_table(tables: Iterable[LaborTable], labor_type: str, span_m: float) -> LaborTable:
-    want = labor_type.strip().lower()
+    want = _key(labor_type)
     tables = list(tables)
     hits = [t for t in tables
-            if t.labor_type.strip().lower() == want and (t.span_m is None or t.span_m[0] <= span_m <= t.span_m[1])]
+            if _key(t.labor_type) == want and (t.span_m is None or t.span_m[0] <= span_m <= t.span_m[1])]
     if len(hits) == 1:
         return hits[0]
+    if len(hits) == 2 and all(t.span_m is not None for t in hits):
+        a, b = sorted(hits, key=lambda t: t.span_m[0])
+        if a.span_m[1] == b.span_m[0] == span_m:  # solo se tocan en el límite: la de luces mayores (menos favorable)
+            return b
     cands = [(t.labor_type, t.span_m) for t in tables]
     problem = "no table" if not hits else "more than one table"
     raise ValueError(f"{problem} for labor_type {labor_type!r} and span {span_m:g} m; candidates: {cands}")

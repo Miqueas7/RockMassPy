@@ -1,7 +1,7 @@
 """Catálogo de tipos de sostenimiento de la mina (datos propios de cada operación, sin E/S).
 
 Cada tipo lleva su código, su orden de menor a mayor exigencia y los elementos que lo componen.
-Validar avisa con TableIssue y nunca bloquea; solo los datos imposibles (longitud ≤ 0, NaN,
+Validar avisa con TableIssue y nunca bloquea; solo los datos imposibles (longitud ≤ 0, NaN, perno sin tipo,
 códigos repetidos) lanzan ValueError. El catálogo es de la mina, por eso edition = None.
 """
 
@@ -24,6 +24,9 @@ class Bolt:
     spacing_m: float
 
     def __post_init__(self):
+        if not isinstance(self.kind, str) or not self.kind.strip():
+            raise ValueError("kind is required")  # un perno sin tipo se confundiría con «sin perno» en Excel
+        object.__setattr__(self, "kind", self.kind.strip())
         _positive("length_m", self.length_m)
         _positive("spacing_m", self.spacing_m)
 
@@ -53,6 +56,11 @@ class SupportType:
         if not code:
             raise ValueError("support code must not be empty")
         object.__setattr__(self, "code", code)
+        # vacío = sin dato, igual que una celda vacía de Excel, para que la ida y vuelta conserve ==
+        object.__setattr__(self, "description", (self.description or "").strip())
+        for name in ("mesh", "arch"):
+            v = getattr(self, name)
+            object.__setattr__(self, name, (v.strip() or None) if isinstance(v, str) else v)
         if not math.isfinite(self.order) or self.order < 1:
             raise ValueError(f"order must be finite and >= 1, got {self.order!r}")
         if self.relative_cost is not None:

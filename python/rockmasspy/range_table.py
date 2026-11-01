@@ -2,7 +2,7 @@
 
 Cada clase cubre [lo, hi] con su sostenimiento. Un valor justo en un límite cae en dos clases y toma
 la de menor `lo` (la peor calidad, criterio conservador). Validar avisa con TableIssue y nunca
-bloquea; solo los datos imposibles (límites no finitos o lo >= hi, método/edición desconocidos)
+bloquea; solo los datos imposibles (límites no finitos o lo >= hi, rótulo vacío, método/edición desconocidos)
 lanzan ValueError.
 """
 
@@ -42,8 +42,11 @@ class RangeClass:
             raise ValueError(f"class limits must be finite, got {self.lo!r}, {self.hi!r}")
         if self.lo >= self.hi:
             raise ValueError(f"class lo must be < hi, got {self.lo:g} >= {self.hi:g}")
-        if isinstance(self.support, str):
-            object.__setattr__(self, "support", self.support.strip() or None)
+        if not isinstance(self.label, str) or not self.label.strip():
+            raise ValueError(f"class label must be a non-empty string, got {self.label!r}")
+        object.__setattr__(self, "label", self.label.strip())
+        if self.support is not None:  # un código numérico de YAML (support: 3) pasa a texto
+            object.__setattr__(self, "support", str(self.support).strip() or None)
 
 
 class RangeTable:

@@ -58,3 +58,13 @@ def test_range_class_validation():
     assert rm.RangeClass(0, 1, "x", " A ").support == "A"
     t = rmr_table()
     assert (t.method, t.base_edition, len(t.classes)) == ("RMR", "RMR89", 5)
+
+
+def test_label_required_and_support_as_text():
+    for bad in ("", "  "):
+        with pytest.raises(ValueError, match="label"):
+            rm.RangeClass(0, 20, bad)
+    c = rm.RangeClass(0, 20, " V ", 3)
+    assert (c.label, c.support) == ("V", "3")
+    assert rm.RangeClass(0, 20, "V", " ").support is None
+    assert rm.CellClass("F/R", 3, label=None) == rm.CellClass("F/R", "3")

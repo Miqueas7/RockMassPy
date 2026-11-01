@@ -117,7 +117,9 @@ struct CustomCorrelation {
     bool operator==(const CustomCorrelation&) const = default;
 };
 
-inline CorrelationResult correlate_custom(const CustomCorrelation& c, double value) {
+/// Lanza std::invalid_argument si falta un nombre o un número no es válido. La usan el constructor
+/// completo de Python y correlate_custom, así un archivo con datos malos falla al cargarse.
+inline void validate_custom(const CustomCorrelation& c) {
     using namespace validation;
     auto need = [](const std::string& s, const char* n) {
         if (s.empty()) throw std::invalid_argument(std::string("Domain error [RockMassPy]: parameter '") + n + "' is required");
@@ -130,6 +132,11 @@ inline CorrelationResult correlate_custom(const CustomCorrelation& c, double val
     require_finite(c.valid_min, "valid_min");
     require_finite(c.valid_max, "valid_max");
     require(c.valid_min < c.valid_max, "valid_min", "must be smaller than valid_max", c.valid_min);
+}
+
+inline CorrelationResult correlate_custom(const CustomCorrelation& c, double value) {
+    using namespace validation;
+    validate_custom(c);
     require_finite(value, "value");
     if (c.form == CorrelationForm::LogLinear) require_positive(value, "value");
 

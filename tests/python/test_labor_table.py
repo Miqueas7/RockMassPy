@@ -76,3 +76,32 @@ def test_select_table():
         rm.select_table([a, b], "galería", 4.2)
     with pytest.raises(ValueError, match="more than one"):
         rm.select_table([a, lab("galería", (3, 5))], "galería", 3.5)
+
+
+def test_classify_support_none_and_spaces():
+    t = lab(table=rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 50, "poor", None), rm.RangeClass(50, 100, "good", " II ")]))
+    assert t.classify(10).support is None and t.classify(10).warnings == ("class poor has no support type in the catalog",)
+    assert t.classify(70).support.code == "II" and t.classify(70).warnings == ()
+
+
+def test_date_must_exist():
+    for bad in ("2026-13-45", "2026-02-30", "20261101", "01/11/2026"):
+        with pytest.raises(ValueError, match="date: expected yyyy-mm-dd"):
+            rm.LaborTable("x", CAT, rtab(), date=bad)
+
+
+def test_select_table_contiguous_spans_take_larger():
+    a, b = lab("galería", (3, 4)), lab("galería", (4, 5))
+    assert rm.select_table([a, b], "galería", 4.0) is b  # en el límite, la de luces mayores
+    assert rm.select_table([b, a], "galería", 4.0) is b
+    assert rm.select_table([a, b], "galería", 3.5) is a
+    with pytest.raises(ValueError, match="more than one"):
+        rm.select_table([lab("galería", (3, 5)), lab("galería", (4, 6))], "galería", 4.5)
+    with pytest.raises(ValueError, match="more than one"):
+        rm.select_table([a, lab("galería")], "galería", 4.0)  # sin luz cubre todo: es solape real
+
+
+def test_select_table_ignores_accents():
+    t = lab("Galería", (3, 4))
+    assert rm.select_table([t], "galeria", 3.5) is t
+    assert rm.select_table([lab("galeria", (3, 4))], " GALERÍA ", 3.5).labor_type == "galeria"

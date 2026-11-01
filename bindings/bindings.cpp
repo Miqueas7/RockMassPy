@@ -242,8 +242,10 @@ NB_MODULE(_rockmasspy_core, m) {
         .def("__init__",
              [](CustomCorrelation* self, std::string name, std::string from, std::string to, CorrelationForm form,
                 double a, double b, double valid_min, double valid_max, std::string source) {
-                 new (self) CustomCorrelation{std::move(name), std::move(from), std::move(to), form, a, b,
-                                              valid_min, valid_max, std::move(source)};
+                 CustomCorrelation c{std::move(name), std::move(from), std::move(to), form, a, b,
+                                     valid_min, valid_max, std::move(source)};
+                 validate_custom(c);  // valida antes de construir: un dato malo nunca llega a un objeto
+                 new (self) CustomCorrelation{std::move(c)};
              },
              nb::arg("name"), nb::arg("from_"), nb::arg("to"), nb::arg("form"), nb::arg("a"), nb::arg("b"),
              nb::arg("valid_min"), nb::arg("valid_max"), nb::arg("source") = "")

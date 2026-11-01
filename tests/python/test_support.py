@@ -37,6 +37,9 @@ def test_order_issues_warn_not_raise():
 def test_bad_elements_raise():
     with pytest.raises(ValueError):
         rm.Bolt("x", 0, 1.0)
+    for kind in ("", "  ", None):
+        with pytest.raises(ValueError, match="kind is required"):
+            rm.Bolt(kind, 1.8, 1.5)
     with pytest.raises(ValueError):
         rm.Shotcrete(float("nan"))
     with pytest.raises(ValueError):
@@ -57,3 +60,9 @@ def test_code_is_trimmed():
 def test_non_finite_order_raises(bad):
     with pytest.raises(ValueError, match="order"):
         rm.SupportType("A", bad)
+
+
+def test_empty_texts_normalise():
+    t = rm.SupportType("II", 2, None, mesh=" ", arch="", bolt=rm.Bolt(" split set ", 1.8, 1.5))
+    assert (t.description, t.mesh, t.arch, t.bolt.kind) == ("", None, None, "split set")
+    assert t == rm.SupportType("II", 2, "", rm.Bolt("split set", 1.8, 1.5))
