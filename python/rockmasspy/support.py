@@ -53,8 +53,8 @@ class SupportType:
         if not code:
             raise ValueError("support code must not be empty")
         object.__setattr__(self, "code", code)
-        if self.order < 1:
-            raise ValueError(f"order must be >= 1, got {self.order!r}")
+        if not math.isfinite(self.order) or self.order < 1:
+            raise ValueError(f"order must be finite and >= 1, got {self.order!r}")
         if self.relative_cost is not None:
             _positive("relative_cost", self.relative_cost)
 

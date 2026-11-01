@@ -51,3 +51,9 @@ def test_bad_elements_raise():
 
 def test_code_is_trimmed():
     assert rm.SupportType(" II ", 2).code == "II"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_order_raises(bad):
+    with pytest.raises(ValueError, match="order"):
+        rm.SupportType("A", bad)
