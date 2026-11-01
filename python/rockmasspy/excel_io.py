@@ -76,11 +76,14 @@ class _ExcelSource:
     def decimal_comma(self, sheet):
         return False
 
+    def missing(self, sheet):
+        return f"missing sheet '{sheet}'"
+
 
 def _sheet_rows(wb, sheet, cols, required, numeric, boolean=()):
     """Una tupla (fila_excel, dict) por fila no vacía; una celda vacía opcional queda en None."""
     if sheet not in wb.sheetnames:
-        raise ValueError(f"missing sheet '{sheet}'")
+        raise ValueError(wb.missing(sheet))
     dec = wb.decimal_comma(sheet)
     rows = iter(wb.rows(sheet))
     header = [_text(h) if h is not None else "" for h in next(rows, ())]
@@ -291,21 +294,10 @@ def _corr(n, r):
     return d
 
 
-def save_excel(t: LaborTable, path) -> None:
-    openpyxl = _optional("openpyxl")
-    d = to_dict(t)
+def _hojas(d):
+    """Las hojas (nombre, columnas, filas) de un dict de to_dict; las comparten Excel y CSV."""
     tb = d["table"]
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-
-    def sheet(name, cols, rows):
-        ws = wb.create_sheet(name)
-        ws.append(list(cols))
-        for c in ws[1]:
-            c.font = _optional("openpyxl.styles").Font(bold=True)
-        for r in rows:
-            ws.append(list(r))
-
+    hojas = []
     span = d["span_m"] or [None, None]
     campos = [("schema", d["schema"]), ("version", d["version"]), ("labor_type", d["labor_type"]),
               ("luz_min_m", span[0]), ("luz_max_m", span[1]), ("autor", d["author"] or None),
@@ -316,22 +308,22 @@ def save_excel(t: LaborTable, path) -> None:
         campos += [("edicion_base", tb["chart"]), ("cartilla", tb["chart"])]
     rt = d["rating"]
     campos.append(("edicion_puntajes", rt and rt["base_edition"] or None))
-    sheet("Tabla", ("campo", "valor"), campos)
-    sheet("Tipos_sostenimiento", TIPOS, [
+    hojas.append(("Tabla", ("campo", "valor"), campos))
+    hojas.append(("Tipos_sostenimiento", TIPOS, [
         (s["code"], s["order"], s["description"] or None,
          s["bolt"] and s["bolt"]["kind"], s["bolt"] and s["bolt"]["length_m"], s["bolt"] and s["bolt"]["spacing_m"],
          s["shotcrete"] and s["shotcrete"]["thickness_mm"],
          ("si" if s["shotcrete"]["fiber"] else "no") if s["shotcrete"] else None,
-         s["mesh"], s["arch"], s["relative_cost"]) for s in d["support_types"]])
+         s["mesh"], s["arch"], s["relative_cost"]) for s in d["support_types"]]))
     if tb["kind"] == "range":
-        sheet("Clases", CLASES, [(c["lo"], c["hi"], c["label"], c["support"]) for c in tb["classes"]])
+        hojas.append(("Clases", CLASES, [(c["lo"], c["hi"], c["label"], c["support"]) for c in tb["classes"]]))
     else:
-        sheet("Celdas", CELDAS, [(c["cell"], c["support"], *(c["gsi_range"] or (None, None)), c["label"] or None)
-                                 for c in tb["cells"]])
+        hojas.append(("Celdas", CELDAS, [(c["cell"], c["support"], *(c["gsi_range"] or (None, None)), c["label"] or None)
+                                         for c in tb["cells"]]))
     if d["correlations"]:
-        sheet("Correlaciones", CORRELACIONES, [
+        hojas.append(("Correlaciones", CORRELACIONES, [
             (c["name"], c["from"], c["to"], c["form"], c["a"], c["b"], c["valid_min"], c["valid_max"], c["source"] or None)
-            for c in d["correlations"]])
+            for c in d["correlations"]]))
     if rt:
         filas = []
         for p in rt["params"]:
@@ -341,5 +333,19 @@ def save_excel(t: LaborTable, path) -> None:
             else:
                 filas += [(p["name"], "categoria", None, None, None, None, k, v) for k, v in p["points"].items()]
         filas += [(None, "ajuste", None, None, None, None, k, v) for k, v in rt["adjustments"].items()]
-        sheet("Puntajes", PUNTAJES, filas)
+        hojas.append(("Puntajes", PUNTAJES, filas))
+    return hojas
+
+
+def save_excel(t: LaborTable, path) -> None:
+    openpyxl = _optional("openpyxl")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, cols, rows in _hojas(to_dict(t)):
+        ws = wb.create_sheet(name)
+        ws.append(list(cols))
+        for c in ws[1]:
+            c.font = _optional("openpyxl.styles").Font(bold=True)
+        for r in rows:
+            ws.append(list(r))
     wb.save(path)
