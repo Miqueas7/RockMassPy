@@ -53,3 +53,18 @@ def test_normal_shear_python():
     assert "tau_mpa" in repr(r)
     with pytest.raises(ValueError):
         rm.hb_normal_shear(st - 0.01, 50, p)
+
+
+def test_normal_shear_hand_value():
+    # Calculado a mano con Balmer (Hoek et al. 2002 ec. 8-10), no es un ejemplo publicado; dσ1/dσ3 = 4.981761.
+    r = rm.hb_normal_shear(1.0, 50, rm.hb_params(45, 10, 0, rm.HbEdition.HB2002))
+    assert r.sigma_n_mpa == pytest.approx(2.413708, abs=1e-5)
+    assert r.tau_mpa == pytest.approx(3.155377, abs=1e-5)
+
+
+def test_normal_shear_just_above_tensile_is_finite():
+    import math
+    p = rm.hb_params(45, 10, 0, rm.HbEdition.HB2002)
+    st = rm.hb_tensile(50, p)
+    r = rm.hb_normal_shear(st + 1e-9 * max(1.0, abs(st)), 50, p)
+    assert math.isfinite(r.sigma_n_mpa) and math.isfinite(r.tau_mpa) and r.tau_mpa > 0

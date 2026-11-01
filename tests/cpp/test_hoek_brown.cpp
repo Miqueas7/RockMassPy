@@ -140,3 +140,17 @@ TEST(HoekBrown, NormalShearAtTensileLimit) {
     EXPECT_EQ(r.tau_mpa, 0.0);
     EXPECT_THROW(hb_normal_shear(st - 0.01, 50, p), std::invalid_argument);
 }
+// Calculado a mano con Balmer (Hoek et al. 2002 ec. 8-10), no es un ejemplo publicado; dσ1/dσ3 = 4.981761.
+TEST(HoekBrown, NormalShearHandValue) {
+    auto r = hb_normal_shear(1.0, 50, hb_params(45, 10, 0, HbEdition::HB2002));
+    EXPECT_NEAR(r.sigma_n_mpa, 2.413708, 1e-5);
+    EXPECT_NEAR(r.tau_mpa, 3.155377, 1e-5);
+}
+TEST(HoekBrown, NormalShearJustAboveTensileIsFinite) {
+    auto p = hb_params(45, 10, 0, HbEdition::HB2002);
+    double st = hb_tensile(50, p);
+    auto r = hb_normal_shear(st + 1e-9 * std::max(1.0, std::abs(st)), 50, p);
+    EXPECT_TRUE(std::isfinite(r.sigma_n_mpa));
+    EXPECT_TRUE(std::isfinite(r.tau_mpa));
+    EXPECT_GT(r.tau_mpa, 0.0);
+}
