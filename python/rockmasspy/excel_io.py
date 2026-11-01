@@ -34,13 +34,17 @@ def _where(sheet, row, col):
     return f"sheet '{sheet}', row {row}, column '{col}'"
 
 
-def _num(v, sheet, row, col):
+def _num(v, sheet, row, col, decimal_comma=False):
+    """Número de una celda. Con decimal_comma (CSV con ';') se acepta "3,5"; "1.234,5" no: solo decimales planos."""
     x = None
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         x = v
     elif isinstance(v, str):
+        v1 = v.strip()
+        if decimal_comma and v1.count(",") == 1 and "." not in v1:
+            v1 = v1.replace(",", ".")
         try:
-            x = float(v.strip())
+            x = float(v1)
         except ValueError:
             pass
     if x is None or not math.isfinite(x):
@@ -58,11 +62,27 @@ def _text(v):
     return str(v).strip()
 
 
+class _ExcelSource:
+    """Fuente de hojas: nombres, filas crudas (la primera es la cabecera) y si la coma es decimal.
+    csv_io implementa la misma interfaz, así que todo lo de abajo no sabe de qué formato viene."""
+
+    def __init__(self, wb):
+        self.wb = wb
+        self.sheetnames = wb.sheetnames
+
+    def rows(self, sheet):
+        return self.wb[sheet].iter_rows(values_only=True)
+
+    def decimal_comma(self, sheet):
+        return False
+
+
 def _sheet_rows(wb, sheet, cols, required, numeric, boolean=()):
     """Una tupla (fila_excel, dict) por fila no vacía; una celda vacía opcional queda en None."""
     if sheet not in wb.sheetnames:
         raise ValueError(f"missing sheet '{sheet}'")
-    rows = wb[sheet].iter_rows(values_only=True)
+    dec = wb.decimal_comma(sheet)
+    rows = iter(wb.rows(sheet))
     header = [_text(h) if h is not None else "" for h in next(rows, ())]
     pos = {}
     for c in cols:
@@ -82,7 +102,7 @@ def _sheet_rows(wb, sheet, cols, required, numeric, boolean=()):
                 if c in required:
                     raise ValueError(f"{_where(sheet, n, c)}: required value is empty")
             elif c in numeric:
-                row[c] = _num(v, sheet, n, c)
+                row[c] = _num(v, sheet, n, c, dec)
             elif c in boolean:
                 row[c] = _bool(v, _where(sheet, n, c))
             else:
@@ -121,7 +141,7 @@ def _support_dicts(wb, sheet):
 
 
 def _open(path):
-    return _optional("openpyxl").load_workbook(path, read_only=True, data_only=True)
+    return _ExcelSource(_optional("openpyxl").load_workbook(path, read_only=True, data_only=True))
 
 
 def _catalog(wb, sheet):
@@ -137,7 +157,7 @@ def load_support_catalog_excel(path, sheet: str = "Tipos_sostenimiento") -> Supp
     try:
         return _catalog(wb, sheet)[1]
     finally:
-        wb.close()
+        wb.wb.close()
 
 
 def load_excel(path) -> LaborTable:
@@ -145,7 +165,7 @@ def load_excel(path) -> LaborTable:
     try:
         return _load(wb)
     finally:
-        wb.close()
+        wb.wb.close()
 
 
 def _load(wb) -> LaborTable:
@@ -157,7 +177,7 @@ def _load(wb) -> LaborTable:
 
     def numero(k):
         v = campos.get(k)
-        return None if v is None else _num(v, "Tabla", filas[k][0], "valor")
+        return None if v is None else _num(v, "Tabla", filas[k][0], "valor", wb.decimal_comma("Tabla"))
 
     lo, hi = numero("luz_min_m"), numero("luz_max_m")
     if (lo is None) != (hi is None):
@@ -248,7 +268,7 @@ def _puntajes(wb, edicion):
         p = params.setdefault(nombre, {"name": nombre, "kind": "numeric", "unit": r["unidad"] or "",
                                        "better": MEJOR[r["mejor"]], "bins": []})
         hi = r["hasta"]  # vacío = infinito, pero solo en el último intervalo (se revisa abajo)
-        hi = None if hi is None else math.inf if hi.lower() == "inf" else _num(hi, hoja, n, "hasta")
+        hi = None if hi is None else math.inf if hi.lower() == "inf" else _num(hi, hoja, n, "hasta", wb.decimal_comma(hoja))
         p["bins"].append({"lo": r["desde"], "hi": hi, "points": r["puntos"]})
         _row(hoja, n, RatingBin, r["desde"], math.inf if hi is None else hi, r["puntos"])
     for nombre, p in params.items():
