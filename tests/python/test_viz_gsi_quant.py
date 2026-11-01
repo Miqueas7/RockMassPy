@@ -57,3 +57,8 @@ def test_muestras():
     for lang in ("es", "en"):
         fig = plot_gsi_quantified([(22, 70), (8, 35)], labels=["P1", "P2"], style=Style(lang=lang))
         save_figure(fig, Path(d) / f"t3_gsi_quant_{lang}.png")
+
+
+def test_rotulos_de_distinto_largo():
+    with pytest.raises(ValueError, match="labels"):
+        plot_gsi_quantified([(22, 70)], labels=["P1", "P2"])
