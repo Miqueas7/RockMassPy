@@ -1,3 +1,4 @@
+import colorsys
 import subprocess
 import sys
 
@@ -75,4 +76,12 @@ def _luminance(hex_color):
 
 def test_support_colors_luminance_strictly_decreasing():
     lums = [_luminance(c) for c in viz.DEFAULT_SUPPORT_COLORS]
-    assert all(a - b >= 0.03 for a, b in zip(lums, lums[1:])), lums
+    assert all(a - b >= 0.04 for a, b in zip(lums, lums[1:])), lums
+
+
+def test_support_colors_hue_order_green_to_purple():
+    hues = []
+    for c in viz.DEFAULT_SUPPORT_COLORS:
+        h = colorsys.rgb_to_hsv(*(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)))[0] * 360
+        hues.append(h if h < 180 else h - 360)  # rojo cerca de 0; los morados quedan negativos
+    assert all(a > b for a, b in zip(hues, hues[1:])), hues
