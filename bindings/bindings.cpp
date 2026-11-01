@@ -9,6 +9,7 @@
 #include <nanobind/stl/vector.h>
 
 #include "rockmasspy/method_info.hpp"
+#include "rockmasspy/q_system.hpp"
 #include "rockmasspy/rmr14.hpp"
 #include "rockmasspy/rmr76.hpp"
 #include "rockmasspy/rmr89.hpp"
@@ -168,4 +169,26 @@ NB_MODULE(_rockmasspy_core, m) {
           nb::arg("depth_m"), nb::arg("shape_factor_f"), "Elastic behaviour index (Bieniawski & Celada).");
     m.def("fs_face", &fs_face, nb::arg("ice"));
     m.def("rmr14", &rmr14, nb::arg("input"), "RMR14 (Bieniawski 2014), drill-and-blast only.");
+
+    nb::enum_<QEdition>(m, "QEdition", "Q-system manual edition.")
+        .value("NGI2015", QEdition::NGI2015).value("NGI2025", QEdition::NGI2025);
+    nb::class_<QInput>(m, "QInput", "Q-system inputs (jn up to 60 covers 3*Jn at intersections).")
+        .def(nb::init<>())
+        .def(nb::init<double, double, double, double, double, double>(), nb::arg("rqd_pct"), nb::arg("jn"),
+             nb::arg("jr"), nb::arg("ja"), nb::arg("jw"), nb::arg("srf"))
+        .def_rw("rqd_pct", &QInput::rqd_pct).def_rw("jn", &QInput::jn).def_rw("jr", &QInput::jr)
+        .def_rw("ja", &QInput::ja).def_rw("jw", &QInput::jw).def_rw("srf", &QInput::srf);
+    nb::class_<QResult>(m, "QResult")
+        .def_ro("q", &QResult::q).def_ro("q_base", &QResult::q_base).def_ro("rqd_used", &QResult::rqd_used)
+        .def_ro("rock_class", &QResult::rock_class).def_ro("info", &QResult::info)
+        .def_ro("warnings", &QResult::warnings);
+    m.def("q_value", &q_value, nb::arg("input"), nb::arg("edition") = QEdition::NGI2025,
+          "Q and Q' with rock class (NGI 2025 by default).");
+    m.def("wall_q", &wall_q, nb::arg("q"), nb::arg("wall_height_m"), nb::arg("span_m"), nb::arg("high_stress"),
+          nb::arg("edition") = QEdition::NGI2025, "Q to use for wall support design.");
+    nb::class_<EquivalentDimension>(m, "EquivalentDimension")
+        .def_ro("de_m", &EquivalentDimension::de_m).def_ro("esr_used", &EquivalentDimension::esr_used)
+        .def_ro("warnings", &EquivalentDimension::warnings);
+    m.def("equivalent_dimension", &equivalent_dimension, nb::arg("span_or_height_m"), nb::arg("esr"), nb::arg("q"),
+          nb::arg("esr_category"), "Equivalent dimension De = span or height / ESR.");
 }
