@@ -35,6 +35,14 @@ TEXTS: dict[str, dict[str, str]] = {
     "gsi_quant_title": {"es": "Carta GSI cuantificada", "en": "Quantified GSI chart"},
     "jcond89_axis": {"es": "Condición de juntas (JCond89)", "en": "Joint condition (JCond89)"},
     "rqd_axis": {"es": "RQD (%)", "en": "RQD (%)"},
+    "hb_envelope_title": {"es": "Envolvente de Hoek-Brown", "en": "Hoek-Brown envelope"},
+    "sigma1_axis": {"es": "σ1 (MPa)", "en": "σ1 (MPa)"},
+    "sigma3_axis": {"es": "σ3 (MPa)", "en": "σ3 (MPa)"},
+    "tau_axis": {"es": "τ (MPa)", "en": "τ (MPa)"},
+    "sigma_n_axis": {"es": "σn (MPa)", "en": "σn (MPa)"},
+    "hb_curve": {"es": "Hoek-Brown", "en": "Hoek-Brown"},
+    "mc_line": {"es": "Mohr-Coulomb (ajuste)", "en": "Mohr-Coulomb (fit)"},
+    "lab_tests": {"es": "Ensayos de laboratorio", "en": "Lab tests"},
     "gsi_label": {"es": "GSI", "en": "GSI"},
 }
 
