@@ -75,6 +75,7 @@ if(ROCKMASSPY_BUILD_TESTS)
     # Cada tarea agrega aquí su archivo de pruebas
     add_executable(rockmasspy_tests
         tests/cpp/test_validation.cpp
+        tests/cpp/test_rqd.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core
