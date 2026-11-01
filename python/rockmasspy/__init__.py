@@ -8,3 +8,4 @@ from .issues import TableIssue  # noqa: E402,F401
 from .intact_rock import (  # noqa: E402,F401
     MI_ALIASES_ES, MI_SOURCE, MI_TABLE, MR_SOURCE, MR_TABLE, MiEntry, MrEntry, mi_lookup, mr_lookup,
 )
+from .support import Bolt, Shotcrete, SupportCatalog, SupportType  # noqa: E402,F401
