@@ -77,6 +77,8 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_validation.cpp
         tests/cpp/test_rqd.cpp
         tests/cpp/test_rmr89.cpp
+        tests/cpp/test_rmr76.cpp
+        tests/cpp/test_rmr14.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core

@@ -9,6 +9,8 @@
 #include <nanobind/stl/vector.h>
 
 #include "rockmasspy/method_info.hpp"
+#include "rockmasspy/rmr14.hpp"
+#include "rockmasspy/rmr76.hpp"
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 
@@ -111,4 +113,59 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("rmr_class", &rmr_class, nb::arg("rmr"));
     m.def("jcond89", &jcond89, nb::arg("joint"));
     m.def("rmr89", &rmr89, nb::arg("input"), "RMR89 (Bieniawski 1989) with optional orientation adjustment.");
+
+    nb::enum_<JointCondition76>(m, "JointCondition76")
+        .value("VeryRoughTight", JointCondition76::VeryRoughTight)
+        .value("SlightlyRoughSlightlyWeathered", JointCondition76::SlightlyRoughSlightlyWeathered)
+        .value("SlightlyRoughHighlyWeathered", JointCondition76::SlightlyRoughHighlyWeathered)
+        .value("SlickensidedOrThinGouge", JointCondition76::SlickensidedOrThinGouge)
+        .value("SoftGougeOrWide", JointCondition76::SoftGougeOrWide);
+    nb::enum_<Water76>(m, "Water76").value("CompletelyDry", Water76::CompletelyDry).value("Damp", Water76::Damp)
+        .value("ModeratePressure", Water76::ModeratePressure).value("Severe", Water76::Severe);
+    nb::class_<Rmr76Input>(m, "Rmr76Input", "RMR76 inputs (exactly one of ucs/is50).")
+        .def(nb::init<>())
+        .def_rw("ucs_mpa", &Rmr76Input::ucs_mpa).def_rw("is50_mpa", &Rmr76Input::is50_mpa)
+        .def_rw("rqd_pct", &Rmr76Input::rqd_pct).def_rw("spacing_m", &Rmr76Input::spacing_m)
+        .def_rw("condition", &Rmr76Input::condition).def_rw("water", &Rmr76Input::water)
+        .def_rw("orientation", &Rmr76Input::orientation).def_rw("application", &Rmr76Input::application);
+    nb::class_<Rmr76Result>(m, "Rmr76Result")
+        .def_ro("r_strength", &Rmr76Result::r_strength).def_ro("r_rqd", &Rmr76Result::r_rqd)
+        .def_ro("r_spacing", &Rmr76Result::r_spacing).def_ro("r_condition", &Rmr76Result::r_condition)
+        .def_ro("r_water", &Rmr76Result::r_water).def_ro("basic", &Rmr76Result::basic)
+        .def_ro("adjustment", &Rmr76Result::adjustment).def_ro("rmr", &Rmr76Result::rmr)
+        .def_ro("rmr_class", &Rmr76Result::rmr_class).def_ro("info", &Rmr76Result::info)
+        .def_ro("warnings", &Rmr76Result::warnings);
+    m.def("rating_spacing76", &rating_spacing76, nb::arg("spacing_m"));
+    m.def("rmr76", &rmr76, nb::arg("input"), "RMR76 (Bieniawski 1976) with optional orientation adjustment.");
+
+    nb::enum_<Roughness14>(m, "Roughness14").value("VeryRough", Roughness14::VeryRough)
+        .value("Rough", Roughness14::Rough).value("Smooth", Roughness14::Smooth)
+        .value("Slickensided", Roughness14::Slickensided);
+    nb::enum_<Infilling14>(m, "Infilling14").value("HardUnder5mm", Infilling14::HardUnder5mm)
+        .value("HardOver5mm", Infilling14::HardOver5mm).value("SoftUnder5mm", Infilling14::SoftUnder5mm)
+        .value("SoftOver5mm", Infilling14::SoftOver5mm);
+    nb::enum_<Alteration14>(m, "Alteration14").value("Unaltered", Alteration14::Unaltered)
+        .value("Moderately", Alteration14::Moderately).value("Highly", Alteration14::Highly)
+        .value("Decomposed", Alteration14::Decomposed);
+    nb::enum_<Excavation>(m, "Excavation").value("DrillAndBlast", Excavation::DrillAndBlast)
+        .value("Tbm", Excavation::Tbm);
+    nb::class_<Rmr14Input>(m, "Rmr14Input", "RMR14 inputs (strength and joint-frequency ratings read from the charts).")
+        .def(nb::init<>())
+        .def_rw("strength_rating", &Rmr14Input::strength_rating)
+        .def_rw("joints_per_m_rating", &Rmr14Input::joints_per_m_rating)
+        .def_rw("continuity_m", &Rmr14Input::continuity_m).def_rw("roughness", &Rmr14Input::roughness)
+        .def_rw("infilling", &Rmr14Input::infilling).def_rw("alteration", &Rmr14Input::alteration)
+        .def_rw("water", &Rmr14Input::water).def_rw("id2_pct", &Rmr14Input::id2_pct)
+        .def_rw("orientation", &Rmr14Input::orientation).def_rw("excavation", &Rmr14Input::excavation)
+        .def_rw("ice", &Rmr14Input::ice);
+    nb::class_<Rmr14Result>(m, "Rmr14Result")
+        .def_ro("basic", &Rmr14Result::basic).def_ro("f0", &Rmr14Result::f0).def_ro("fe", &Rmr14Result::fe)
+        .def_ro("fs", &Rmr14Result::fs).def_ro("rmr", &Rmr14Result::rmr).def_ro("rmr_class", &Rmr14Result::rmr_class)
+        .def_ro("info", &Rmr14Result::info).def_ro("warnings", &Rmr14Result::warnings);
+    m.def("rating_continuity14", &rating_continuity14, nb::arg("m"));
+    m.def("rating_id2_14", &rating_id2_14, nb::arg("id2_pct"));
+    m.def("ice_bieniawski_celada", &ice_bieniawski_celada, nb::arg("rmr"), nb::arg("sigma_ci_mpa"), nb::arg("k0"),
+          nb::arg("depth_m"), nb::arg("shape_factor_f"), "Elastic behaviour index (Bieniawski & Celada).");
+    m.def("fs_face", &fs_face, nb::arg("ice"));
+    m.def("rmr14", &rmr14, nb::arg("input"), "RMR14 (Bieniawski 2014), drill-and-blast only.");
 }
