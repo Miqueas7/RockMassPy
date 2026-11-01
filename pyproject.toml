@@ -1,0 +1,53 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "rockmasspy"
+version = "0.1.0"
+description = "Rock mass classifications, Hoek-Brown strength and mining geomechanics (C++ core, Python API)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    {name = "Miqueas Quintanilla Ventura", email = "miqueasq@gmail.com"},
+]
+keywords = ["mining", "geomechanics", "rock-mass", "RMR", "Q-system", "GSI",
+            "hoek-brown", "engineering"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/Miqueas7/RockMassPy"
+Documentation = "https://miqueas.dev/rockmasspy"
+Repository = "https://github.com/Miqueas7/RockMassPy"
+Issues = "https://github.com/Miqueas7/RockMassPy/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "hypothesis>=6.0"]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = ["-DROCKMASSPY_BUILD_PYTHON=ON", "-DROCKMASSPY_BUILD_TESTS=OFF"]
+wheel.packages = ["python/rockmasspy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "pp* *-musllinux*"
+test-requires = "pytest hypothesis"
+test-command = "pytest {project}/tests/python -q -p no:cacheprovider"
