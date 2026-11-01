@@ -14,7 +14,7 @@ def test_gsi_quantified():
 def test_correlation_value_and_labels():
     r = rm.correlate(rm.Correlation.RmrFromQ_Bieniawski1976, 4.5)
     assert abs(r.value - 57.536) < 1e-3
-    assert (r.from_, r.to) == ("Q", "RMR89")
+    assert (r.from_, r.to) == ("Q", "RMR76")  # ajustada con el RMR de 1976
     assert len(r.warnings) == 1
 
 
@@ -24,3 +24,8 @@ def test_chaining_blocked_but_explicit_value_allowed():
         rm.correlate(rm.Correlation.GsiFromRmr89Prime_HoekDiederichs2006, rmr)
     g = rm.correlate(rm.Correlation.GsiFromRmr89Prime_HoekDiederichs2006, rmr.value)
     assert abs(g.value - (rmr.value - 5)) < 1e-12
+
+
+def test_gsi_rqd_fraction_warns():
+    w = rm.gsi_from_jcond89_rqd(18, 0.7).warnings
+    assert w == ["rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction"]

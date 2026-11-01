@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -76,4 +77,21 @@ TEST(HoekBrown, Moduli) {
     EXPECT_EQ(em_hoek2002(45, 0, 50).unit, "GPa");
     EXPECT_EQ(erm_hoek_diederichs_simplified(45, 0).unit, "MPa");
     EXPECT_EQ(erm_hoek_diederichs_simplified(45, 0).info.method_id, "HD-2006");
+}
+// I4: en σ3 = σt la base mb·σ3/σci + s puede quedar en −1e-17; σ1 debe ser finito.
+TEST(HoekBrown, Sigma1AtTensileIsFinite) {
+    for (double gsi : {10.0, 25.0, 45.0, 63.7, 80.0, 100.0})
+        for (double mi : {4.0, 10.0, 17.3, 32.0})
+            for (double d : {0.0, 0.3, 0.7, 1.0}) {
+                auto p = hb_params(gsi, mi, d);
+                EXPECT_TRUE(std::isfinite(hb_sigma1(hb_tensile(80, p), 80, p))) << gsi << " " << mi << " " << d;
+            }
+}
+// M4: el aviso de D de HB-2018 llega al ajuste de Mohr-Coulomb.
+TEST(HoekBrown, MohrCoulombCarriesDWarning) {
+    auto p = hb_params(45, 10, 0.5);
+    auto mc = hb_mohr_coulomb(50, p, 1.0);
+    ASSERT_EQ(mc.warnings.size(), 1u);
+    EXPECT_EQ(mc.warnings[0], p.warnings[0]);
+    EXPECT_TRUE(hb_mohr_coulomb(50, hb_params(45, 10, 0), 1.0).warnings.empty());
 }

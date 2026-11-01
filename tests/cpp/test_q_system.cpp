@@ -1,7 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "error_of.hpp"
 #include "rockmasspy/q_system.hpp"
 
 using namespace rockmasspy;
@@ -44,4 +49,18 @@ TEST(QSystem, EsrRuleLowQ) {
     auto d = equivalent_dimension(10, 1.6, 0.05, 'C'); EXPECT_DOUBLE_EQ(d.esr_used, 1.0); EXPECT_DOUBLE_EQ(d.de_m, 10); EXPECT_EQ(d.warnings.size(), 1u);
     EXPECT_DOUBLE_EQ(equivalent_dimension(10, 3.0, 0.05, 'A').esr_used, 3.0);
     EXPECT_THROW(equivalent_dimension(10, 1.6, 1, 'H'), std::invalid_argument);
+    EXPECT_DOUBLE_EQ(equivalent_dimension(10, 1.6, 0.05, 'c').esr_used, 1.0);   // minúscula = 'C'
+}
+TEST(QSystem, UnsetFieldsThrowWithTheirName) {
+    EXPECT_THROW(q_value(QInput{}), std::invalid_argument);
+    const double nan = std::nan("");
+    const std::vector<std::pair<std::string, std::function<void(QInput&)>>> cases = {
+        {"rqd_pct", [=](QInput& in) { in.rqd_pct = nan; }}, {"jn", [=](QInput& in) { in.jn = nan; }},
+        {"jr", [=](QInput& in) { in.jr = nan; }},           {"ja", [=](QInput& in) { in.ja = nan; }},
+        {"jw", [=](QInput& in) { in.jw = nan; }},           {"srf", [=](QInput& in) { in.srf = nan; }},
+    };
+    for (const auto& [name, unset] : cases) {
+        QInput in{90, 4, 3, 1, 1, 15}; unset(in);
+        EXPECT_NE(error_of([&] { q_value(in); }).find("'" + name + "'"), std::string::npos) << name;
+    }
 }

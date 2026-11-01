@@ -20,3 +20,12 @@ def test_core_and_errors():
     with pytest.raises(ValueError):
         rm.rqd_from_core([0.8, 0.5], 1.0)
     assert rm.rqd_from_jv(0.0).warnings != []
+
+
+def test_core_sum_rounding_stays_at_100():
+    rqd = rm.rqd_from_core([0.45, 0.13, 0.68, 0.37, 0.47, 0.29, 0.33, 0.28], 3.0).rqd_pct
+    assert rqd <= 100
+    rm.q_value(rm.QInput(rqd, 4, 3, 1, 1, 1))
+    inp = rm.Rmr89Input()
+    inp.ucs_mpa, inp.rqd_pct, inp.spacing_m, inp.joint_condition_rating, inp.water = 120, rqd, 0.5, 20, rm.Water.Dry
+    rm.rmr89(inp)

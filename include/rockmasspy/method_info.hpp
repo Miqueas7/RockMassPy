@@ -9,8 +9,9 @@
 
 namespace rockmasspy {
 
-/// Primary = fuente primaria leída; PrimaryLaterAuthors = primaria con ajustes de autores posteriores;
-/// Secondary = solo fuente secundaria.
+/// Primary = verificada en la fuente original (o en una reproducción fiel de sus ecuaciones por un autor citado);
+/// PrimaryLaterAuthors = verificada en una publicación posterior de los mismos autores; Secondary = solo fuente
+/// secundaria.
 enum class Verification { Primary, PrimaryLaterAuthors, Secondary };
 
 struct MethodInfo {

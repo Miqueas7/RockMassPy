@@ -11,6 +11,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -22,9 +23,10 @@ namespace rockmasspy {
 
 enum class QEdition { NGI2015, NGI2025 };
 
-/// jn hasta 60 incluye 3·Jn de intersecciones.
+/// jn hasta 60 incluye 3·Jn de intersecciones. Sin dato todo vale NaN: un campo olvidado lanza con su nombre.
 struct QInput {
-    double rqd_pct = 100.0, jn = 1.0, jr = 1.0, ja = 1.0, jw = 1.0, srf = 1.0;
+    double rqd_pct = validation::unset, jn = validation::unset, jr = validation::unset, ja = validation::unset,
+           jw = validation::unset, srf = validation::unset;
     QInput() = default;
     QInput(double rqd_pct, double jn, double jr, double ja, double jw, double srf)
         : rqd_pct(rqd_pct), jn(jn), jr(jr), ja(ja), jw(jw), srf(srf) {}
@@ -90,11 +92,12 @@ struct EquivalentDimension {
     std::vector<std::string> warnings;
 };
 
-/// De = luz o altura / ESR. Categoría ESR 'A'-'G' (NGI Tabla 4-1).
+/// De = luz o altura / ESR. Categoría ESR 'A'-'G' (NGI Tabla 4-1); se acepta en minúscula.
 inline EquivalentDimension equivalent_dimension(double span_or_height_m, double esr, double q, char esr_category) {
     validation::require_positive(span_or_height_m, "span_or_height_m");
     validation::require_positive(esr, "esr");
     validation::require_positive(q, "q");
+    esr_category = static_cast<char>(std::toupper(static_cast<unsigned char>(esr_category)));
     if (esr_category < 'A' || esr_category > 'G')
         throw std::invalid_argument("Domain error [RockMassPy]: parameter 'esr_category' must be one of A-G");
     EquivalentDimension d{};

@@ -10,8 +10,8 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -61,12 +61,13 @@ inline double hb_tensile(double sigma_ci_mpa, const HbParams& p) {
     return -p.s * sigma_ci_mpa / p.mb;
 }
 
-/// Lanza si σ3 < σt (la envolvente no existe en ese rango).
+/// Lanza si σ3 < σt (la envolvente no existe en ese rango). En σ3 = σt la base puede salir −1e-17 por
+/// redondeo y pow daría NaN: se recorta a 0.
 inline double hb_sigma1(double sigma3_mpa, double sigma_ci_mpa, const HbParams& p) {
     validation::require_finite(sigma3_mpa, "sigma3_mpa");
     if (sigma3_mpa < hb_tensile(sigma_ci_mpa, p))
         validation::detail::fail("sigma3_mpa", "must be >= the tensile strength of the rock mass", sigma3_mpa);
-    return sigma3_mpa + sigma_ci_mpa * std::pow(p.mb * sigma3_mpa / sigma_ci_mpa + p.s, p.a);
+    return sigma3_mpa + sigma_ci_mpa * std::pow(std::max(0.0, p.mb * sigma3_mpa / sigma_ci_mpa + p.s), p.a);
 }
 
 /// σcm: resistencia global del macizo (rango σt < σ3 < σci/4).
@@ -83,17 +84,16 @@ inline double hb_sigma3max(double sigma_cm_mpa, double unit_weight_mn_m3, double
     using namespace validation;
     require_positive(sigma_cm_mpa, "sigma_cm_mpa");
     require_positive(unit_weight_mn_m3, "unit_weight_mn_m3");
-    std::ostringstream got;
-    got << unit_weight_mn_m3;
     require_max(unit_weight_mn_m3, 0.05, "unit_weight_mn_m3",
-                "unit_weight_mn_m3 must be in MN/m3 (e.g. 0.027), got " + got.str());
+                "unit_weight_mn_m3 must be in MN/m3 (e.g. 0.027), got " + detail::num(unit_weight_mn_m3));
     require_positive(depth_or_height_m, "depth_or_height_m");
     const double ratio = sigma_cm_mpa / (unit_weight_mn_m3 * depth_or_height_m);
     return app == HbApplication::Tunnel ? 0.47 * std::pow(ratio, -0.94) * sigma_cm_mpa
                                         : 0.72 * std::pow(ratio, -0.91) * sigma_cm_mpa;
 }
 
-// La info copia la de HbParams: queda Primary porque reproduce los ejemplos resueltos HB-1 y HB-2 del paper.
+// La info y los avisos se copian de HbParams (así el aviso de D de HB-2018 llega a c' y φ'). Queda Primary
+// porque reproduce los ejemplos resueltos HB-1 y HB-2 del paper.
 struct MohrCoulombFit {
     double phi_deg;
     double cohesion_mpa;
@@ -116,6 +116,7 @@ inline MohrCoulombFit hb_mohr_coulomb(double sigma_ci_mpa, const HbParams& p, do
                      ((1.0 + a) * (2.0 + a) * std::sqrt(1.0 + k / ((1.0 + a) * (2.0 + a))));
     r.sigma3max_mpa = sigma3max_mpa;
     r.info = p.info;
+    r.warnings = p.warnings;
     return r;
 }
 

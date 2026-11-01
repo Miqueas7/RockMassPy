@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -40,7 +41,8 @@ inline RqdResult rqd_from_core(const std::vector<double>& piece_lengths_m, doubl
     if (total > run_length_m * (1.0 + 1e-9))
         throw std::invalid_argument(
             "Domain error [RockMassPy]: parameter 'piece_lengths_m' sums to more than 'run_length_m'");
-    return {100.0 * sound / run_length_m,
+    // La tolerancia de arriba deja pasar sumas apenas mayores que la corrida: se recorta a 100.
+    return {std::min(100.0, 100.0 * sound / run_length_m),
             {"RQD-Deere", Verification::Secondary, "Deere (1964); Deere & Deere (1988)"},
             {}};
 }

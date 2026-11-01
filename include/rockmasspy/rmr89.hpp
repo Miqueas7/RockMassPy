@@ -4,6 +4,7 @@
  *
  * Regla de límites: un valor justo en el límite de un rango toma el puntaje menos favorable
  * (por ejemplo UCS = 100 MPa puntúa 7, no 12; RQD = 90 puntúa 17, no 20).
+ * Sin dato: las medidas valen NaN y los enums obligatorios van vacíos; un campo olvidado lanza con su nombre.
  * Fuente: transcripción de Osinergmin (2017), Anexo A.15 (verificación secundaria).
  */
 
@@ -25,11 +26,11 @@ enum class Infilling { None, HardUnder5mm, HardOver5mm, SoftUnder5mm, SoftOver5m
 enum class Weathering { Unweathered, Slightly, Moderately, Highly, Decomposed };
 
 struct JointCondition89 {
-    double persistence_m = 0.0;
-    double aperture_mm = 0.0;
-    Roughness roughness = Roughness::VeryRough;
-    Infilling infilling = Infilling::None;
-    Weathering weathering = Weathering::Unweathered;
+    double persistence_m = validation::unset;
+    double aperture_mm = validation::unset;
+    std::optional<Roughness> roughness;
+    std::optional<Infilling> infilling;
+    std::optional<Weathering> weathering;
 };
 
 inline int rating_ucs89(double ucs_mpa) {
@@ -80,8 +81,10 @@ inline int jcond89(const JointCondition89& j) {
                             : j.persistence_m < 20.0 ? 1 : 0;
     const int aperture = j.aperture_mm == 0.0 ? 6 : j.aperture_mm < 0.1 ? 5 : j.aperture_mm < 1.0 ? 4
                          : j.aperture_mm < 5.0 ? 1 : 0;
-    return persistence + aperture + rough[static_cast<int>(j.roughness)] + fill[static_cast<int>(j.infilling)] +
-           weather[static_cast<int>(j.weathering)];
+    using validation::require_set;
+    return persistence + aperture + rough[static_cast<int>(require_set(j.roughness, "roughness"))] +
+           fill[static_cast<int>(require_set(j.infilling, "infilling"))] +
+           weather[static_cast<int>(require_set(j.weathering, "weathering"))];
 }
 
 inline int rating_water89(Water w) {
@@ -92,20 +95,22 @@ inline int rating_water89(Water w) {
 /// Exactamente uno de ucs_mpa/is50_mpa y uno de joint_condition/joint_condition_rating (0-30).
 struct Rmr89Input {
     std::optional<double> ucs_mpa, is50_mpa;
-    double rqd_pct = 0.0;
-    double spacing_m = 1.0;
+    double rqd_pct = validation::unset;
+    double spacing_m = validation::unset;
     std::optional<JointCondition89> joint_condition;
-    std::optional<int> joint_condition_rating;
-    Water water = Water::Dry;
+    std::optional<double> joint_condition_rating;
+    std::optional<Water> water;
     std::optional<OrientationClass> orientation;
     Application application = Application::Tunnel;
 };
 
 struct Rmr89Result {
-    int r_strength, r_rqd, r_spacing, r_condition, r_water;
-    int basic;
-    int adjustment;
-    int rmr;
+    int r_strength, r_rqd, r_spacing;
+    double r_condition;
+    int r_water;
+    double basic;
+    double adjustment;
+    double rmr;
     RmrClass rmr_class;
     MethodInfo info;
     std::vector<std::string> warnings;
@@ -128,7 +133,7 @@ inline Rmr89Result rmr89(const Rmr89Input& in) {
         validation::require_in_range(*in.joint_condition_rating, 0.0, 30.0, "joint_condition_rating");
         r.r_condition = *in.joint_condition_rating;
     }
-    r.r_water = rating_water89(in.water);
+    r.r_water = rating_water89(validation::require_set(in.water, "water"));
     r.basic = r.r_strength + r.r_rqd + r.r_spacing + r.r_condition + r.r_water;
 
     if (in.rqd_pct > 0.0 && in.rqd_pct <= 1.0)
@@ -137,9 +142,10 @@ inline Rmr89Result rmr89(const Rmr89Input& in) {
         r.adjustment = orientation_adjustment(*in.orientation, in.application);
     } else {
         r.adjustment = 0;
-        r.warnings.push_back("no orientation adjustment: rmr is the basic RMR89'");
+        r.warnings.push_back("no orientation adjustment applied: rmr is the basic rating");
     }
     r.rmr = r.basic + r.adjustment;
+    if (r.rmr < 0.0 || r.rmr > 100.0) r.warnings.push_back("rmr outside 0-100 after adjustments");
     r.rmr_class = rmr_class(r.rmr);
     r.info = {"RMR89", Verification::Secondary, "Bieniawski (1989), as transcribed in Osinergmin (2017), Annex A.15"};
     return r;

@@ -1,8 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "error_of.hpp"
 #include "rockmasspy/rmr76.hpp"
 
 using namespace rockmasspy;
@@ -20,7 +25,7 @@ TEST(Rmr76, SpacingAndTotal) {
     EXPECT_EQ(r.basic, 12 + 17 + 20 + 20 + 10); EXPECT_EQ(r.info.method_id, "RMR76");
     EXPECT_EQ(r.adjustment, 0); EXPECT_EQ(r.rmr, 79);
     ASSERT_EQ(r.warnings.size(), 1u);
-    EXPECT_EQ(r.warnings[0], "no orientation adjustment: rmr is the basic RMR76");
+    EXPECT_EQ(r.warnings[0], "no orientation adjustment applied: rmr is the basic rating");
 }
 
 // A.16 difiere de RMR89 en los rangos de resistencia (A.16 manda).
@@ -46,4 +51,19 @@ TEST(Rmr76, Validation) {
     in = base76(); in.spacing_m = 0; EXPECT_THROW(rmr76(in), std::invalid_argument);
     in = base76(); in.rqd_pct = 101; EXPECT_THROW(rmr76(in), std::invalid_argument);
     in = base76(); in.rqd_pct = std::numeric_limits<double>::quiet_NaN(); EXPECT_THROW(rmr76(in), std::invalid_argument);
+}
+TEST(Rmr76, UnsetFieldsThrowWithTheirName) {
+    EXPECT_THROW(rmr76(Rmr76Input{}), std::invalid_argument);
+    EXPECT_NO_THROW(rmr76(base76()));
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<std::pair<std::string, std::function<void(Rmr76Input&)>>> cases = {
+        {"rqd_pct", [=](Rmr76Input& in) { in.rqd_pct = nan; }},
+        {"spacing_m", [=](Rmr76Input& in) { in.spacing_m = nan; }},
+        {"condition", [](Rmr76Input& in) { in.condition.reset(); }},
+        {"water", [](Rmr76Input& in) { in.water.reset(); }},
+    };
+    for (const auto& [name, unset] : cases) {
+        auto in = base76(); unset(in);
+        EXPECT_NE(error_of([&] { rmr76(in); }).find("'" + name + "'"), std::string::npos) << name;
+    }
 }

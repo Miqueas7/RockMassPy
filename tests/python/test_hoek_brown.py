@@ -23,3 +23,9 @@ def test_unit_weight_in_kn_raises():
 def test_moduli():
     assert rm.erm_hoek_diederichs_simplified(45, 0).value == pytest.approx(6138.31, abs=0.01)
     assert rm.em_hoek2002(45, 0, 50).unit == "GPa"
+
+
+def test_mohr_coulomb_carries_d_warning():
+    p = rm.hb_params(45, 10, 0.5, rm.HbEdition.HB2018)
+    mc = rm.hb_mohr_coulomb(50, p, 1.0)
+    assert len(mc.warnings) == 1 and "blast-damaged zone" in mc.warnings[0]

@@ -44,3 +44,18 @@ def test_rmr14_tbm_raises():
     i.excavation = rm.Excavation.Tbm
     with pytest.raises(ValueError):
         rm.rmr14(i)
+
+
+def test_rmr14_fractional_chart_rating():
+    i = _in14()
+    i.strength_rating = 12.4
+    i.ice = 80.0
+    assert rm.rmr14(i).basic == pytest.approx(77.4)
+
+
+@pytest.mark.parametrize("field", ["strength_rating", "joints_per_m_rating"])
+def test_rmr14_nan_chart_rating_raises_value_error(field):
+    i = _in14()
+    setattr(i, field, float("nan"))
+    with pytest.raises(ValueError, match=field):
+        rm.rmr14(i)

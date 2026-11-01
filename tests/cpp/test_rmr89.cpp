@@ -1,9 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "error_of.hpp"
 #include "rockmasspy/rmr89.hpp"
 
 using namespace rockmasspy;
@@ -35,7 +40,7 @@ TEST(Rmr89, OrientationMatrix) {
 TEST(Rmr89, TotalConditionRatingAndNoOrientation) {
     Rmr89Input in; in.ucs_mpa = 120; in.rqd_pct = 80; in.spacing_m = 0.5; in.joint_condition_rating = 20; in.water = Water::Dry;
     auto r = rmr89(in); EXPECT_EQ(r.rmr, 12 + 17 + 10 + 20 + 15); EXPECT_EQ(r.adjustment, 0); EXPECT_EQ(r.warnings.size(), 1u);
-    EXPECT_EQ(r.warnings[0], "no orientation adjustment: rmr is the basic RMR89'");
+    EXPECT_EQ(r.warnings[0], "no orientation adjustment applied: rmr is the basic rating");
 }
 TEST(Rmr89, RqdAsFractionWarns) {
     Rmr89Input in; in.ucs_mpa = 120; in.rqd_pct = 0.7; in.spacing_m = 0.5; in.joint_condition_rating = 20;
@@ -69,4 +74,47 @@ TEST(Rmr89, OrientationBoundaryIsConservative) {
 TEST(Rmr89, RmrClassRejectsNonFinite) {
     EXPECT_THROW(rmr_class(std::nan("")), std::invalid_argument);
     EXPECT_THROW(rmr_class(std::numeric_limits<double>::infinity()), std::invalid_argument);
+}
+// I1: un campo olvidado lanza con su nombre, nunca toma el valor más favorable.
+TEST(Rmr89, UnsetFieldsThrowWithTheirName) {
+    EXPECT_THROW(rmr89(Rmr89Input{}), std::invalid_argument);
+    const auto full = [] {
+        Rmr89Input in; in.ucs_mpa = 120; in.rqd_pct = 80; in.spacing_m = 0.5; in.water = Water::Dry;
+        in.joint_condition = JointCondition89{2.0, 0.5, Roughness::Rough, Infilling::None, Weathering::Slightly};
+        return in;
+    };
+    EXPECT_NO_THROW(rmr89(full()));
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<std::pair<std::string, std::function<void(Rmr89Input&)>>> cases = {
+        {"rqd_pct", [=](Rmr89Input& in) { in.rqd_pct = nan; }},
+        {"spacing_m", [=](Rmr89Input& in) { in.spacing_m = nan; }},
+        {"water", [](Rmr89Input& in) { in.water.reset(); }},
+        {"persistence_m", [=](Rmr89Input& in) { in.joint_condition->persistence_m = nan; }},
+        {"aperture_mm", [=](Rmr89Input& in) { in.joint_condition->aperture_mm = nan; }},
+        {"roughness", [](Rmr89Input& in) { in.joint_condition->roughness.reset(); }},
+        {"infilling", [](Rmr89Input& in) { in.joint_condition->infilling.reset(); }},
+        {"weathering", [](Rmr89Input& in) { in.joint_condition->weathering.reset(); }},
+    };
+    for (const auto& [name, unset] : cases) {
+        auto in = full(); unset(in);
+        EXPECT_NE(error_of([&] { rmr89(in); }).find("'" + name + "'"), std::string::npos) << name;
+    }
+    EXPECT_NE(error_of([] { jcond89(JointCondition89{}); }).find("'persistence_m'"), std::string::npos);
+}
+// I2: el puntaje de condición acepta decimales (celdas de Excel).
+TEST(Rmr89, FractionalConditionRating) {
+    Rmr89Input in; in.ucs_mpa = 120; in.rqd_pct = 80; in.spacing_m = 0.5; in.joint_condition_rating = 18.5;
+    in.water = Water::Dry; in.orientation = OrientationClass::Fair;
+    auto r = rmr89(in);
+    EXPECT_DOUBLE_EQ(r.r_condition, 18.5); EXPECT_DOUBLE_EQ(r.rmr, 12 + 17 + 10 + 18.5 + 15 - 5);
+    in.joint_condition_rating = std::numeric_limits<double>::quiet_NaN(); EXPECT_THROW(rmr89(in), std::invalid_argument);
+}
+// M5: un talud con ajuste -60 baja de 0.
+TEST(Rmr89, OutOfRangeAfterAdjustmentWarns) {
+    Rmr89Input in; in.ucs_mpa = 0.5; in.rqd_pct = 10; in.spacing_m = 0.05; in.joint_condition_rating = 0;
+    in.water = Water::Flowing; in.orientation = OrientationClass::VeryUnfavourable; in.application = Application::Slope;
+    auto r = rmr89(in);
+    EXPECT_DOUBLE_EQ(r.rmr, 8 - 60);
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0], "rmr outside 0-100 after adjustments");
 }

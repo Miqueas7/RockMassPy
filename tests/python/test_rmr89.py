@@ -29,3 +29,13 @@ def test_ambiguous_raises():
 def test_rmr_class_rejects_nan():
     with pytest.raises(ValueError):
         rm.rmr_class(float("nan"))
+
+
+def test_condition_rating_accepts_excel_float_and_rejects_nan():
+    inp = rm.Rmr89Input()
+    inp.ucs_mpa, inp.rqd_pct, inp.spacing_m, inp.water = 120.0, 80.0, 0.5, rm.Water.Dry
+    inp.joint_condition_rating = 18.0
+    assert rm.rmr89(inp).r_condition == 18.0
+    inp.joint_condition_rating = float("nan")
+    with pytest.raises(ValueError, match="joint_condition_rating"):
+        rm.rmr89(inp)

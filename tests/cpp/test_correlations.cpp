@@ -24,6 +24,7 @@ TEST(Correlations, InfoAndLabels) {
     EXPECT_EQ(r.info.verification, Verification::Secondary);
     EXPECT_EQ(r.from, "Q");
     EXPECT_EQ(r.to, "RMR89");
+    EXPECT_EQ(correlate(Correlation::RmrFromQ_Bieniawski1976, 4.5).to, "RMR76");   // ajustada con el RMR de 1976
     auto g = correlate(Correlation::GsiFromRmr89Prime_HoekDiederichs2006, 64);
     EXPECT_EQ(g.info.verification, Verification::Primary);
     EXPECT_EQ(g.from, "RMR89'");

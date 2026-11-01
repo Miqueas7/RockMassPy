@@ -26,16 +26,22 @@ inline MethodInfo gsi_info() {
     return {"GSI-2013", Verification::Primary, "Hoek, Carter & Diederichs (2013), ARMA 13-672"};
 }
 
+// RQD escrito como fracción (0.7 en vez de 70): mismo aviso que RMR89 y Q.
+inline std::vector<std::string> rqd_fraction_warning(double rqd_pct) {
+    if (rqd_pct > 0.0 && rqd_pct <= 1.0) return {"rqd_pct <= 1: RQD is a percentage (0-100); check it is not a fraction"};
+    return {};
+}
+
 inline GsiResult gsi_from_jcond89_rqd(double jcond89, double rqd_pct) {
     validation::require_in_range(jcond89, 0.0, 30.0, "jcond89");
     validation::require_in_range(rqd_pct, 0.0, 100.0, "rqd_pct");
-    return {1.5 * jcond89 + rqd_pct / 2.0, gsi_info(), {}};
+    return {1.5 * jcond89 + rqd_pct / 2.0, gsi_info(), rqd_fraction_warning(rqd_pct)};
 }
 
 inline GsiResult gsi_from_jcond76_rqd(double jcond76, double rqd_pct) {
     validation::require_in_range(jcond76, 0.0, 25.0, "jcond76");
     validation::require_in_range(rqd_pct, 0.0, 100.0, "rqd_pct");
-    return {2.0 * jcond76 + rqd_pct / 2.0, gsi_info(), {}};
+    return {2.0 * jcond76 + rqd_pct / 2.0, gsi_info(), rqd_fraction_warning(rqd_pct)};
 }
 
 /// JCond89 = 35·(Jr/Ja)/(1 + Jr/Ja), con los rangos de Jr y Ja del sistema Q.

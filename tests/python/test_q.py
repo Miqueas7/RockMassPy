@@ -9,7 +9,7 @@ def test_hoek_example_via_python():
 
 def test_default_constructor_and_fields():
     q = rm.QInput()
-    q.rqd_pct = 90
+    q.rqd_pct, q.jn, q.jr, q.ja, q.jw, q.srf = 90, 1, 1, 1, 1, 1
     assert rm.q_value(q).q_base == 90.0
 
 
@@ -19,6 +19,10 @@ def test_wall_and_de_via_python():
     assert rm.equivalent_dimension(15, 1.6, 4.5, "C").de_m == pytest.approx(9.375)
     with pytest.raises(ValueError):
         rm.equivalent_dimension(15, 1.6, 4.5, "Z")
+    assert rm.equivalent_dimension(10, 1.6, 0.05, "c").esr_used == 1.0  # minúscula = "C"
+    for bad in ("", "CC"):
+        with pytest.raises(ValueError, match="esr_category"):
+            rm.equivalent_dimension(15, 1.6, 4.5, bad)
 
 
 def test_lookup_2025():

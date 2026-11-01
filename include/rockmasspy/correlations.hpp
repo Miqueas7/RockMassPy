@@ -51,7 +51,7 @@ inline CorrelationResult correlate(Correlation c, double x) {
         case Correlation::RmrFromQ_Bieniawski1976:
             require_positive(x, "q");
             v = 9.0 * std::log(x) + 44.0;
-            set("RmrFromQ_Bieniawski1976", Verification::Secondary, "Bieniawski (1976)", "Q", "RMR89");
+            set("RmrFromQ_Bieniawski1976", Verification::Secondary, "Bieniawski (1976)", "Q", "RMR76");  // ajustada con RMR76
             break;
         case Correlation::RmrFromQ_Huang2026:
             require_positive(x, "q");

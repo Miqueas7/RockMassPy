@@ -25,9 +25,10 @@ NB_MODULE(_rockmasspy_core, m) {
     m.doc() = "RockMassPy core: rock mass classifications, Hoek-Brown strength and mining geomechanics.";
 
     nb::enum_<Verification>(m, "Verification", "How well the method's source was verified.")
-        .value("Primary", Verification::Primary, "Primary source read")
+        .value("Primary", Verification::Primary,
+               "Verified in the original source (or a faithful reproduction of its equations by a cited author)")
         .value("PrimaryLaterAuthors", Verification::PrimaryLaterAuthors,
-               "Primary source with later-author adjustments")
+               "Verified in a later publication by the same authors")
         .value("Secondary", Verification::Secondary, "Secondary source only");
 
     nb::class_<MethodInfo>(m, "MethodInfo", "Method id, verification level and source of a result.")
@@ -171,7 +172,7 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("ice_bieniawski_celada", &ice_bieniawski_celada, nb::arg("rmr"), nb::arg("sigma_ci_mpa"), nb::arg("k0"),
           nb::arg("depth_m"), nb::arg("shape_factor_f"), "Elastic behaviour index (Bieniawski & Celada).");
     m.def("fs_face", &fs_face, nb::arg("ice"));
-    m.def("rmr14", &rmr14, nb::arg("input"), "RMR14 (Bieniawski 2014), drill-and-blast only.");
+    m.def("rmr14", &rmr14, nb::arg("input"), "RMR14 per Celada et al. (2014), drill-and-blast only.");
 
     nb::enum_<QEdition>(m, "QEdition", "Q-system manual edition.")
         .value("NGI2015", QEdition::NGI2015).value("NGI2025", QEdition::NGI2025);
@@ -192,8 +193,16 @@ NB_MODULE(_rockmasspy_core, m) {
     nb::class_<EquivalentDimension>(m, "EquivalentDimension")
         .def_ro("de_m", &EquivalentDimension::de_m).def_ro("esr_used", &EquivalentDimension::esr_used)
         .def_ro("warnings", &EquivalentDimension::warnings);
-    m.def("equivalent_dimension", &equivalent_dimension, nb::arg("span_or_height_m"), nb::arg("esr"), nb::arg("q"),
-          nb::arg("esr_category"), "Equivalent dimension De = span or height / ESR.");
+    // El caster de char de nanobind da TypeError con "" o "CC": se recibe str para que salga ValueError.
+    m.def("equivalent_dimension",
+          [](double span_or_height_m, double esr, double q, const std::string& esr_category) {
+              if (esr_category.size() != 1)
+                  throw std::invalid_argument(
+                      "Domain error [RockMassPy]: parameter 'esr_category' must be one of A-G");
+              return equivalent_dimension(span_or_height_m, esr, q, esr_category[0]);
+          },
+          nb::arg("span_or_height_m"), nb::arg("esr"), nb::arg("q"), nb::arg("esr_category"),
+          "Equivalent dimension De = span or height / ESR (ESR category A-G, any case).");
 
     nb::class_<GsiResult>(m, "GsiResult")
         .def_ro("gsi", &GsiResult::gsi).def_ro("info", &GsiResult::info).def_ro("warnings", &GsiResult::warnings);

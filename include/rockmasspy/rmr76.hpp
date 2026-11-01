@@ -5,6 +5,7 @@
  * Regla de límites: un valor justo en el límite de un rango toma el puntaje menos favorable.
  * Los rangos de resistencia del Anexo A.16 difieren de los de RMR89 (A.15), por eso aquí van los propios.
  * RQD, agua y ajuste por orientación coinciden con RMR89 y se reutilizan.
+ * Sin dato: las medidas valen NaN y los enums obligatorios van vacíos; un campo olvidado lanza con su nombre.
  * Fuente: transcripción de Osinergmin (2017), Anexo A.16 (verificación secundaria).
  */
 
@@ -60,10 +61,10 @@ inline int rating_spacing76(double spacing_m) {
 /// Exactamente uno de ucs_mpa/is50_mpa.
 struct Rmr76Input {
     std::optional<double> ucs_mpa, is50_mpa;
-    double rqd_pct = 0.0;
-    double spacing_m = 1.0;
-    JointCondition76 condition = JointCondition76::VeryRoughTight;
-    Water76 water = Water76::CompletelyDry;
+    double rqd_pct = validation::unset;
+    double spacing_m = validation::unset;
+    std::optional<JointCondition76> condition;
+    std::optional<Water76> water;
     std::optional<OrientationClass> orientation;
     Application application = Application::Tunnel;
 };
@@ -87,8 +88,8 @@ inline Rmr76Result rmr76(const Rmr76Input& in) {
     r.r_strength = in.ucs_mpa ? rating_ucs76(*in.ucs_mpa) : rating_is50_76(*in.is50_mpa);
     r.r_rqd = rating_rqd89(in.rqd_pct);  // mismos rangos en A.16
     r.r_spacing = rating_spacing76(in.spacing_m);
-    r.r_condition = cond[static_cast<int>(in.condition)];
-    r.r_water = water[static_cast<int>(in.water)];
+    r.r_condition = cond[static_cast<int>(validation::require_set(in.condition, "condition"))];
+    r.r_water = water[static_cast<int>(validation::require_set(in.water, "water"))];
     r.basic = r.r_strength + r.r_rqd + r.r_spacing + r.r_condition + r.r_water;
 
     if (in.rqd_pct > 0.0 && in.rqd_pct <= 1.0)
@@ -97,9 +98,10 @@ inline Rmr76Result rmr76(const Rmr76Input& in) {
         r.adjustment = orientation_adjustment(*in.orientation, in.application);
     } else {
         r.adjustment = 0;
-        r.warnings.push_back("no orientation adjustment: rmr is the basic RMR76");
+        r.warnings.push_back("no orientation adjustment applied: rmr is the basic rating");
     }
     r.rmr = r.basic + r.adjustment;
+    if (r.rmr < 0 || r.rmr > 100) r.warnings.push_back("rmr outside 0-100 after adjustments");
     r.rmr_class = rmr_class(r.rmr);
     r.info = {"RMR76", Verification::Secondary, "Bieniawski (1976), as transcribed in Osinergmin (2017), Annex A.16"};
     return r;
