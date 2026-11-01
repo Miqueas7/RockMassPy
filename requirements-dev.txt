@@ -1,5 +1,7 @@
 cmake==4.4.4
 hypothesis==6.170.14
 nanobind==3.1.0
+openpyxl==3.1.5
 pytest==9.2.0
+PyYAML==6.0.3
 scikit_build_core==1.1.1
