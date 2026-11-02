@@ -78,7 +78,12 @@ inline PlaneChecks check_plane(PlaneOrientation plane, const KinematicInput& in)
     validate(in);
     check(plane);
     const double bs = in.face.dip_deg, bj = plane.dip_deg, phi = in.friction_deg, lim = in.lateral_limit_deg;
-    const double delta = sdiff(plane.dip_direction_deg, in.face.dip_direction_deg);
+    double delta = sdiff(plane.dip_direction_deg, in.face.dip_direction_deg);
+    // plano vertical contra cara vertical: sin lado; se toma el sentido más cercano a la cara (el crítico)
+    if (bj >= 90.0 - eps && bs >= 90.0 - eps) {
+        const double other = sdiff(plane.dip_direction_deg + 180.0, in.face.dip_direction_deg);
+        if (std::fabs(other) < std::fabs(delta)) delta = other;
+    }
     const bool day = toward(delta) && daylights(vec({plane.dip_direction_deg, bj}), in);
     PlaneChecks r{};
     r.planar_no_limits = day && bj >= phi - eps;

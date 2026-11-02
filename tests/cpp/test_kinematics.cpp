@@ -100,6 +100,15 @@ TEST(Kinematics, VerticalPlaneIsTheSameFromEitherSide) {
     EXPECT_TRUE(check_plane({180, 90}, kIn).flexural_toppling);
 }
 
+TEST(Kinematics, VerticalPlaneAgainstVerticalFaceFromEitherSide) {
+    const KinematicInput in{{180, 90}, 30, 30};
+    const auto a = check_plane({180, 90}, in), b = check_plane({0, 90}, in);
+    EXPECT_TRUE(a.planar);
+    EXPECT_EQ(a.planar, b.planar);
+    EXPECT_EQ(a.planar_no_limits, b.planar_no_limits);
+    EXPECT_EQ(a.direct_toppling_base_zone, b.direct_toppling_base_zone);
+}
+
 TEST(Kinematics, VerticalLineIsInvariantToTrend) {
     for (const auto& in : {kIn, KinematicInput{{180, 90}, 30, 20}}) {
         const auto a = check_intersection({0, 90}, in), b = check_intersection({180, 90}, in);

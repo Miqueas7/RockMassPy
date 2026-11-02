@@ -100,6 +100,35 @@ TEST(Smr, DiscreteLimits) {
     EXPECT_EQ(smr_class(81), 1);
 }
 
+TEST(Smr, DiscreteLimitsSurviveFloatNoise) {
+    // el ruido de coma flotante (media de Fisher) no saca un límite al lado favorable (R10)
+    auto f = [](SmrMode m, SmrAngles a) { return smr(60, m, kDis, kNormal, a); };
+    const double n = 1e-12;
+    for (double a : {5.0, 10.0, 20.0, 30.0}) EXPECT_EQ(f(P, {a + n, 60, 20}).f1, f(P, {a, 60, 20}).f1) << a;
+    for (double b : {20.0, 30.0, 35.0, 45.0}) EXPECT_EQ(f(P, {40, b - n, 20}).f2, f(P, {40, b, 20}).f2) << b;
+    for (double c : {110.0, 120.0}) EXPECT_EQ(f(T, {40, 45, c - n}).f3, f(T, {40, 45, c}).f3) << c;
+    EXPECT_EQ(f(P, {40, 45, 10 + n}).f3, -6);
+    EXPECT_EQ(f(P, {40, 45, 1.4e-14}).f3, -25);
+    EXPECT_EQ(f(P, {40, 45, -1.4e-14}).f3, -25);
+    EXPECT_EQ(f(P, {40, 45, -9.999999999999993}).f3, -60);
+}
+
+TEST(Smr, FisherMeanOnTheLimitGivesTheUnfavourableClass) {
+    auto mean_case = [](PlaneOrientation j, int rows, PlaneOrientation face) {
+        const auto fs = fisher_stats(std::vector<LineOrientation>(rows, pole_of(j)));
+        const auto m = plane_of(fs.mean);
+        return smr(60, P, kDis, kNormal, smr_angles(P, m.dip_direction_deg, m.dip_deg, face));
+    };
+    auto r = mean_case({7, 60}, 3, {7, 60});  // familia de tres filas paralela a la cara: C = 0
+    EXPECT_EQ(r.f3, -25);
+    EXPECT_NEAR(r.smr, 35.0, 1e-9);
+    EXPECT_EQ(r.smr_class, 4);
+    r = mean_case({0, 30}, 1, {0, 40});  // una fila, C = -10
+    EXPECT_EQ(r.f3, -60);
+    EXPECT_NEAR(r.smr, 18.0, 1e-9);
+    EXPECT_EQ(r.smr_class, 5);
+}
+
 TEST(Smr, F4AndProbabilityAndInfo) {
     const SmrAngles a{40, 45, 20};
     const double expect[] = {15, 10, 8, 0, -8};

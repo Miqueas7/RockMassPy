@@ -80,10 +80,12 @@ inline SmrResult smr(double rmr_basic, SmrMode mode, SmrFunctions functions, Slo
     const double A = angles.a_deg, B = angles.b_deg, C = angles.c_deg;
     double f1, f2, f3;
     if (functions == SmrFunctions::Discrete) {
-        f1 = A > 30 ? 0.15 : A > 20 ? 0.40 : A > 10 ? 0.70 : A > 5 ? 0.85 : 1.00;
-        f2 = top ? 1.0 : B < 20 ? 0.15 : B < 30 ? 0.40 : B < 35 ? 0.70 : B < 45 ? 0.85 : 1.00;
-        if (top) f3 = C < 110 ? 0 : C < 120 ? -6 : -25;
-        else f3 = C > 10 ? 0 : C > 0 ? -6 : C == 0 ? -25 : C > -10 ? -50 : -60;
+        // holgura del lado menos favorable (R10): el ruido de la media de Fisher no decide un límite; |C| <= e es C = 0
+        constexpr double e = 1e-9;
+        f1 = A > 30 + e ? 0.15 : A > 20 + e ? 0.40 : A > 10 + e ? 0.70 : A > 5 + e ? 0.85 : 1.00;
+        f2 = top ? 1.0 : B < 20 - e ? 0.15 : B < 30 - e ? 0.40 : B < 35 - e ? 0.70 : B < 45 - e ? 0.85 : 1.00;
+        if (top) f3 = C < 110 - e ? 0 : C < 120 - e ? -6 : -25;
+        else f3 = C > 10 + e ? 0 : C > e ? -6 : C >= -e ? -25 : C > -10 + e ? -50 : -60;
     } else {
         const auto at = [](double x) { return stereonet_detail::deg(std::atan(x)); };
         f1 = 16.0 / 25.0 - (3.0 / 500.0) * at((A - 17.0) / 10.0);

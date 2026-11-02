@@ -147,8 +147,10 @@ TEST(QSlope, OutOfTableWarnsWithoutThrowing) {
     in.srf_a = 1.5;
     EXPECT_TRUE(has(q_slope(in).warnings, "srf_a"));
     in = base();
-    in.jn = 25;
-    EXPECT_TRUE(has(q_slope(in).warnings, "jn"));
+    in.jn = 27.3;
+    const auto w = q_slope(in).warnings;
+    EXPECT_TRUE(has(w, "jn outside the table range [0.5, 20]"));
+    EXPECT_FALSE(has(w, "27.3"));  // el aviso no repite el valor de la celda
     in = base();
     in.jr_b = 6; in.ja_b = 1; in.o_factor_b = 0.9;
     EXPECT_TRUE(has(q_slope(in).warnings, "jr_b"));

@@ -93,7 +93,7 @@ inline QSlopeResult q_slope(const QSlopeInput& in) {
 
     const auto out = [&](std::optional<double> v, double lo, double hi, const char* name) {
         if (v && (*v < lo || *v > hi))
-            r.warnings.push_back(std::string(name) + " " + validation::detail::num(*v) + " outside the table range [" +
+            r.warnings.push_back(std::string(name) + " outside the table range [" +  // sin el valor de la celda
                                  validation::detail::num(lo) + ", " + validation::detail::num(hi) + "]");
     };
     out(in.jn, 0.5, 20, "jn");
