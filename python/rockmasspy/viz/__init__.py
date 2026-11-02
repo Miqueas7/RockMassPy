@@ -10,3 +10,4 @@ from .style import DEFAULT_SUPPORT_COLORS, SIZES_CM, TEXTS, Style, footer, new_f
 from .maps import plot_labor_profile, plot_plan_map  # noqa: F401
 from .q_chart import plot_q_chart  # noqa: F401
 from .stability_graph import plot_stability_graph  # noqa: F401
+from .stereonet import plot_stereonet  # noqa: F401

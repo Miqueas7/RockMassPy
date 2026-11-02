@@ -499,6 +499,161 @@ def build_stope_report(results, *, title: str, lang: str = "es", author: str = "
                   __version__, date or datetime.date.today().isoformat())
 
 
+_SLOPE_MODES = ("planar", "wedge", "flexural_toppling", "direct_toppling")
+
+
+def _slope_critical(r, mode: str) -> tuple[int, int]:
+    """(casos críticos, total) del modo en el talud; (0, 0) si no hubo cinemática."""
+    k = r.kinematics
+    if k is None:
+        return 0, 0
+    if mode in ("planar", "flexural_toppling"):
+        return getattr(k, mode), k.n_planes
+    if mode == "wedge":
+        return sum(bool(c.wedge_primary or c.wedge_secondary) for c in k.intersections), k.n_intersections
+    return k.direct_toppling, k.n_intersections
+
+
+def slope_modes(r) -> list[str]:
+    """Modos con al menos un caso crítico: cada uno lleva su estereograma."""
+    k = r.kinematics
+    return [m for m in _SLOPE_MODES if _slope_critical(r, m)[0] > 0
+            or (m == "direct_toppling" and k is not None and k.direct_toppling_oblique > 0)]
+
+
+def _attention(r) -> list[str]:
+    """Claves de texto de lo que hace que el talud pida atención (las mismas condiciones de `needs_attention`)."""
+    k, d, c = r.kinematics, r.smr_discrete, r.smr_continuous
+    out = []
+    if k is not None:
+        out += [f"att_{x}" for x in ("planar", "wedge_primary", "wedge_secondary", "flexural_toppling",
+                                     "direct_toppling", "direct_toppling_oblique") if getattr(k, x)]
+    if (d is not None and d.discrete.smr_class >= 4) or (c is not None and c.continuous.smr_class >= 4):
+        out.append("att_smr")
+    if r.face_steeper_than_beta:
+        out.append("att_qslope")
+    if r.warnings:
+        out.append("att_warnings")
+    return out
+
+
+def slope_figure(r, mode: str | None, lang: str, projection: str = "equal_area"):
+    """Estereograma del talud: densidad (mode=None) o la zona crítica de un modo."""
+    from ..viz import plot_stereonet
+    from ..viz.style import Style
+
+    k = r.kinematics
+    lines = [rm.plane_intersection(r.planes[a], r.planes[b]) for a, b in zip(k.pair_a, k.pair_b)] if k else []
+    return plot_stereonet(
+        r.planes, families=[(f.familia, f.mean_plane) for f in r.families], face=r.face,
+        friction_deg=k.input.friction_deg if k else None,
+        lateral_limit_deg=k.input.lateral_limit_deg if k else None, mode=mode,
+        intersections=[x for x in lines if x is not None], projection=projection,
+        density=mode is None, style=Style(lang=lang))
+
+
+def _orient(p) -> str:
+    return f"{p.dip_deg:.0f}/{p.dip_direction_deg:03.0f}"
+
+
+def _kcell(k: int, n: int) -> str:
+    return f"{k}/{n} ({100 * k / n:.0f} %)" if n else "-"
+
+
+def _kappa(v) -> str:
+    return "-" if v is None else "∞" if v == float("inf") else f"{v:.1f}"
+
+
+def _slope_blocks(results, lang: str, figures: bool, projection: str = "equal_area") -> tuple:
+    """Tablas de taludes, familias, SMR y Q-slope, y las figuras por talud; la 3D puede reusarlas."""
+    from ..viz.style import text
+
+    modes_h = tuple(text(f"stereo_mode_{m}", lang) for m in _SLOPE_MODES)
+    slopes = tuple(
+        (r.id_talud, r.id_tramo, _orient(r.face),
+         *(_str(v) for v in ((r.kinematics.input.friction_deg, r.kinematics.input.lateral_limit_deg)
+                             if r.kinematics else ("", ""))),
+         *(_kcell(*_slope_critical(r, m)) for m in _SLOPE_MODES),
+         _kcell(r.kinematics.direct_toppling_oblique, r.kinematics.n_intersections) if r.kinematics else "-")
+        for r in results)
+    fams: dict[tuple, tuple] = {}
+    for r in results:
+        for f in r.families:
+            fams.setdefault((r.id_tramo, f.familia), (
+                r.id_tramo, f.familia, str(f.n), _orient(f.mean_plane), _kappa(f.fisher.kappa),
+                "-" if f.fisher.alpha95_deg is None else f"{f.fisher.alpha95_deg:.1f}"))
+
+    def cls(n):
+        return f"{('I', 'II', 'III', 'IV', 'V')[n - 1]} ({t(f'smr_class_{n}', lang)})"
+
+    smr = []
+    for r in results:
+        for c in r.smr_cases:
+            d, k = c.discrete, c.continuous
+            a = d.angles
+            gov = "+".join(x for x, g in (("D", r.smr_discrete), ("C", r.smr_continuous)) if g is c)
+            smr.append((r.id_talud, c.label, t(f"smr_mode_{c.mode}", lang), *(f"{v:.0f}" for v in (a.a_deg, a.b_deg, a.c_deg)),
+                        *(f"{getattr(d, f'f{i}'):g} / {getattr(k, f'f{i}'):.2f}" for i in (1, 2, 3, 4)),
+                        f"{d.smr:.1f}", cls(d.smr_class), f"{k.smr:.1f}", cls(k.smr_class), gov))
+    qs = tuple((r.id_talud, f"{r.q_slope.q_slope:.3g}", f"{r.q_slope.beta_deg:.1f}", f"{r.face.dip_deg:.0f}",
+                t("sl_yes" if r.face_steeper_than_beta else "sl_no", lang)) for r in results if r.q_slope)
+    figs = []
+    for n, r in enumerate(results, 1):
+        figs.append(_fig(t("fig_stereo_density", lang).format(n=n),
+                         lambda r=r: slope_figure(r, None, lang, projection), lang, figures))
+        for m in slope_modes(r):
+            figs.append(_fig(t("fig_stereo_mode", lang).format(mode=text(f"stereo_mode_{m}", lang), n=n),
+                             lambda r=r, m=m: slope_figure(r, m, lang, projection), lang, figures))
+
+    def tab(key, head, rows):
+        return Table(t(key, lang), head, tuple(rows)) if rows else Paragraph(f"{t(key, lang).rstrip('.')}: {t('none_items', lang)}")
+
+    return (
+        tab("cap_slopes", ("id_talud", "id_tramo", t("h_face", lang), "φ (°)", "L (°)", *modes_h, t("h_oblique", lang)), slopes),
+        tab("cap_families", ("id_tramo", t("h_family", lang), "N", t("h_mean_orientation", lang), "κ", "α95 (°)"),
+            fams.values()),
+        tab("cap_smr", ("id_talud", t("h_case", lang), t("h_mode_smr", lang), "A", "B", "C", "F1", "F2", "F3", "F4",
+                        "SMR D", f"{t('h_class', lang)} D", "SMR C", f"{t('h_class', lang)} C", t("h_governing", lang)),
+            smr),
+        tab("cap_qslope", ("id_talud", "Q-slope", t("h_beta", lang), t("h_face_dip", lang), t("h_steeper", lang)),
+            qs),
+        *figs)
+
+
+def build_slope_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
+                       figures: bool = True, projection: str = "equal_area") -> Report:
+    """Informe de taludes: alcance, métodos, resultados, avisos y nota."""
+    _check_lang(lang)
+    results = list(results)
+    if not results:
+        raise ValueError("results is empty: nothing to report")
+    methods = tuple({(m.method_id, m.source): MethodRef(m.method_id, m.verification.name, m.source)
+                     for r in results for m in r.methods}.values())
+    counts = Counter(w for r in results for w in set(r.warnings))
+    notes = dict.fromkeys(n for r in results for n in r.notes)
+    s4 = ((Table(t("cap_sl_warnings", lang), (t("h_warning", lang), t("h_slopes", lang)),
+                 tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),)
+          if counts else (Paragraph(t("no_warnings", lang)),))
+    why = Counter(x for r in results for x in _attention(r))
+    n_att = sum(r.needs_attention for r in results)
+    if n_att:
+        s4 += (Paragraph(t("sl_attention", lang).format(n=n_att, m=len(results), why=", ".join(
+            f"{t(k, lang)} ({v})" for k, v in why.items()))),)
+    if notes:
+        s4 += (Paragraph(t("h_notes", lang) + ":"), *(Paragraph(n) for n in notes))
+    sections = (
+        Section("1", t("sl_s1", lang), (Paragraph(t("sl_scope", lang)),)),
+        Section("2", t("sl_s2", lang), (Table(
+            t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
+            tuple((m.method_id, m.verification, m.source) for m in methods)),)),
+        Section("3", t("sl_s3", lang), _slope_blocks(results, lang, figures, projection)),
+        Section("4", t("sl_s4", lang), s4),
+        Section("5", t("sl_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
+    )
+    return Report(title, _subtitle(t("slope_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang],
+                  __version__, date or datetime.date.today().isoformat())
+
+
 def build_verification_report(verification: "VerificationResult", *, title: str, lang: str = "es", author: str = "",
                               date: str = "") -> Report:
     """Informe de verificación normativa: alcance, perfil, hallazgos por sección y nota. Sin identificadores de fila."""

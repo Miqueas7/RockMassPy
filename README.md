@@ -231,6 +231,54 @@ rockmass verify --profile PE-DS024-2016 --as-of 2026-11-02 --tables galeria.json
 
 See `examples/07-verificacion-normativa-peru/`.
 
+## Slope kinematics, SMR and Q-slope
+
+For one open-pit slope face and its discontinuity sets, `rockmass slope` and `assess_slopes(...)` return:
+- the **Fisher** statistics of each family (mean orientation, kappa, alpha95) and the pole density;
+- the **Markland kinematic tests**: planar sliding, wedge sliding (primary and secondary zones), flexural toppling and
+  direct toppling (oblique toppling is counted apart), each with its count and percentage;
+- the **SMR** (Romana, discrete; Tomas, continuous) per family, per wedge and per plane without a family, with the case
+  that governs and its class;
+- the **Q-slope** of Bar and Barton and the angle beta, compared with the face dip.
+
+Read this part twice:
+
+- **The percentages are feasibility, not probability.** They are the share of poles (planar, flexural) or of
+  intersections (wedge, direct toppling) that fall in the critical zone. They are not a probability of failure.
+- **The lateral limit** (30 degrees by default, `--lateral-limit`) keeps planar sliding and both topplings to the
+  discontinuities that strike close to the face. Wedge sliding has no lateral limit. The planar count without limits
+  is reported too; the exit code uses the one with limits.
+- **A face steeper than beta** (`face_steeper_than_beta`) means the face is steeper than the angle Q-slope allows
+  without reinforcement or support: it asks for attention. A face equal to beta is also flagged.
+- The wedge figure counts primary plus secondary intersections. The continuous SMR (`smr_caso_continuo`) has its own
+  governing case, apart from the discrete one.
+- `familia` names reach the console in warnings: do not put labor or mine codes in them. `id_talud` and `id_tramo`
+  go only to the results file and the report tables, never to the console or the figures.
+
+```python
+import rockmasspy as rm
+
+# a synthetic planar case (Tomas et al. 2006, p. 93): face 22/180, joint 21/209, basic RMR 60, normal blasting
+a = rm.smr_angles(rm.SmrMode.Planar, 209, 21, rm.PlaneOrientation(180, 22))
+print(f"{a.a_deg:.0f} {a.b_deg:.0f} {a.c_deg:.0f}")           # 29 21 -1
+d = rm.smr(60, rm.SmrMode.Planar, rm.SmrFunctions.Discrete, rm.SlopeExcavation.NormalBlastingOrMechanical, a)
+c = rm.smr(60, rm.SmrMode.Planar, rm.SmrFunctions.Continuous, rm.SlopeExcavation.NormalBlastingOrMechanical, a)
+print(f"{d.smr:.0f} {d.smr_class} {c.smr:.1f} {c.smr_class}")  # 52 3 55.7 3
+# Q-slope 0.6 (Bar and Barton 2018, Table 12): the steepest angle without reinforcement
+print(f"{rm.q_slope_beta(0.6):.2f}")                          # 60.56
+```
+
+The faces come from a `Taludes` sheet and the planes from a `Familias` sheet (xlsx, or CSV): `rm.load_slope_faces`,
+`rm.load_families`, `rm.assess_slopes`, `rm.slope_counts`, `rm.save_slope_results` (26 columns) and
+`report.build_slope_report`. `report.slope_modes` and `report.slope_figure` are the helpers the command line uses for
+the stereonets. From the command line (exit 2 if anything asks for attention):
+
+```bash
+rockmass slope --faces Taludes.csv --families Familias.csv --report taludes.html --charts fig -o resultados.csv
+```
+
+See `examples/08-taludes-cinematica-smr-qslope/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
@@ -252,6 +300,11 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | Q-GrimstadBarton1993 | Roof support pressure (Hoek, after Grimstad & Barton 1993); the unit is still to be confirmed | Secondary |
 | Mathews-Potvin1988 | Modified stability number N' (factors A, B, C), hydraulic radius and the stability graph, digitized by RockMassPy (max. measured error 0.014 grid cell; factor A fit 0.019, sliding C 0.044, B curves 0.007) | Primary |
 | MRMR-Laubscher1990 / Laubscher1994-stability | MRMR (Laubscher 1990) and its caving diagram (1994, max. measured error 0.009 grid cell) | Primary |
+| SMR-Romana1985 / SMR-Tomas2007 | SMR of Romana (discrete) and Tomas (continuous, revision 2017) for planar and toppling failure | PrimaryLaterAuthors |
+| SMR-Romana1985-wedge | Discrete SMR for wedges (Anbalagan 1992 adaptation, as described by Tomas) | Secondary |
+| Q-slope-BarBarton2017 | Q-slope and the angle beta (Bar and Barton 2017, 2018) | PrimaryLaterAuthors |
+| Kinematic-PlanarSliding / -WedgeSliding / -FlexuralToppling-Goodman1980 / -DirectToppling-HudsonHarrison1997 | Markland kinematic tests (criteria of the Dips documentation) | Secondary |
+| Fisher1953-set-statistics | Fisher statistics of a discontinuity set (after Tauxe et al.) | Secondary |
 | GSI-2013 | Quantified GSI (Hoek, Carter & Diederichs) | Primary |
 | HB-2002 / HB-2018 | Hoek-Brown criterion parameters (`hb_params`) and equivalent Mohr-Coulomb (`hb_mohr_coulomb`); 2018 is the default | Primary |
 | HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |

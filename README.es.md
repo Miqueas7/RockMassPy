@@ -233,6 +233,56 @@ rockmass verify --profile PE-DS024-2016 --as-of 2026-11-02 --tables galeria.json
 
 Ve `examples/07-verificacion-normativa-peru/`.
 
+## Cinemática de taludes, SMR y Q-slope
+
+Para la cara de un talud de tajo abierto y sus familias de discontinuidades, `rockmass slope` y `assess_slopes(...)`
+devuelven:
+- la estadística de **Fisher** de cada familia (orientación media, kappa, alfa95) y la densidad de polos;
+- las **pruebas cinemáticas de Markland**: deslizamiento planar, por cuña (zonas primaria y secundaria), volteo
+  flexural y volteo directo (el volteo oblicuo se cuenta aparte), cada una con su conteo y su porcentaje;
+- el **SMR** (Romana, discreto; Tomás, continuo) por familia, por cuña y por plano sin familia, con el caso que
+  gobierna y su clase;
+- el **Q-slope** de Bar y Barton y el ángulo beta, comparado con el buzamiento de la cara.
+
+Lee esto dos veces:
+
+- **Los porcentajes son factibilidad, no probabilidad.** Son la parte de los polos (planar, flexural) o de las
+  intersecciones (cuña, volteo directo) que cae en la zona crítica. No son una probabilidad de falla.
+- **El límite lateral** (30 grados por defecto, `--lateral-limit`) deja el deslizamiento planar y los dos volteos
+  para las discontinuidades que rumbean cerca de la cara. La cuña no lleva límite lateral. También se informa el
+  planar sin límites; el código de salida usa el que tiene límites.
+- **Una cara más empinada que beta** (`face_steeper_than_beta`) quiere decir que la cara es más empinada que el
+  ángulo que Q-slope permite sin refuerzo ni soporte: pide atención. Una cara igual a beta también se señala.
+- La figura de cuña cuenta las intersecciones primarias más las secundarias. El SMR continuo (`smr_caso_continuo`)
+  tiene su propio caso que gobierna, aparte del discreto.
+- Los nombres de `familia` llegan a la consola dentro de los avisos: no pongas en ellos códigos de labor ni de mina.
+  `id_talud` e `id_tramo` van solo al archivo de resultados y a las tablas del informe, nunca a la consola ni a las
+  figuras.
+
+```python
+import rockmasspy as rm
+
+# un caso planar inventado (Tomás et al. 2006, p. 93): cara 22/180, junta 21/209, RMR básico 60, voladura normal
+a = rm.smr_angles(rm.SmrMode.Planar, 209, 21, rm.PlaneOrientation(180, 22))
+print(f"{a.a_deg:.0f} {a.b_deg:.0f} {a.c_deg:.0f}")           # 29 21 -1
+d = rm.smr(60, rm.SmrMode.Planar, rm.SmrFunctions.Discrete, rm.SlopeExcavation.NormalBlastingOrMechanical, a)
+c = rm.smr(60, rm.SmrMode.Planar, rm.SmrFunctions.Continuous, rm.SlopeExcavation.NormalBlastingOrMechanical, a)
+print(f"{d.smr:.0f} {d.smr_class} {c.smr:.1f} {c.smr_class}")  # 52 3 55.7 3
+# Q-slope 0.6 (Bar y Barton 2018, Tabla 12): el ángulo más empinado sin refuerzo
+print(f"{rm.q_slope_beta(0.6):.2f}")                          # 60.56
+```
+
+Las caras salen de una hoja `Taludes` y los planos de una hoja `Familias` (xlsx, o CSV): `rm.load_slope_faces`,
+`rm.load_families`, `rm.assess_slopes`, `rm.slope_counts`, `rm.save_slope_results` (26 columnas) y
+`report.build_slope_report`. `report.slope_modes` y `report.slope_figure` son los ayudantes que usa la línea de
+comandos para los estereogramas. Por la línea de comandos (código 2 si algo pide atención):
+
+```bash
+rockmass slope --faces Taludes.csv --families Familias.csv --report taludes.html --charts fig -o resultados.csv
+```
+
+Ve `examples/08-taludes-cinematica-smr-qslope/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
@@ -254,6 +304,11 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 | Q-GrimstadBarton1993 | Presión de sostenimiento del techo (Hoek, según Grimstad y Barton 1993); la unidad aún está por confirmar | Secondary |
 | Mathews-Potvin1988 | Número de estabilidad modificado N' (factores A, B, C), radio hidráulico y gráfico de estabilidad, digitalizado por RockMassPy (error máximo medido 0.014 celda; ajuste del factor A 0.019, C por deslizamiento 0.044, curvas de B 0.007) | Primary |
 | MRMR-Laubscher1990 / Laubscher1994-stability | MRMR (Laubscher 1990) y su diagrama de hundimiento (1994, error máximo medido 0.009 celda) | Primary |
+| SMR-Romana1985 / SMR-Tomas2007 | SMR de Romana (discreto) y de Tomás (continuo, revisión 2017) para rotura planar y vuelco | PrimaryLaterAuthors |
+| SMR-Romana1985-wedge | SMR discreto en cuña (adaptación de Anbalagan 1992, según la describe Tomás) | Secondary |
+| Q-slope-BarBarton2017 | Q-slope y el ángulo beta (Bar y Barton 2017, 2018) | PrimaryLaterAuthors |
+| Kinematic-PlanarSliding / -WedgeSliding / -FlexuralToppling-Goodman1980 / -DirectToppling-HudsonHarrison1997 | Pruebas cinemáticas de Markland (criterios de la documentación de Dips) | Secondary |
+| Fisher1953-set-statistics | Estadística de Fisher de una familia de discontinuidades (según Tauxe et al.) | Secondary |
 | GSI-2013 | GSI cuantificado (Hoek, Carter y Diederichs) | Primary |
 | HB-2002 / HB-2018 | Parámetros del criterio de Hoek-Brown (`hb_params`) y Mohr-Coulomb equivalente (`hb_mohr_coulomb`); 2018 por defecto | Primary |
 | HB-2002 | Módulo del macizo Em (`em_hoek2002`) | Secondary |

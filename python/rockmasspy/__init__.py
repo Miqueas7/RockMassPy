@@ -59,8 +59,11 @@ from .batch import (BatchSummary, EsrSpec, TramoResult, add_q_chart_reference, c
 from .stope_surfaces import (SURFACE_COLUMNS, StopeSurface, StopeSurfaceResult, assess_stope_surfaces,  # noqa: E402,F401
                              load_stope_surfaces, save_stope_results, stope_zone_counts)
 from .table_files import load_table  # noqa: E402,F401
+from .slopes import (FACE_COLUMNS, JOINT_COLUMNS, FamilyStats, JointRecord, SlopeFace, SlopeResult, SmrCase,  # noqa: E402,F401
+                     assess_slopes, load_families, load_slope_faces, save_slope_results, slope_counts)
 from .normative import (COMPARISONS, FORCES, RULES, VERIFICATIONS, NormativeProfile, NormItem,  # noqa: E402,F401
                         available_profiles, get_profile, load_profile)
 from .design_inputs import (DESIGN_SHEETS, DesignInputs, PedestrianRefugeSpacing, QcMonth,  # noqa: E402,F401
                             RefugeStation, SafetyFactor, StandupTime, load_design_inputs)
 from .verify import STATUSES, Finding, VerificationResult  # noqa: E402,F401  (la función `verify` taparía el módulo: se usa desde rockmasspy.verify)
+from . import q_slope_tables  # noqa: E402,F401

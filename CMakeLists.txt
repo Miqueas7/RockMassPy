@@ -95,6 +95,10 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_gsi.cpp
         tests/cpp/test_correlations.cpp
         tests/cpp/test_hoek_brown.cpp
+        tests/cpp/test_stereonet.cpp
+        tests/cpp/test_kinematics.cpp
+        tests/cpp/test_smr.cpp
+        tests/cpp/test_q_slope.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core

@@ -1,0 +1,215 @@
+#include <gtest/gtest.h>
+
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <string>
+
+#include "error_of.hpp"
+#include "rockmasspy/stereonet.hpp"
+
+using namespace rockmasspy;
+
+namespace {
+double adiff(double a, double b) {
+    double d = std::fabs(std::fmod(a - b, 360.0));
+    return d > 180.0 ? 360.0 - d : d;
+}
+void expect_line(const std::optional<LineOrientation>& l, double trend, double plunge, double tol = 1.0) {
+    ASSERT_TRUE(l.has_value());
+    EXPECT_LE(adiff(l->trend_deg, trend), tol);
+    EXPECT_NEAR(l->plunge_deg, plunge, tol);
+}
+}  // namespace
+
+TEST(Stereonet, PoleAndPlane) {
+    auto p = pole_of({180, 60});
+    EXPECT_NEAR(p.trend_deg, 0, 1e-12);
+    EXPECT_NEAR(p.plunge_deg, 30, 1e-12);
+    p = pole_of({350, 20});
+    EXPECT_NEAR(p.trend_deg, 170, 1e-12);
+    EXPECT_NEAR(p.plunge_deg, 70, 1e-12);
+    auto q = plane_of(pole_of({360, 30}));
+    EXPECT_NEAR(q.dip_direction_deg, 0, 1e-12);
+    EXPECT_NEAR(q.dip_deg, 30, 1e-12);
+    q = plane_of(pole_of({123.4, 56.7}));
+    EXPECT_NEAR(q.dip_direction_deg, 123.4, 1e-9);
+    EXPECT_NEAR(q.dip_deg, 56.7, 1e-9);
+}
+
+TEST(Stereonet, Projections) {
+    EXPECT_NEAR(project({0, 45}, Projection::EqualAngle).y, 0.41421356, 1e-8);
+    EXPECT_NEAR(project({0, 45}, Projection::EqualArea).y, 0.54119610, 1e-8);
+    for (auto p : {Projection::EqualAngle, Projection::EqualArea}) {
+        auto c = project({70, 90}, p);
+        EXPECT_NEAR(c.x, 0, 1e-12);
+        EXPECT_NEAR(c.y, 0, 1e-12);
+        auto e = project({90, 0}, p);
+        EXPECT_NEAR(e.x, 1, 1e-12);
+        EXPECT_NEAR(e.y, 0, 1e-12);
+        auto l = unproject(project({200, 33}, p), p);
+        EXPECT_NEAR(l.trend_deg, 200, 1e-9);
+        EXPECT_NEAR(l.plunge_deg, 33, 1e-9);
+    }
+    EXPECT_THROW(unproject({1.0, 0.1}, Projection::EqualArea), std::invalid_argument);
+}
+
+TEST(Stereonet, PublishedIntersections) {  // Riquelme et al. 2016, Tabla 4, p. 21
+    PlaneOrientation f1{325, 87}, f2{119, 20}, f3{234, 83}, f4{62, 62};
+    expect_line(plane_intersection(f1, f2), 55, 9);
+    expect_line(plane_intersection(f1, f4), 49, 61);
+    expect_line(plane_intersection(f2, f3), 146, 18);
+    expect_line(plane_intersection(f2, f4), 142, 19);
+    expect_line(plane_intersection(f3, f4), 145, 12);
+    PlaneOrientation s1{323, 89}, s2{135, 26}, s3{250, 76}, s4{41, 57};
+    expect_line(plane_intersection(s1, s2), 53, 4);
+    expect_line(plane_intersection(s1, s4), 51, 57);
+    expect_line(plane_intersection(s2, s3), 166, 23);
+    expect_line(plane_intersection(s2, s4), 114, 24);
+}
+
+TEST(Stereonet, IntersectionProperties) {
+    PlaneOrientation a{325, 87}, b{119, 20};
+    auto ab = plane_intersection(a, b);
+    auto ba = plane_intersection(b, a);
+    ASSERT_TRUE(ab && ba);
+    EXPECT_NEAR(ab->trend_deg, ba->trend_deg, 1e-9);
+    EXPECT_NEAR(ab->plunge_deg, ba->plunge_deg, 1e-9);
+    EXPECT_NEAR(angle_between(pole_of(a), *ab), 90, 1e-9);
+    EXPECT_NEAR(angle_between(pole_of(b), *ab), 90, 1e-9);
+    EXPECT_FALSE(plane_intersection(a, a));
+    EXPECT_FALSE(plane_intersection({10, 90}, {190, 90}));  // verticales paralelos, opuestos
+    EXPECT_FALSE(plane_intersection({10, 40}, {10, 40.0}));
+}
+
+TEST(Stereonet, EdgesOfDomain) {
+    auto p = pole_of({360, 30});
+    EXPECT_NEAR(p.trend_deg, 180, 1e-12);
+    // dip 90: dirección 90 y 270 dan el mismo eje
+    EXPECT_NEAR(angle_between(pole_of({90, 90}), pole_of({270, 90})), 0, 1e-9);
+    for (const auto& pt : great_circle({40, 0}, Projection::EqualAngle, 11))
+        EXPECT_NEAR(std::hypot(pt.x, pt.y), 1, 1e-9);
+    // plano vertical: un diámetro (pasa por el centro y todos los puntos sobre una recta)
+    auto g = great_circle({90, 90}, Projection::EqualArea, 181);
+    ASSERT_EQ(g.size(), 181u);
+    for (const auto& pt : g) EXPECT_NEAR(pt.x, 0, 1e-9);
+    EXPECT_NEAR(g[90].y, 0, 1e-9);
+    EXPECT_NEAR(std::fabs(g[0].y), 1, 1e-9);
+    EXPECT_NEAR(g[0].y, -g[180].y, 1e-9);
+    EXPECT_THROW(great_circle({0, 30}, Projection::EqualArea, 2), std::invalid_argument);
+}
+
+TEST(Stereonet, Validation) {
+    EXPECT_NE(error_of([] { pole_of({0, 95}); }).find("dip_deg"), std::string::npos);
+    EXPECT_NE(error_of([] { pole_of({-5, 30}); }).find("dip_direction_deg"), std::string::npos);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    EXPECT_NE(error_of([&] { pole_of({nan, 30}); }).find("dip_direction_deg"), std::string::npos);
+    EXPECT_NE(error_of([&] { pole_of({10, inf}); }).find("dip_deg"), std::string::npos);
+    EXPECT_NE(error_of([&] { plane_of({nan, 30}); }).find("trend_deg"), std::string::npos);
+    EXPECT_NE(error_of([] { plane_of({10, 91}); }).find("plunge_deg"), std::string::npos);
+    EXPECT_NE(error_of([] { project({361, 10}, Projection::EqualArea); }).find("trend_deg"), std::string::npos);
+    EXPECT_NE(error_of([&] { unproject({nan, 0}, Projection::EqualArea); }).find("x"), std::string::npos);
+}
+
+TEST(StereonetFisher, FourSymmetricPoles) {
+    const auto s = fisher_stats({{0, 80}, {90, 80}, {180, 80}, {270, 80}});
+    EXPECT_NEAR(s.mean.plunge_deg, 90, 1e-9);
+    EXPECT_NEAR(s.resultant_length, 4 * std::sin(80 * 3.14159265358979323846 / 180), 1e-9);
+    ASSERT_TRUE(s.kappa && s.alpha95_deg);
+    EXPECT_NEAR(*s.kappa, 49.3673, 1e-4);
+    EXPECT_NEAR(*s.alpha95_deg, 13.2067, 1e-4);
+    EXPECT_EQ(s.info.verification, Verification::Secondary);
+    EXPECT_NE(s.info.source.find("Tauxe"), std::string::npos);
+}
+
+TEST(StereonetFisher, SingleAndIdentical) {
+    const auto one = fisher_stats({{120, 40}});
+    EXPECT_NEAR(one.mean.trend_deg, 120, 1e-9);
+    EXPECT_NEAR(one.mean.plunge_deg, 40, 1e-9);
+    EXPECT_FALSE(one.kappa || one.alpha95_deg);
+    const auto three = fisher_stats({{120, 40}, {120, 40}, {120, 40}});
+    EXPECT_TRUE(std::isinf(*three.kappa));
+    EXPECT_EQ(*three.alpha95_deg, 0.0);
+}
+
+TEST(StereonetFisher, AxialNearVertical) {
+    const auto s = fisher_stats({{90, 2}, {270, 2}, {88, 1}, {272, 3}});
+    EXPECT_LT(s.mean.plunge_deg, 3.0);
+}
+
+TEST(StereonetFisher, DispersedWarnsAndErrors) {
+    EXPECT_NO_THROW(fisher_stats({{0, 0}, {90, 0}, {180, 45}, {270, 30}, {0, 89}}));
+    const auto s = fisher_stats({{0, 0}, {90, 0}});  // R = sqrt(2): alpha95 no existe
+    EXPECT_FALSE(s.alpha95_deg.has_value());
+    ASSERT_EQ(s.warnings.size(), 1u);
+    EXPECT_EQ(s.warnings[0], "alpha95 undefined: poles too dispersed for their number");
+    EXPECT_THROW(fisher_stats({}), std::invalid_argument);
+    EXPECT_THROW(fisher_stats({{std::nan(""), 10}}), std::invalid_argument);
+}
+
+TEST(StereonetDensity, CountingCircle) {
+    const std::vector<LineOrientation> poles(50, LineOrientation{120, 40});
+    auto d = pole_density(poles, {{120, 40}, {150, 40}});
+    EXPECT_NEAR(d[0], 100.0, 1e-9);
+    EXPECT_EQ(d[1], 0.0);
+    EXPECT_NEAR(pole_density({{90, 0}}, {{270, 0}})[0], 100.0, 1e-9);
+    EXPECT_THROW(pole_density(poles, {{0, 0}}, 0.0), std::invalid_argument);
+    EXPECT_THROW(pole_density(poles, {{0, 0}}, 0.6), std::invalid_argument);
+    EXPECT_THROW(pole_density({}, {{0, 0}}), std::invalid_argument);
+}
+
+TEST(Stereonet, UnprojectOutsideNamesPoint) {
+    const auto msg = error_of([] { unproject({1.0, 0.1}, Projection::EqualArea); });
+    EXPECT_NE(msg.find("'point'"), std::string::npos);
+    EXPECT_NE(msg.find("1.00498"), std::string::npos);  // radio
+}
+
+TEST(Stereonet, NearVerticalRoundTrip) {
+    const auto q = plane_of(pole_of({123, 89.999999}));
+    EXPECT_NEAR(q.dip_deg, 89.999999, 1e-9);
+    const auto l = unproject(project({50, 89.999999}, Projection::EqualArea), Projection::EqualArea);
+    EXPECT_NEAR(l.plunge_deg, 89.999999, 1e-7);
+}
+
+TEST(Stereonet, HorizontalIntersectionCanonical) {
+    const PlaneOrientation a{10, 90}, b{100, 90}, c{280, 90};
+    for (auto [p, q] : {std::pair{a, b}, std::pair{b, a}, std::pair{a, c}, std::pair{c, a}}) {
+        const auto l = plane_intersection(p, q);
+        ASSERT_TRUE(l.has_value());
+        EXPECT_NEAR(l->plunge_deg, 90, 1e-9);  // dos verticales se cortan en vertical
+    }
+    // dos planos que cortan en horizontal: buzamientos opuestos con el mismo rumbo no, así que usamos rumbo
+    // distinto con ambos verticales y una línea de rumbo: planos verticales de igual rumbo son paralelos (None).
+    // Horizontal real: planos de buzamiento 45 en direcciones 90 y 270 se cortan en una línea N-S horizontal.
+    const auto l1 = plane_intersection({90, 45}, {270, 45});
+    const auto l2 = plane_intersection({270, 45}, {90, 45});
+    ASSERT_TRUE(l1 && l2);
+    EXPECT_NEAR(l1->plunge_deg, 0, 1e-9);
+    EXPECT_NEAR(l1->trend_deg, l2->trend_deg, 1e-9);
+    EXPECT_LT(l1->trend_deg, 180.0);
+}
+
+TEST(Stereonet, ObliqueGreatCircle) {
+    const PlaneOrientation pl{130, 55};
+    const auto pole = pole_of(pl);
+    for (auto proj : {Projection::EqualAngle, Projection::EqualArea}) {
+        const auto g = great_circle(pl, proj, 181);
+        for (const auto& pt : g) EXPECT_NEAR(angle_between(unproject(pt, proj), pole), 90, 1e-6);
+        const auto mid = project({130, 55}, proj);
+        EXPECT_NEAR(g[90].x, mid.x, 1e-9);
+        EXPECT_NEAR(g[90].y, mid.y, 1e-9);
+    }
+}
+
+TEST(StereonetDensity, AreaFractionFactor) {
+    const std::vector<LineOrientation> poles(50, LineOrientation{120, 40});
+    EXPECT_NEAR(pole_density(poles, {{120, 40}}, 0.05)[0], 20.0, 1e-9);
+}
+
+TEST(StereonetFisher, HorizontalMeanIndependentOfOrder) {
+    const auto a = fisher_stats({{10, 0}, {190, 0}, {20, 0}});
+    const auto b = fisher_stats({{190, 0}, {10, 0}, {20, 0}});
+    EXPECT_NEAR(a.mean.trend_deg, b.mean.trend_deg, 1e-9);
+    EXPECT_LT(a.mean.trend_deg, 180.0);
+}

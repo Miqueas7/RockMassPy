@@ -20,6 +20,10 @@
 #include "rockmasspy/rmr76.hpp"
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
+#include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/q_slope.hpp"
+#include "rockmasspy/smr.hpp"
+#include "rockmasspy/stereonet.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -373,4 +377,107 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("erm_hoek_diederichs_simplified", &erm_hoek_diederichs_simplified, nb::arg("gsi"), nb::arg("d"));
     m.def("erm_hoek_diederichs_generalized", &erm_hoek_diederichs_generalized, nb::arg("gsi"), nb::arg("d"),
           nb::arg("ei_mpa"));
+
+    // Red estereográfica (geometría, sin MethodInfo)
+    nb::enum_<Projection>(m, "Projection", "Stereonet projection.")
+        .value("EqualAngle", Projection::EqualAngle).value("EqualArea", Projection::EqualArea);
+    nb::class_<PlaneOrientation>(m, "PlaneOrientation", "Plane: dip direction and dip, degrees.")
+        .def(nb::init<double, double>(), nb::arg("dip_direction_deg"), nb::arg("dip_deg"))
+        .def_ro("dip_direction_deg", &PlaneOrientation::dip_direction_deg).def_ro("dip_deg", &PlaneOrientation::dip_deg);
+    nb::class_<LineOrientation>(m, "LineOrientation", "Line in the lower hemisphere: trend and plunge, degrees.")
+        .def(nb::init<double, double>(), nb::arg("trend_deg"), nb::arg("plunge_deg"))
+        .def_ro("trend_deg", &LineOrientation::trend_deg).def_ro("plunge_deg", &LineOrientation::plunge_deg);
+    nb::class_<Point2>(m, "Point2", "Point of the unit disk (x east, y north).")
+        .def(nb::init<double, double>(), nb::arg("x"), nb::arg("y"))
+        .def_ro("x", &Point2::x).def_ro("y", &Point2::y);
+    m.def("pole_of", &pole_of, nb::arg("plane"));
+    m.def("plane_of", &plane_of, nb::arg("pole"));
+    m.def("plane_intersection", &plane_intersection, nb::arg("a"), nb::arg("b"), "None if the planes are parallel.");
+    m.def("angle_between", &angle_between, nb::arg("a"), nb::arg("b"), "Axial angle in [0, 90] degrees.");
+    m.def("project", &project, nb::arg("line"), nb::arg("projection"));
+    m.def("unproject", &unproject, nb::arg("point"), nb::arg("projection"));
+    m.def("great_circle", &great_circle, nb::arg("plane"), nb::arg("projection"), nb::arg("n") = 181);
+    nb::class_<FisherStats>(m, "FisherStats", "Axial Fisher statistics of a set of poles.")
+        .def_ro("mean", &FisherStats::mean).def_ro("n", &FisherStats::n)
+        .def_ro("resultant_length", &FisherStats::resultant_length).def_ro("kappa", &FisherStats::kappa)
+        .def_ro("alpha95_deg", &FisherStats::alpha95_deg).def_ro("info", &FisherStats::info)
+        .def_ro("warnings", &FisherStats::warnings);
+    m.def("fisher_stats", &fisher_stats, nb::arg("poles"));
+    m.def("pole_density", &pole_density, nb::arg("poles"), nb::arg("at"), nb::arg("area_fraction") = 0.01);
+
+    // Cinemática de Markland
+    nb::class_<KinematicInput>(m, "KinematicInput", "Slope face, friction angle and lateral limit, degrees.")
+        .def(nb::init<PlaneOrientation, double, double>(), nb::arg("face"), nb::arg("friction_deg"),
+             nb::arg("lateral_limit_deg"))
+        .def_ro("face", &KinematicInput::face).def_ro("friction_deg", &KinematicInput::friction_deg)
+        .def_ro("lateral_limit_deg", &KinematicInput::lateral_limit_deg);
+    nb::class_<PlaneChecks>(m, "PlaneChecks", "Kinematic checks of one plane.")
+        .def_ro("planar", &PlaneChecks::planar).def_ro("planar_no_limits", &PlaneChecks::planar_no_limits)
+        .def_ro("flexural_toppling", &PlaneChecks::flexural_toppling)
+        .def_ro("direct_toppling_base_zone", &PlaneChecks::direct_toppling_base_zone);
+    nb::class_<IntersectionChecks>(m, "IntersectionChecks", "Kinematic checks of one intersection line.")
+        .def_ro("line", &IntersectionChecks::line).def_ro("wedge_primary", &IntersectionChecks::wedge_primary)
+        .def_ro("wedge_secondary", &IntersectionChecks::wedge_secondary)
+        .def_ro("direct_toppling", &IntersectionChecks::direct_toppling)
+        .def_ro("direct_toppling_oblique", &IntersectionChecks::direct_toppling_oblique);
+    nb::class_<KinematicResult>(m, "KinematicResult", "Kinematic analysis of a set of planes (feasibility, not probability).")
+        .def_ro("planes", &KinematicResult::planes).def_ro("intersections", &KinematicResult::intersections)
+        .def_ro("pair_a", &KinematicResult::pair_a).def_ro("pair_b", &KinematicResult::pair_b)
+        .def_ro("n_planes", &KinematicResult::n_planes).def_ro("n_intersections", &KinematicResult::n_intersections)
+        .def_ro("n_parallel_pairs", &KinematicResult::n_parallel_pairs).def_ro("planar", &KinematicResult::planar)
+        .def_ro("planar_no_limits", &KinematicResult::planar_no_limits)
+        .def_ro("flexural_toppling", &KinematicResult::flexural_toppling)
+        .def_ro("wedge_primary", &KinematicResult::wedge_primary)
+        .def_ro("wedge_secondary", &KinematicResult::wedge_secondary)
+        .def_ro("direct_toppling", &KinematicResult::direct_toppling)
+        .def_ro("direct_toppling_oblique", &KinematicResult::direct_toppling_oblique)
+        .def_ro("base_zone_1", &KinematicResult::base_zone_1).def_ro("base_zone_2", &KinematicResult::base_zone_2)
+        .def_ro("base_zone_3", &KinematicResult::base_zone_3).def_ro("input", &KinematicResult::input)
+        .def_ro("methods", &KinematicResult::methods).def_ro("notes", &KinematicResult::notes);
+    m.def("check_plane", &check_plane, nb::arg("plane"), nb::arg("input"));
+    m.def("check_intersection", &check_intersection, nb::arg("line"), nb::arg("input"));
+    m.def("kinematic_analysis", &kinematic_analysis, nb::arg("planes"), nb::arg("groups"), nb::arg("input"));
+
+    // SMR de Romana y Tomás
+    nb::enum_<SmrMode>(m, "SmrMode", "SMR failure mode.")
+        .value("Planar", SmrMode::Planar).value("Toppling", SmrMode::Toppling).value("Wedge", SmrMode::Wedge);
+    nb::enum_<SmrFunctions>(m, "SmrFunctions", "Discrete (Romana) or continuous (Tomas) adjustment functions.")
+        .value("Discrete", SmrFunctions::Discrete).value("Continuous", SmrFunctions::Continuous);
+    nb::enum_<SlopeExcavation>(m, "SlopeExcavation", "Slope excavation method (SMR F4).")
+        .value("NaturalSlope", SlopeExcavation::NaturalSlope).value("Presplitting", SlopeExcavation::Presplitting)
+        .value("SmoothBlasting", SlopeExcavation::SmoothBlasting)
+        .value("NormalBlastingOrMechanical", SlopeExcavation::NormalBlastingOrMechanical)
+        .value("DeficientBlasting", SlopeExcavation::DeficientBlasting);
+    nb::class_<SmrAngles>(m, "SmrAngles", "SMR angles A, B and C in degrees.")
+        .def(nb::init<double, double, double>(), nb::arg("a_deg"), nb::arg("b_deg"), nb::arg("c_deg"))
+        .def_ro("a_deg", &SmrAngles::a_deg).def_ro("b_deg", &SmrAngles::b_deg).def_ro("c_deg", &SmrAngles::c_deg);
+    nb::class_<SmrResult>(m, "SmrResult", "SMR with its factors, class and failure probability (Table 3).")
+        .def_ro("smr", &SmrResult::smr).def_ro("f1", &SmrResult::f1).def_ro("f2", &SmrResult::f2)
+        .def_ro("f3", &SmrResult::f3).def_ro("f4", &SmrResult::f4).def_ro("smr_class", &SmrResult::smr_class)
+        .def_ro("failure_probability", &SmrResult::failure_probability).def_ro("mode", &SmrResult::mode)
+        .def_ro("functions", &SmrResult::functions).def_ro("angles", &SmrResult::angles)
+        .def_ro("info", &SmrResult::info).def_ro("warnings", &SmrResult::warnings);
+    m.def("smr_angles", &smr_angles, nb::arg("mode"), nb::arg("direction_deg"), nb::arg("dip_deg"), nb::arg("face"));
+    m.def("smr_class", &smr_class, nb::arg("smr"), "1 (I) to 5 (V).");
+    m.def("smr", &smr, nb::arg("rmr_basic"), nb::arg("mode"), nb::arg("functions"), nb::arg("excavation"),
+          nb::arg("angles"));
+
+    // Q-slope de Bar y Barton
+    nb::class_<QSlopeInput>(m, "QSlopeInput", "Q-slope parameters as numbers; set B and two of the SRFs are optional.")
+        .def(nb::init<>())
+        .def_rw("rqd_pct", &QSlopeInput::rqd_pct).def_rw("jn", &QSlopeInput::jn)
+        .def_rw("jr_a", &QSlopeInput::jr_a).def_rw("ja_a", &QSlopeInput::ja_a)
+        .def_rw("o_factor_a", &QSlopeInput::o_factor_a)
+        .def_rw("jr_b", &QSlopeInput::jr_b).def_rw("ja_b", &QSlopeInput::ja_b)
+        .def_rw("o_factor_b", &QSlopeInput::o_factor_b).def_rw("jwice", &QSlopeInput::jwice)
+        .def_rw("srf_a", &QSlopeInput::srf_a).def_rw("srf_b", &QSlopeInput::srf_b)
+        .def_rw("srf_c", &QSlopeInput::srf_c);
+    nb::class_<QSlopeResult>(m, "QSlopeResult", "Q-slope, the unsupported slope angle beta and its inputs.")
+        .def_ro("q_slope", &QSlopeResult::q_slope).def_ro("beta_deg", &QSlopeResult::beta_deg)
+        .def_ro("rqd_used", &QSlopeResult::rqd_used).def_ro("jr_ja_0", &QSlopeResult::jr_ja_0)
+        .def_ro("srf_slope", &QSlopeResult::srf_slope).def_ro("beta_capped", &QSlopeResult::beta_capped)
+        .def_ro("info", &QSlopeResult::info).def_ro("warnings", &QSlopeResult::warnings)
+        .def_ro("notes", &QSlopeResult::notes);
+    m.def("q_slope_beta", &q_slope_beta, nb::arg("q_slope"), "beta = 20*log10(Q-slope) + 65, uncapped.");
+    m.def("q_slope", &q_slope, nb::arg("input"));
 }
