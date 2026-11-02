@@ -81,6 +81,45 @@ env = viz.plot_hb_envelopes(50.0, p, sigma3max_mpa=1.35, gsi=45, mi=10, d=0)  # 
 The same module draws the quantified GSI chart, Hoek-Brown envelopes, Q-RMR scatter and class histograms; every figure
 states its source in the footer. The library recommends, the engineer decides. See `examples/03-cartillas/`.
 
+## Tramos, batch, report and CLI
+
+Needs the extras `pip install "rockmasspy[io,viz,report]"` (the HTML report only needs the base package; Word needs
+`[report]`, figures need `[viz]`). `load_tramos` reads a `Tramos` sheet (Excel or CSV) and takes a `column_map` from
+your column names to the template's. Classification never stops on a bad row: a tramo with no table for its labor or
+span, or without the method value, stays unclassified (`label=None`) with a warning, and the summary counts it apart.
+Neither the library nor the CLI prints tramo rows.
+
+```python
+from pathlib import Path
+
+import rockmasspy as rm
+import rockmasspy.report as rp
+
+Path("tramos.csv").write_text("id_tramo,Labor,luz_m,RMR\nT01,gallery,3.5,53\n", encoding="utf-8")   # a one-row sheet
+tramos = rm.load_tramos("tramos.csv", column_map={"RMR": "rmr_valor", "Labor": "tipo_labor"})   # CSV: the sheet is the file name
+results = rm.classify_tramos(tramos, [labor])                      # `labor` comes from the tables section
+summary = rm.summarize(results)
+rm.save_results(results, "results.csv")                            # or .xlsx (needs [io])
+report = rp.build_memoria(results, [labor], title="Calculation report", lang="en")
+rp.write_html(report, "report.html")                               # rp.write_docx(report, "report.docx") needs [report]
+print(summary.total, summary.classified)                           # 1 1
+```
+
+Every report states what it is: "The library recommends, the engineer decides. This document does not replace the
+signed geomechanical study." on the cover and in each page footer, plus the edition and verification mark of each
+method and the RockMassPy version. `rp.build_anexo39b` gives the Annex 39 B layout of DS 024.
+
+The same pipeline from the command line (exit code 0 ok, 1 input or usage error, 2 done but needs attention):
+
+```bash
+rockmass check galeria.json
+rockmass cartilla galeria.json -o cartilla.png --lang en
+rockmass classify tramos.xlsx --tables galeria.json -o results.csv
+rockmass report tramos.xlsx --tables galeria.json -o report.docx --template anexo39b --labor gallery
+```
+
+See `examples/04-informe/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a

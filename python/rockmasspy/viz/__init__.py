@@ -7,3 +7,4 @@ from .cartilla import plot_cartilla  # noqa: F401
 from .envelopes import plot_hb_envelopes  # noqa: F401
 from .gsi_quant import plot_gsi_quantified  # noqa: F401
 from .style import DEFAULT_SUPPORT_COLORS, SIZES_CM, TEXTS, Style, footer, new_figure, support_color, text  # noqa: F401
+from .maps import plot_labor_profile, plot_plan_map  # noqa: F401

@@ -63,6 +63,7 @@ COLUMNAS = [
     ('Tramos', 'q_edicion', 'Edición del Q usada', '', 'q_edicion', '1,2,3'),
     ('Tramos', 'gsi_valor', 'GSI asignado', 'pts', 'número', '1'),
     ('Tramos', 'gsi_tabla', 'Tabla GSI usada', '', 'gsi_tabla', '1'),
+    ('Tramos', 'gsi_celda', 'Celda de la cartilla GSI (estructura/condición, p. ej. F/R)', '', 'texto', '1,2'),
     ('Tramos', 'sost_recomendado', 'Tipo de sostenimiento que pedía la tabla (código de la hoja Tipos_sostenimiento)', '', 'texto', '2'),
     ('Tramos', 'sost_instalado', 'Tipo de sostenimiento realmente instalado (código)', '', 'texto', '2,3'),
     ('Tramos', 'fecha_instalacion', 'Fecha en que se terminó de sostener', 'aaaa-mm-dd', 'fecha', '3'),
