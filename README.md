@@ -150,6 +150,44 @@ rockmass classify tramos.xlsx --tables galeria.json --esr "*=C" -o results.csv
 
 See `examples/05-sostenimiento-q/`.
 
+## Stope stability (Mathews) and MRMR
+
+Modified Mathews stability number of Potvin (1988): N' = Q' x A x B x C, with the hydraulic radius of each stope face
+(`hydraulic_radius`, `hydraulic_radius_rect`) and the stable / transition / caved zones of Potvin's graph, digitized
+by RockMassPy. There is no logit curve: Mawdesley publishes no coefficients. Factor C follows Potvin's own equation
+(8 - 6 cos a); the 8 - 7 cos of Mathews et al. (1980) belongs to the original method. The MRMR is Laubscher (1990) and
+its zones are read on the 1994 diagram. Everything is **Primary**; read points outside the frame are taken on the
+unfavourable side, with a warning.
+
+```python
+import rockmasspy as rm
+
+# N' = Q' * A * B * C of a synthetic roof face (Q' 12, HR 2.5 m), read on Potvin's stability graph
+r = rm.mathews_stability(12.0, 2.5, ucs_mpa=120, sigma1_mpa=30, dip_difference_deg=60,
+                         failure_mode="gravity", surface_inclination_deg=0)
+print(f"{r.factor_a:.3f} {r.factor_b:.1f} {r.factor_c:.1f}")      # 0.325 0.8 2.0
+print(f"{r.n_prime:.2f}")                                         # 6.24
+print(r.reading.zone_label)                                       # stable
+
+# MRMR (Laubscher 1990) of a synthetic case, placed on the 1994 caving diagram at HR = 30 m
+i = rm.Mrmr90Input()
+i.irs_mpa, i.rqd_pct, i.spacings_m, i.joint_condition = 100, 75, [0.5, 1.0, 3.0], 10.8
+m = rm.mrmr90(i)
+print(m.mrmr_class)                                               # 3B
+print(rm.read_stability_graph("Laubscher1994-stability", 30.0, m.mrmr).zone_label)    # caving
+```
+
+Faces come from a `Superficies` sheet (xlsx) or a CSV (`rm.SURFACE_COLUMNS`): `rm.load_stope_surfaces`,
+`rm.assess_stope_surfaces`, `rm.save_stope_results`, `viz.plot_stability_graph` and `report.build_stope_report`. A
+face with impossible geometry stops the run with its row. From the command line:
+
+```bash
+rockmass mathews Superficies.csv --chart mathews.png -o results.csv     # exit 2 if a face is in transition, caved or warns
+rockmass mrmr --irs 100 --rqd 75 --spacing 0.5 1.0 3.0 --jc 10.8 --hr 30 --chart laubscher.png
+```
+
+See `examples/06-tajeos-mathews-mrmr/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
@@ -169,6 +207,8 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | Q-NGI-2025-chart / Q-NGI-2015-chart | Q support chart regions, digitized by RockMassPy (max. measured error 0.017 / 0.008 decade, including junctions) | Primary |
 | Q-Barton1980 | Maximum unsupported span and bolt length formulas (Hoek, after Barton et al. 1980) | Secondary |
 | Q-GrimstadBarton1993 | Roof support pressure (Hoek, after Grimstad & Barton 1993); the unit is still to be confirmed | Secondary |
+| Mathews-Potvin1988 | Modified stability number N' (factors A, B, C), hydraulic radius and the stability graph, digitized by RockMassPy (max. measured error 0.014 grid cell; factor A fit 0.019, sliding C 0.044, B curves 0.007) | Primary |
+| MRMR-Laubscher1990 / Laubscher1994-stability | MRMR (Laubscher 1990) and its caving diagram (1994, max. measured error 0.009 grid cell) | Primary |
 | GSI-2013 | Quantified GSI (Hoek, Carter & Diederichs) | Primary |
 | HB-2002 / HB-2018 | Hoek-Brown criterion parameters (`hb_params`) and equivalent Mohr-Coulomb (`hb_mohr_coulomb`); 2018 is the default | Primary |
 | HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |

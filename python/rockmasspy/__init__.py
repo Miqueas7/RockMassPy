@@ -46,6 +46,8 @@ from .vallejo_lines import (  # noqa: E402,F401
 from .chart_regions import Region, locate  # noqa: E402,F401
 from .q_chart_data import ESR_TABLES, Q_CHART_FRAME, Q_CHARTS, QChartCategory, QChartData  # noqa: E402,F401
 from .q_support import QChartReading, QSupportResult, read_q_chart, recommend_q_support  # noqa: E402,F401
+from .stability_graphs import STABILITY_GRAPHS, GraphReading, StabilityGraph, read_stability_graph  # noqa: E402,F401
+from .mathews import FACTOR_B_INFO, JOINT_ORIENTATION_CURVES, MathewsResult, factor_b, mathews_stability  # noqa: E402,F401
 from .rating_table import CategoricalParam, NumericParam, RatingBin, RatingResult, RatingTable  # noqa: E402,F401
 from .labor_table import Classification, LaborTable, select_table  # noqa: E402,F401
 from .table_io import SCHEMA, SCHEMA_VERSION, from_dict, load_json, load_yaml, save_json, save_yaml, to_dict  # noqa: E402,F401
@@ -54,4 +56,6 @@ from .csv_io import load_csv_dir, load_support_catalog_csv, save_csv_dir  # noqa
 from .tramos import TRAMO_COLUMNS, Tramo, load_tramos  # noqa: E402,F401
 from .batch import (BatchSummary, EsrSpec, TramoResult, add_q_chart_reference, classify_tramos,  # noqa: E402,F401
                     q_chart_crosstab, save_results, summarize)  # noqa: E402,F401
+from .stope_surfaces import (SURFACE_COLUMNS, StopeSurface, StopeSurfaceResult, assess_stope_surfaces,  # noqa: E402,F401
+                             load_stope_surfaces, save_stope_results, stope_zone_counts)
 from .table_files import load_table  # noqa: E402,F401

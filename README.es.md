@@ -152,6 +152,44 @@ rockmass classify tramos.xlsx --tables galeria.json --esr "*=C" -o resultados.cs
 
 Ver `examples/05-sostenimiento-q/`.
 
+## Estabilidad de tajeos (Mathews) y MRMR
+
+Número de estabilidad modificado de Mathews según Potvin (1988): N' = Q' x A x B x C, con el radio hidráulico de cada
+cara del tajeo (`hydraulic_radius`, `hydraulic_radius_rect`) y las zonas estable, transición y hundimiento del
+gráfico de Potvin, digitalizado por RockMassPy. No hay curva logit: Mawdesley no publica los coeficientes. El factor C
+sigue la ecuación del propio Potvin (8 - 6 cos a); el 8 - 7 cos de Mathews et al. (1980) es del método original. El
+MRMR es el de Laubscher (1990) y sus zonas se leen en el diagrama de 1994. Todo es **Primary**; un punto fuera del
+marco se lee del lado desfavorable, con aviso.
+
+```python
+import rockmasspy as rm
+
+# N' = Q' * A * B * C de un techo sintético (Q' 12, HR 2.5 m), leído en el gráfico de Potvin
+r = rm.mathews_stability(12.0, 2.5, ucs_mpa=120, sigma1_mpa=30, dip_difference_deg=60,
+                         failure_mode="gravity", surface_inclination_deg=0)
+print(f"{r.factor_a:.3f} {r.factor_b:.1f} {r.factor_c:.1f}")      # 0.325 0.8 2.0
+print(f"{r.n_prime:.2f}")                                         # 6.24
+print(r.reading.zone_label)                                       # stable
+
+# MRMR (Laubscher 1990) de un caso sintético, ubicado en el diagrama de 1994 con HR = 30 m
+i = rm.Mrmr90Input()
+i.irs_mpa, i.rqd_pct, i.spacings_m, i.joint_condition = 100, 75, [0.5, 1.0, 3.0], 10.8
+m = rm.mrmr90(i)
+print(m.mrmr_class)                                               # 3B
+print(rm.read_stability_graph("Laubscher1994-stability", 30.0, m.mrmr).zone_label)    # caving
+```
+
+Las caras salen de una hoja `Superficies` (xlsx) o de un CSV (`rm.SURFACE_COLUMNS`): `rm.load_stope_surfaces`,
+`rm.assess_stope_surfaces`, `rm.save_stope_results`, `viz.plot_stability_graph` y `report.build_stope_report`. Una cara
+con geometría imposible detiene la corrida y nombra su fila. Por la línea de comandos:
+
+```bash
+rockmass mathews Superficies.csv --chart mathews.png -o resultados.csv   # sale con 2 si hay una cara en transición, hundida o con aviso
+rockmass mrmr --irs 100 --rqd 75 --spacing 0.5 1.0 3.0 --jc 10.8 --hr 30 --chart laubscher.png
+```
+
+Ve `examples/06-tajeos-mathews-mrmr/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
@@ -171,6 +209,8 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 | Q-NGI-2025-chart / Q-NGI-2015-chart | Regiones de la carta de sostenimiento Q, digitalizadas por RockMassPy (error máximo medido 0.017 / 0.008 década, con los empalmes) | Primary |
 | Q-Barton1980 | Fórmulas de luz máxima sin sostén y longitud de perno (Hoek, según Barton et al. 1980) | Secondary |
 | Q-GrimstadBarton1993 | Presión de sostenimiento del techo (Hoek, según Grimstad y Barton 1993); la unidad aún está por confirmar | Secondary |
+| Mathews-Potvin1988 | Número de estabilidad modificado N' (factores A, B, C), radio hidráulico y gráfico de estabilidad, digitalizado por RockMassPy (error máximo medido 0.014 celda; ajuste del factor A 0.019, C por deslizamiento 0.044, curvas de B 0.007) | Primary |
+| MRMR-Laubscher1990 / Laubscher1994-stability | MRMR (Laubscher 1990) y su diagrama de hundimiento (1994, error máximo medido 0.009 celda) | Primary |
 | GSI-2013 | GSI cuantificado (Hoek, Carter y Diederichs) | Primary |
 | HB-2002 / HB-2018 | Parámetros del criterio de Hoek-Brown (`hb_params`) y Mohr-Coulomb equivalente (`hb_mohr_coulomb`); 2018 por defecto | Primary |
 | HB-2002 | Módulo del macizo Em (`em_hoek2002`) | Secondary |
