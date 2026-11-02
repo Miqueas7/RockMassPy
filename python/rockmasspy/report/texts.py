@@ -139,6 +139,31 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_shotcrete": {"es": "Shotcrete (mm)", "en": "Shotcrete (mm)"},
     "h_energy": {"es": "Energía Sfr (J)", "en": "Sfr energy (J)"},
     "h_rrs": {"es": "RRS", "en": "RRS"},
+    # --- Diseño de tajeos (Mathews, gráfico de Potvin) ---
+    "stope_title": {"es": "Diseño empírico de tajeos", "en": "Empirical stope design"},
+    "st_s1": {"es": "Alcance", "en": "Scope"},
+    "st_s2": {"es": "Métodos y ediciones", "en": "Methods and editions"},
+    "st_s3": {"es": "Resultados", "en": "Results"},
+    "st_s4": {"es": "Avisos", "en": "Warnings"},
+    "st_s5": {"es": "Nota", "en": "Note"},
+    "st_scope": {
+        "es": "Este documento lee la estabilidad de caras de tajeo con el gráfico modificado de Potvin (1988), cuyas "
+              "fronteras están digitalizadas por RockMassPy. Es un método empírico: la lectura cerca de una frontera "
+              "puede diferir de la lámina impresa, y el ingeniero decide.",
+        "en": "This document reads the stability of stope faces on the modified stability graph of Potvin (1988), whose "
+              "boundaries are digitized by RockMassPy. It is an empirical method: a reading near a boundary may differ "
+              "from the printed graph, and the engineer decides.",
+    },
+    "cap_surfaces": {"es": "Caras evaluadas", "en": "Faces assessed"},
+    "cap_zones": {"es": "Caras por zona del gráfico", "en": "Faces by graph zone"},
+    "fig_stability": {"es": "Gráfico de estabilidad con las caras", "en": "Stability graph with the faces"},
+    "h_mode": {"es": "Modo", "en": "Mode"},
+    "h_zone": {"es": "Zona", "en": "Zone"},
+    "h_faces": {"es": "Caras", "en": "Faces"},
+    "cap_st_warnings": {"es": "Avisos y cantidad de caras que los tienen", "en": "Warnings and number of faces that have them"},
+    "zone_1": {"es": "estable", "en": "stable"},
+    "zone_2": {"es": "transición", "en": "transition"},
+    "zone_3": {"es": "hundimiento", "en": "caved"},
     "unknown_method": {"es": "sin información de verificación", "en": "no verification information"},
 }
 

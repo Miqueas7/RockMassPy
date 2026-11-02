@@ -434,5 +434,57 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
                   date or datetime.date.today().isoformat())
 
 
+def _stope_blocks(results, lang: str, figures: bool) -> tuple:
+    """Tabla de caras, conteo por zona y gráfico; la 2C puede reusarlos en el Anexo 39 B."""
+    from ..stope_surfaces import stope_zone_counts
+    from ..viz import plot_stability_graph
+    from ..viz.style import Style
+
+    head = ("id_superficie", "Q'", "A", "B", "C", t("h_mode", lang), "N'", "HR (m)", t("h_zone", lang))
+    rows = tuple((r.id_superficie, *(_str(round(v, 4)) for v in (m.q_prime, m.factor_a, m.factor_b, m.factor_c)),
+                  m.failure_mode, _str(round(m.n_prime, 4)), _str(round(m.hr_m, 3)),
+                  f"{m.reading.zone} {t(f'zone_{m.reading.zone}', lang)}")
+                 for r in results for m in (r.mathews,))
+    counts = stope_zone_counts(results)
+    graph = results[0].mathews.graph
+    cases = [(r.mathews.reading.x, r.mathews.reading.y) for r in results]
+    return (
+        Table(t("cap_surfaces", lang), head, rows),
+        Table(t("cap_zones", lang), (t("h_zone", lang), t("h_faces", lang)),
+              tuple((f"{z} {t(f'zone_{z}', lang)}", str(n)) for z, n in counts.items())),
+        _fig(t("fig_stability", lang),
+             lambda: plot_stability_graph(graph, cases=cases, style=Style(lang=lang)), lang, figures),
+    )
+
+
+def build_stope_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
+                       figures: bool = True) -> Report:
+    """Informe de diseño de tajeos (Mathews): alcance, métodos, resultados, avisos y nota."""
+    _check_lang(lang)
+    results = list(results)
+    if not results:
+        raise ValueError("results is empty: nothing to report")
+    out: dict[tuple[str, str], MethodRef] = {}
+    for r in results:
+        for m in r.mathews.methods:
+            out.setdefault((m.method_id, m.source), MethodRef(m.method_id, m.verification.name, m.source))
+    methods = tuple(out.values())
+    counts = Counter(w for r in results for w in set(r.mathews.warnings))
+    s4 = (Table(t("cap_st_warnings", lang), (t("h_warning", lang), t("h_faces", lang)),
+                tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),
+          ) if counts else (Paragraph(t("no_warnings", lang)),)
+    sections = (
+        Section("1", t("st_s1", lang), (Paragraph(t("st_scope", lang)),)),
+        Section("2", t("st_s2", lang), (Table(
+            t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
+            tuple((m.method_id, m.verification, m.source) for m in methods)),)),
+        Section("3", t("st_s3", lang), _stope_blocks(results, lang, figures)),
+        Section("4", t("st_s4", lang), s4),
+        Section("5", t("st_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
+    )
+    return Report(title, _subtitle(t("stope_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang],
+                  __version__, date or datetime.date.today().isoformat())
+
+
 from .docx import write_docx  # noqa: E402,F401
 from .html import write_html  # noqa: E402,F401

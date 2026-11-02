@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -300,3 +301,69 @@ def test_qsupport_estrella_en_la_lectura_ajustada(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(viz, "plot_q_chart", lambda *a, **k: seen.update(k) or real(*a, **k))
     main(["qsupport", "--q", "2000", "--span", "6", "--esr-category", "E", "--chart", str(tmp_path / "q.png")])
     assert seen["points"][0][0] == 1000
+
+
+# --- mathews y mrmr ---
+
+from test_stope_surfaces import CAB as SCAB, FILAS as SFILAS, csv as stope_csv  # noqa: E402
+
+MR = ["mrmr", "--irs", "100", "--rqd", "75", "--spacing", "0.5", "1.0", "3.0", "--jc-large", "straight",
+      "--jc-small", "smooth_planar", "--jc-filling", "soft_medium", "--water", "dry", "--weathering", "85",
+      "--blasting", "90"]
+
+
+def test_mathews_summary_files_and_no_leak(tmp_path, capsys):
+    p = stope_csv(tmp_path)
+    out = tmp_path / "res.csv"
+    code = main(["mathews", str(p), "-o", str(out), "--report", str(tmp_path / "x.html"), "--no-figures"])
+    cap = capsys.readouterr()
+    assert code == 2 and "graph: Mathews-Potvin1988 [Primary]" in cap.out and "surfaces: 6" in cap.out
+    assert "stable: 3" in cap.out and "transition: 1" in cap.out and "caved: 2" in cap.out
+    assert "warnings: 2" in cap.out and "warning: N' below the graph (0.1): taken as caved (2)" in cap.out
+    assert cap.out.rstrip().endswith("the library recommends, the engineer decides")
+    assert "SECRETO-123" not in cap.out and not re.search(r"S[1-6]", cap.out + cap.err)
+    assert "SECRETO-123" not in cap.err and "SECRETO-123" not in out.read_text(encoding="utf-8")
+    assert len(out.read_text(encoding="utf-8").splitlines()[0].split(",")) == 13
+    assert (tmp_path / "x.html").stat().st_size > 0
+
+
+def test_mathews_chart_exit_codes_and_errors(tmp_path, capsys):
+    pytest.importorskip("matplotlib")
+    png = tmp_path / "g.png"
+    ok = stope_csv(tmp_path, [SFILAS[0], SFILAS[1], SFILAS[4]])
+    assert main(["mathews", str(ok), "--chart", str(png)]) == 0 and png.stat().st_size > 0
+    assert "warning:" not in capsys.readouterr().out
+    bad = stope_csv(tmp_path, ["S1,10,,,,,100,20,45,,90,,130,40,,,L-1,1,SECRETO-123"], nombre="m.csv")
+    assert main(["mathews", str(bad)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and err.count("\n") == 1 and "row 2" in err and "SECRETO-123" not in err
+
+
+def test_mrmr_case_and_codes(capsys):
+    assert main(MR + ["--orientation", "75"]) == 0
+    out = capsys.readouterr().out
+    assert "class 3B" in out and "class 4B" in out and "MRMR-Laubscher1990" in out
+    assert out.rstrip().endswith("the library recommends, the engineer decides")
+    assert main(MR + ["--orientation", "50"]) == 2
+    assert "warning:" in capsys.readouterr().out
+
+
+def test_mrmr_input_errors_and_hr(tmp_path, capsys):
+    assert main(MR + ["--ff", "5", "--sets", "2"]) == 1
+    assert capsys.readouterr().err.startswith("error: ")
+    assert main(["mrmr", "--irs", "100", "--rqd", "75", "--spacing", "1", "--jc", "20", "--jc-large", "straight"]) == 1
+    capsys.readouterr()
+    assert main(["mrmr", "--irs", "100", "--ff", "4", "--sets", "2", "--jc", "20", "--hr", "10"]) in (0, 2)
+    out = capsys.readouterr().out
+    assert "Laubscher1994-stability" in out and "zone" in out
+    pytest.importorskip("matplotlib")
+    png = tmp_path / "m.png"
+    main(["mrmr", "--irs", "100", "--ff", "4", "--sets", "2", "--jc", "20", "--hr", "10", "--chart", str(png)])
+    assert png.stat().st_size > 0
+
+
+def test_help_lists_new_commands(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    assert "mathews" in out and "mrmr" in out

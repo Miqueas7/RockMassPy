@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -168,6 +169,117 @@ def _qsupport(a) -> int:
     return 2 if r.warnings or max(ro.category, r.walls.category if r.walls else 0) >= 7 else 0
 
 
+def _mathews(a) -> int:
+    from collections import Counter
+
+    from . import report as rp
+    from .stope_surfaces import assess_stope_surfaces, load_stope_surfaces, save_stope_results, stope_zone_counts
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    rs = assess_stope_surfaces(load_stope_surfaces(a.surfaces, sheet=a.sheet, column_map=_column_map(a.column_map)))
+    counts = stope_zone_counts(rs)
+    ws = Counter(w for r in rs for w in set(r.mathews.warnings))
+    info = rs[0].mathews.reading.info if rs else None
+    print(f"graph: {rs[0].mathews.graph} [{info.verification.name}]" if rs else "graph: none")
+    print(f"surfaces: {len(rs)}")
+    for z, name in ((1, "stable"), (2, "transition"), (3, "caved")):
+        print(f"{name}: {counts[z]}")
+    print(f"warnings: {sum(1 for r in rs if r.mathews.warnings)}")
+    for w, n in sorted(ws.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"warning: {w} ({n})")
+    if a.output:
+        print(f"results: {save_stope_results(rs, a.output)}")
+    if a.chart and rs:
+        from .viz import Style, plot_stability_graph, save_figure
+
+        fig = plot_stability_graph(rs[0].mathews.graph, cases=[(r.mathews.reading.x, r.mathews.reading.y) for r in rs],
+                                   style=Style(lang=a.lang))
+        print(f"chart: {save_figure(fig, a.chart)}")
+    if a.report and rs:
+        rep = rp.build_stope_report(rs, title=a.title or t("stope_title", a.lang), lang=a.lang, author=a.author or "",
+                                    figures=not a.no_figures)
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if ws or counts[2] or counts[3] else 0
+
+
+def _snake(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name.rstrip("_")).lower()
+
+
+def _enum(cls, value: str, flag: str):
+    members = {_snake(m.name): m for m in cls}  # los nombres salen del enum enlazado, en CamelCase
+    if value.lower() not in members:
+        raise ValueError(f"invalid {flag} {value!r}; choose one of: {', '.join(members)}")
+    return members[value.lower()]
+
+
+def _mrmr(a) -> int:
+    from . import _rockmasspy_core as rm
+    from .stability_graphs import read_stability_graph
+
+    rqd_path, ff_path = a.rqd is not None or a.spacing is not None, a.ff is not None or a.sets is not None
+    if rqd_path == ff_path or (rqd_path and (a.rqd is None or a.spacing is None)) or (ff_path and (a.ff is None or a.sets is None)):
+        raise ValueError("give exactly one path: --rqd and --spacing, or --ff and --sets")
+    if rqd_path and a.core_recovery is not None:
+        raise ValueError("--core-recovery goes with --ff and --sets")
+    has_desc = any((a.jc_large, a.jc_small, a.water, a.jc_filling, a.jc_altered))
+    if (a.jc is not None) == has_desc or (has_desc and not (a.jc_large and a.jc_small and a.water)):
+        raise ValueError("give --jc, or --jc-large, --jc-small and --water (optional --jc-filling, --jc-altered)")
+    i = rm.Mrmr90Input()
+    i.irs_mpa = a.irs
+    if rqd_path:
+        i.rqd_pct, i.spacings_m = a.rqd, a.spacing
+    else:
+        i.ff_per_m, i.joint_sets = a.ff, a.sets
+        if a.core_recovery is not None:
+            i.core_recovery_pct = a.core_recovery
+    if a.jc is not None:
+        i.joint_condition = a.jc
+    else:
+        j = rm.JointCondition90()
+        j.large, j.small = _enum(rm.JointExpressionLarge, a.jc_large, "--jc-large"), _enum(rm.JointExpressionSmall, a.jc_small, "--jc-small")
+        j.water = _enum(rm.JointWater90, a.water, "--water")
+        if a.jc_filling:
+            j.filling = _enum(rm.JointFilling90, a.jc_filling, "--jc-filling")
+        j.altered_wall = a.jc_altered
+        i.joint_condition = rm.joint_condition90(j)
+    for field, v in (("weathering_pct", a.weathering), ("orientation_pct", a.orientation), ("stress_pct", a.stress),
+                     ("blasting_pct", a.blasting)):
+        if v is not None:
+            setattr(i, field, v)
+    r = rm.mrmr90(i)
+    warnings = list(r.warnings)
+    print(f"edition: {r.info.method_id} [{r.info.verification.name}]")
+    print(f"irs rating: {r.irs_rating:g}")
+    if rqd_path:
+        print(f"rqd rating: {r.rqd_rating:g}")
+        print(f"spacing rating: {r.spacing_rating:g}")
+    else:
+        print(f"ff rating: {r.ff_rating:g}")
+    print(f"joint condition: {r.joint_condition:g}")
+    print(f"rmr: {r.rmr:g} (class {r.rmr_class})")
+    print(f"adjustment: {r.adjustment * 100:g}%")
+    print(f"mrmr: {r.mrmr:g} (class {r.mrmr_class})")
+    point = None
+    if a.hr is not None:
+        g = read_stability_graph("Laubscher1994-stability", a.hr, r.mrmr)
+        print(f"zone: {g.zone} {g.zone_label} [{g.info.method_id}, {g.info.verification.name}]")
+        warnings += g.warnings
+        point = (g.x, g.y)
+    for w in warnings:
+        print(f"warning: {w}")
+    print("the library recommends, the engineer decides")
+    if a.chart and point:
+        from .viz import Style, plot_stability_graph, save_figure
+
+        print(f"chart: {save_figure(plot_stability_graph('Laubscher1994-stability', points=[point], style=Style(lang=a.lang)), a.chart)}")
+    return 2 if warnings else 0
+
+
 class _Parser(argparse.ArgumentParser):
     """Los errores de uso salen con 1 (2 queda para «terminó pero hay avisos»)."""
 
@@ -231,6 +343,39 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--chart", metavar="OUT.png")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.set_defaults(fn=_qsupport)
+
+    c = sub.add_parser("mathews", help="Mathews-Potvin stability of stope faces")
+    c.add_argument("surfaces", metavar="SUPERFICIES")
+    c.add_argument("--sheet", default="Superficies")
+    c.add_argument("--column-map", metavar="MAP.json")
+    c.add_argument("-o", "--output", metavar="RESULTADOS.csv|.xlsx")
+    c.add_argument("--chart", metavar="OUT.png")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.add_argument("--no-figures", action="store_true")
+    c.set_defaults(fn=_mathews)
+
+    c = sub.add_parser("mrmr", help="MRMR (Laubscher 1990) and caving diagram zone")
+    c.add_argument("--irs", type=float, required=True, metavar="MPA")
+    c.add_argument("--rqd", type=float, metavar="PCT")
+    c.add_argument("--spacing", type=float, nargs="+", metavar="M")
+    c.add_argument("--ff", type=float, metavar="F")
+    c.add_argument("--sets", type=int, metavar="N")
+    c.add_argument("--core-recovery", type=float, metavar="PCT")
+    c.add_argument("--jc", type=float, metavar="RATING")
+    c.add_argument("--jc-large", metavar="NAME")
+    c.add_argument("--jc-small", metavar="NAME")
+    c.add_argument("--jc-filling", metavar="NAME")
+    c.add_argument("--jc-altered", action="store_true")
+    c.add_argument("--water", metavar="NAME")
+    for k in ("weathering", "orientation", "stress", "blasting"):
+        c.add_argument(f"--{k}", type=float, metavar="PCT")
+    c.add_argument("--hr", type=float, metavar="M")
+    c.add_argument("--chart", metavar="OUT.png")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_mrmr)
     return p
 
 
