@@ -89,3 +89,20 @@ def test_labor_type_tag_escaped(tmp_path):
     rs = rm.classify_tramos([tr("A", labor="<b>x</b>", rmr_valor=70)], [lt])
     h = rp.write_html(rp.build_memoria(rs, [lt], title="t", figures=False), tmp_path / "m.html").read_text(encoding="utf-8")
     assert "<b>x</b>" not in h and "&lt;b&gt;x&lt;/b&gt;" in h
+
+
+@pytest.mark.parametrize("lang,bolt,shot", [("es", "Perno helicoidal 2.1 m @ 1.2 m", "shotcrete 50 mm con fibra"),
+                                            ("en", "Bolt helicoidal 2.1 m @ 1.2 m", "shotcrete 50 mm with fibre")])
+def test_catalog_describes_elements(lang, bolt, shot):
+    cat = rm.SupportCatalog([rm.SupportType("A", 1, bolt=rm.Bolt("helicoidal", 2.1, 1.2),
+                                            shotcrete=rm.Shotcrete(50, True))])
+    lt = rm.LaborTable("galería", cat, rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 100, "x", "A")]))
+    r = rp.build_memoria([], [lt], title="t", lang=lang, figures=False)
+    cap = next(b for b in r.sections[2].blocks[0].blocks if isinstance(b, rp.Table) and len(b.header) == 2)
+    assert cap.rows[0][1] == f"{bolt}; {shot}"
+
+
+def test_plan_note():
+    h = build(figures=False)
+    notes = [b.text for b in h.sections[5].blocks if isinstance(b, rp.Paragraph)]
+    assert any("este/norte" in n for n in notes)

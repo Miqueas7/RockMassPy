@@ -1,8 +1,9 @@
 """Informe de RockMassPy: modelo independiente del formato y memoria de cálculo.
 
 No se importa desde `rockmasspy/__init__.py`: se usa con `import rockmasspy.report`.
-El informe nunca muestra labor_codigo, zona_nivel, codigo_mina, evaluador_codigo, observaciones ni coordenadas;
-solo el id_tramo (código propio del usuario).
+El informe nunca muestra códigos de identificación (labor_codigo, zona_nivel, codigo_mina, evaluador_codigo,
+observaciones); solo el id_tramo (código propio del usuario). El mapa en planta muestra este/norte en sus ejes
+como escala.
 """
 
 from __future__ import annotations
@@ -230,6 +231,7 @@ def _maps_section(results, tables, lang, figures) -> Section:
     if any(r.tramo.este_m is not None and r.tramo.norte_m is not None for r in results):
         cat = next(iter(cat_of.values())) if len(cat_of) == 1 else None  # varios catálogos: color por orden
         blocks.append(_fig(t("fig_plan", lang), lambda: plot_plan_map(results, catalog=cat, style=st), lang, figures))
+        blocks.append(Paragraph(t("plan_note", lang)))
     if not blocks:
         blocks.append(Paragraph(t("no_maps", lang)))
     return Section("6", t("s6", lang), tuple(blocks))

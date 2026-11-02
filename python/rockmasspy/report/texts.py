@@ -54,6 +54,12 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "fig_hist": {"es": "Tramos por clase", "en": "Tramos by class"},
     "fig_profile": {"es": "Perfil por progresiva", "en": "Profile by chainage"},
     "fig_plan": {"es": "Planta", "en": "Plan view"},
+    "plan_note": {
+        "es": "El informe nunca muestra códigos de identificación (labor_codigo, zona_nivel, codigo_mina, "
+              "evaluador_codigo, observaciones). El mapa en planta muestra este/norte en sus ejes como escala.",
+        "en": "The report never shows identification codes (labor_codigo, zona_nivel, codigo_mina, "
+              "evaluador_codigo, observaciones). The plan map shows east/north on its axes as its scale.",
+    },
     "no_figures": {"es": "figuras no disponibles: instala rockmasspy[viz]", "en": "figures not available: install rockmasspy[viz]"},
     "no_maps": {"es": "Ningún tramo trae progresivas ni coordenadas: no hay mapas.",
                 "en": "No tramo has chainage or coordinates: there are no maps."},
