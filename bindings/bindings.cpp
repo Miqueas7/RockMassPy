@@ -14,6 +14,7 @@
 #include "rockmasspy/method_info.hpp"
 #include "rockmasspy/q_support.hpp"
 #include "rockmasspy/mathews.hpp"
+#include "rockmasspy/mrmr.hpp"
 #include "rockmasspy/q_system.hpp"
 #include "rockmasspy/rmr14.hpp"
 #include "rockmasspy/rmr76.hpp"
@@ -211,6 +212,62 @@ NB_MODULE(_rockmasspy_core, m) {
           "Mathews factor C for gravity fall and slabbing: 8 - 6 cos(alpha).");
     m.def("mathews_factor_c_sliding", &mathews_factor_c_sliding, nb::arg("joint_dip_deg"),
           "Mathews factor C for sliding on the critical joint.");
+    nb::enum_<JointExpressionLarge>(m, "JointExpressionLarge")
+        .value("MultiWavyDirectional", JointExpressionLarge::MultiWavyDirectional)
+        .value("UniDirectional", JointExpressionLarge::UniDirectional).value("Curved", JointExpressionLarge::Curved)
+        .value("SlightUndulation", JointExpressionLarge::SlightUndulation)
+        .value("Straight", JointExpressionLarge::Straight);
+    nb::enum_<JointExpressionSmall>(m, "JointExpressionSmall")
+        .value("RoughStepped", JointExpressionSmall::RoughStepped).value("SmoothStepped", JointExpressionSmall::SmoothStepped)
+        .value("SlickensidedStepped", JointExpressionSmall::SlickensidedStepped)
+        .value("RoughUndulating", JointExpressionSmall::RoughUndulating)
+        .value("SmoothUndulating", JointExpressionSmall::SmoothUndulating)
+        .value("SlickensidedUndulating", JointExpressionSmall::SlickensidedUndulating)
+        .value("RoughPlanar", JointExpressionSmall::RoughPlanar).value("SmoothPlanar", JointExpressionSmall::SmoothPlanar)
+        .value("Polished", JointExpressionSmall::Polished);
+    nb::enum_<JointFilling90>(m, "JointFilling90").value("None_", JointFilling90::None)
+        .value("NonSofteningCoarse", JointFilling90::NonSofteningCoarse)
+        .value("NonSofteningMedium", JointFilling90::NonSofteningMedium)
+        .value("NonSofteningFine", JointFilling90::NonSofteningFine).value("SoftCoarse", JointFilling90::SoftCoarse)
+        .value("SoftMedium", JointFilling90::SoftMedium).value("SoftFine", JointFilling90::SoftFine)
+        .value("GougeThinnerThanIrregularities", JointFilling90::GougeThinnerThanIrregularities)
+        .value("GougeThickerThanIrregularities", JointFilling90::GougeThickerThanIrregularities);
+    nb::enum_<JointWater90>(m, "JointWater90").value("Dry", JointWater90::Dry).value("Moist", JointWater90::Moist)
+        .value("ModeratePressure", JointWater90::ModeratePressure).value("HighPressure", JointWater90::HighPressure);
+    nb::enum_<Weathering90>(m, "Weathering90").value("Fresh", Weathering90::Fresh).value("Slight", Weathering90::Slight)
+        .value("Moderate", Weathering90::Moderate).value("High", Weathering90::High)
+        .value("Complete", Weathering90::Complete).value("ResidualSoil", Weathering90::ResidualSoil);
+    nb::enum_<Blasting90>(m, "Blasting90").value("Boring", Blasting90::Boring).value("SmoothWall", Blasting90::SmoothWall)
+        .value("GoodConventional", Blasting90::GoodConventional).value("Poor", Blasting90::Poor);
+    nb::class_<JointCondition90>(m, "JointCondition90", "Joint condition inputs of Laubscher (1990), Table I part 3.")
+        .def(nb::init<>())
+        .def_rw("large", &JointCondition90::large).def_rw("small", &JointCondition90::small)
+        .def_rw("filling", &JointCondition90::filling).def_rw("altered_wall", &JointCondition90::altered_wall)
+        .def_rw("water", &JointCondition90::water);
+    nb::class_<Mrmr90Input>(m, "Mrmr90Input", "MRMR (Laubscher 1990) inputs: rqd_pct + spacings_m, or ff_per_m + joint_sets.")
+        .def(nb::init<>())
+        .def_rw("irs_mpa", &Mrmr90Input::irs_mpa).def_rw("rqd_pct", &Mrmr90Input::rqd_pct)
+        .def_rw("spacings_m", &Mrmr90Input::spacings_m).def_rw("ff_per_m", &Mrmr90Input::ff_per_m)
+        .def_rw("joint_sets", &Mrmr90Input::joint_sets).def_rw("core_recovery_pct", &Mrmr90Input::core_recovery_pct)
+        .def_rw("joint_condition", &Mrmr90Input::joint_condition)
+        .def_rw("weathering_pct", &Mrmr90Input::weathering_pct).def_rw("orientation_pct", &Mrmr90Input::orientation_pct)
+        .def_rw("stress_pct", &Mrmr90Input::stress_pct).def_rw("blasting_pct", &Mrmr90Input::blasting_pct);
+    nb::class_<Mrmr90Result>(m, "Mrmr90Result")
+        .def_ro("irs_rating", &Mrmr90Result::irs_rating).def_ro("rqd_rating", &Mrmr90Result::rqd_rating)
+        .def_ro("spacing_rating", &Mrmr90Result::spacing_rating).def_ro("ff_rating", &Mrmr90Result::ff_rating)
+        .def_ro("joint_condition", &Mrmr90Result::joint_condition).def_ro("rmr", &Mrmr90Result::rmr)
+        .def_ro("adjustment", &Mrmr90Result::adjustment).def_ro("mrmr", &Mrmr90Result::mrmr)
+        .def_ro("rmr_class", &Mrmr90Result::rmr_class).def_ro("mrmr_class", &Mrmr90Result::mrmr_class)
+        .def_ro("info", &Mrmr90Result::info).def_ro("warnings", &Mrmr90Result::warnings);
+    m.def("rating_irs90", &rating_irs90, nb::arg("irs_mpa"));
+    m.def("rating_rqd90", &rating_rqd90, nb::arg("rqd_pct"));
+    m.def("rating_joint_spacing90", &rating_joint_spacing90, nb::arg("spacings_m"));
+    m.def("rating_ff90", &rating_ff90, nb::arg("ff_per_m"), nb::arg("joint_sets"), nb::arg("core_recovery_pct") = 100.0);
+    m.def("joint_condition90", &joint_condition90, nb::arg("joint"));
+    m.def("weathering_adjustment90", &weathering_adjustment90, nb::arg("degree"), nb::arg("years"));
+    m.def("blasting_adjustment90", &blasting_adjustment90, nb::arg("blasting"));
+    m.def("laubscher_class", &laubscher_class, nb::arg("rating"));
+    m.def("mrmr90", &mrmr90, nb::arg("input"), "MRMR (Laubscher 1990); the result is not clipped.");
     m.def("hydraulic_radius", &hydraulic_radius, nb::arg("area_m2"), nb::arg("perimeter_m"),
           "Hydraulic radius = area / perimeter (m).");
     m.def("hydraulic_radius_rect", &hydraulic_radius_rect, nb::arg("width_m"), nb::arg("length_m"),
