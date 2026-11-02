@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,9 +25,9 @@ using validation::unset;
 /// Set B (jr_b, ja_b, o_factor_b) es opcional pero va completo; basta con dar un SRF.
 struct QSlopeInput {
     double rqd_pct = unset, jn = unset, jr_a = unset, ja_a = unset, o_factor_a = unset;
-    double jr_b = unset, ja_b = unset, o_factor_b = unset;
+    std::optional<double> jr_b, ja_b, o_factor_b;
     double jwice = unset;
-    double srf_a = unset, srf_b = unset, srf_c = unset;
+    std::optional<double> srf_a, srf_b, srf_c;
 };
 
 struct QSlopeResult {
@@ -51,23 +52,23 @@ inline QSlopeResult q_slope(const QSlopeInput& in) {
     require_positive(in.ja_a, "ja_a");
     require_positive(in.o_factor_a, "o_factor_a");
     require_positive(in.jwice, "jwice");
-    const bool b_given[] = {!std::isnan(in.jr_b), !std::isnan(in.ja_b), !std::isnan(in.o_factor_b)};
-    const int n_b = b_given[0] + b_given[1] + b_given[2];
+    // vacío = sin dato; un valor presente se valida siempre (NaN o infinito lanzan)
+    const int n_b = in.jr_b.has_value() + in.ja_b.has_value() + in.o_factor_b.has_value();
     if (n_b != 0 && n_b != 3)
         validation::detail::fail("jr_b/ja_b/o_factor_b", "must be given all together or none (incomplete set B)", n_b);
     if (n_b == 3) {
-        require_positive(in.jr_b, "jr_b");
-        require_positive(in.ja_b, "ja_b");
-        require_positive(in.o_factor_b, "o_factor_b");
+        require_positive(*in.jr_b, "jr_b");
+        require_positive(*in.ja_b, "ja_b");
+        require_positive(*in.o_factor_b, "o_factor_b");
     }
-    const double srfs[] = {in.srf_a, in.srf_b, in.srf_c};
+    const std::optional<double> srfs[] = {in.srf_a, in.srf_b, in.srf_c};
     const char* srf_names[] = {"srf_a", "srf_b", "srf_c"};
     double srf = 0;
     bool any_srf = false;
     for (int i = 0; i < 3; ++i) {
-        if (std::isnan(srfs[i])) continue;
-        require_positive(srfs[i], srf_names[i]);
-        srf = any_srf ? std::max(srf, srfs[i]) : srfs[i];
+        if (!srfs[i]) continue;
+        require_positive(*srfs[i], srf_names[i]);
+        srf = any_srf ? std::max(srf, *srfs[i]) : *srfs[i];
         any_srf = true;
     }
     if (!any_srf) validation::detail::fail("srf_a/srf_b/srf_c", "at least one SRF must be given", validation::unset);
@@ -83,23 +84,26 @@ inline QSlopeResult q_slope(const QSlopeInput& in) {
     }
     // en cuña, la resistencia es el producto de los dos conjuntos (p. 894)
     r.jr_ja_0 = in.jr_a / in.ja_a * in.o_factor_a;
-    if (n_b == 3) r.jr_ja_0 *= in.jr_b / in.ja_b * in.o_factor_b;
+    if (n_b == 3) {
+        r.jr_ja_0 *= *in.jr_b / *in.ja_b * *in.o_factor_b;
+        r.notes.push_back("(Jr/Ja)0 is the product of sets A and B (wedge, Bar and Barton 2018 p. 894)");
+    }
     r.srf_slope = srf;
     r.q_slope = (r.rqd_used / in.jn) * r.jr_ja_0 * (in.jwice / srf);
 
-    const auto out = [&](double v, double lo, double hi, const char* name) {
-        if (!std::isnan(v) && (v < lo || v > hi))
-            r.warnings.push_back(std::string(name) + " " + validation::detail::num(v) + " outside the table range [" +
+    const auto out = [&](std::optional<double> v, double lo, double hi, const char* name) {
+        if (v && (*v < lo || *v > hi))
+            r.warnings.push_back(std::string(name) + " " + validation::detail::num(*v) + " outside the table range [" +
                                  validation::detail::num(lo) + ", " + validation::detail::num(hi) + "]");
     };
     out(in.jn, 0.5, 20, "jn");
-    out(in.jr_a, 0, 5, "jr_a");
-    out(in.jr_b, 0, 5, "jr_b");
+    out(in.jr_a, 0.5, 5, "jr_a");
+    out(in.jr_b, 0.5, 5, "jr_b");
     out(in.ja_a, 0.75, 20, "ja_a");
     out(in.ja_b, 0.75, 20, "ja_b");
     out(in.o_factor_a, 0.25, 2, "o_factor_a");
     out(in.o_factor_b, 0.5, 1.5, "o_factor_b");
-    out(in.jwice, 0, 1.95, "jwice");
+    out(in.jwice, 0.05, 1.95, "jwice");
     out(in.srf_a, 2.5, 20, "srf_a");
     out(in.srf_b, 1, 20, "srf_b");
     out(in.srf_c, 1, 24, "srf_c");

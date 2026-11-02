@@ -96,3 +96,20 @@ def test_unknown_key_raises(call):
 def test_unknown_key_lists_valid():
     with pytest.raises(ValueError, match="very_favorable"):
         t.o_factor("muy_bueno")
+
+
+@pytest.mark.parametrize("field", ["jr_b", "ja_b", "o_factor_b", "srf_b", "srf_c", "srf_a"])
+def test_nan_in_optional_field_raises_naming_it(field):
+    i = base(jr_b=2, ja_b=1, o_factor_b=0.9, srf_b=5, srf_c=2)
+    setattr(i, field, NAN)
+    with pytest.raises(ValueError, match=field):
+        rm.q_slope(i)
+
+
+def test_none_and_omission_mean_unset():
+    i = base()
+    assert i.srf_b is None and i.jr_b is None
+    i.srf_b = 5
+    i.srf_b = None
+    assert rm.q_slope(i).srf_slope == 2.5
+    assert any("product of sets A and B" in n for n in rm.q_slope(base(jr_b=2, ja_b=1, o_factor_b=0.9)).notes)

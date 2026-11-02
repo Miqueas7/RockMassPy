@@ -80,6 +80,7 @@ def srf_b(ucs_over_sigma1: float) -> float:
     for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
         if x1 <= x <= x0:
             return y0 + (y1 - y0) * (x0 - x) / (x0 - x1)
+    raise AssertionError("unreachable: x is inside the table range")
 
 
 def srf_c(category: str, orientation: str) -> float:

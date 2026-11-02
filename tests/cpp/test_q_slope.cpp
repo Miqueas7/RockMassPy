@@ -56,17 +56,20 @@ TEST(QSlope, Components) {
     EXPECT_TRUE(r.warnings.empty());
 }
 
-TEST(QSlope, SetBReplacesSetA) {
+TEST(QSlope, SetBMultipliesSetA) {
     auto in = base();
     in.jr_b = 2; in.ja_b = 1; in.o_factor_b = 0.9;
-    EXPECT_NEAR(q_slope(in).jr_ja_0, 2.025, 1e-12);
+    const auto r = q_slope(in);
+    EXPECT_NEAR(r.jr_ja_0, 2.025, 1e-12);
+    EXPECT_TRUE(has(r.notes, "(Jr/Ja)0 is the product of sets A and B (wedge, Bar and Barton 2018 p. 894)"));
+    EXPECT_TRUE(r.warnings.empty());
 }
 
 TEST(QSlope, SrfIsMaximum) {
     auto in = base();
     in.srf_a = 2.5; in.srf_b = 5; in.srf_c = 2;
     EXPECT_DOUBLE_EQ(q_slope(in).srf_slope, 5);
-    in.srf_a = unset; in.srf_b = unset;
+    in.srf_a.reset(); in.srf_b.reset();
     EXPECT_DOUBLE_EQ(q_slope(in).srf_slope, 2);
 }
 
@@ -120,8 +123,20 @@ TEST(QSlope, Throws) {
     EXPECT_NE(bad([](QSlopeInput& i) { i.jr_b = 2; }), "");  // set B a medias
     EXPECT_NE(bad([](QSlopeInput& i) { i.jr_b = 2; i.ja_b = 1; }), "");
     EXPECT_NE(bad([](QSlopeInput& i) { i.jr_b = 2; i.ja_b = 1; i.o_factor_b = 0; }), "");
-    EXPECT_NE(bad([](QSlopeInput& i) { i.srf_a = unset; }), "");  // ningún SRF
+    EXPECT_NE(bad([](QSlopeInput& i) { i.srf_a.reset(); }), "");  // ningún SRF
     EXPECT_NE(bad([](QSlopeInput& i) { i.srf_b = -2; }), "");
+}
+
+TEST(QSlope, NaNInOptionalFieldThrowsNamingIt) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto msg = [&](auto edit) { auto in = base(); edit(in); return error_of([&] { q_slope(in); }); };
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.srf_b = nan; }).find("srf_b"), std::string::npos);
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.srf_c = nan; }).find("srf_c"), std::string::npos);
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.srf_a = nan; }).find("srf_a"), std::string::npos);
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.jr_b = nan; i.ja_b = 1; i.o_factor_b = 1; }).find("jr_b"), std::string::npos);
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.jr_b = 1; i.ja_b = nan; i.o_factor_b = 1; }).find("ja_b"), std::string::npos);
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.jr_b = 1; i.ja_b = 1; i.o_factor_b = nan; }).find("o_factor_b"), std::string::npos);
+    EXPECT_NE(msg([&](QSlopeInput& i) { i.srf_b = std::numeric_limits<double>::infinity(); }), "");
 }
 
 TEST(QSlope, OutOfTableWarnsWithoutThrowing) {
