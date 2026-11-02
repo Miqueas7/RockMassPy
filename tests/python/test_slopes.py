@@ -42,6 +42,9 @@ def test_riquelme_por_la_hoja(tmp_path):
     face = rm.PlaneOrientation(133, 72)
     # J1 y J3 vuelcan; J2 y J4 son planares (dirección dentro de 90 de la cara); las cuñas, por su intersección
     assert [c.mode for c in r.smr_cases[:4]] == ["toppling", "planar", "toppling", "planar"]
+    assert r.smr_discrete.label == "J1" and r.smr_discrete.mode == "toppling"
+    assert r.smr_discrete.discrete.smr == pytest.approx(24.5)
+    assert r.smr_continuous.continuous.smr == pytest.approx(21.5, abs=0.5)
     esperado = min(c.discrete.smr for c in r.smr_cases)
     assert r.smr_discrete.discrete.smr == esperado
     assert r.smr_discrete is next(c for c in r.smr_cases if c.discrete.smr == esperado)
@@ -55,11 +58,11 @@ def test_riquelme_por_la_hoja(tmp_path):
 
 def test_ida_y_vuelta_csv_y_excel(tmp_path):
     openpyxl = pytest.importorskip("openpyxl")
-    tf = [T(), T("T2", fr="", rmr="", exc="", q=Q, srf=",,2.5")]
-    a = correr(tmp_path, [T()])
+    tf = [T(), T("T2", fr="", rmr="", exc="", q=Q, b="2,1,0.9", srf="2.5,,")]
+    a = correr(tmp_path, tf)
     wb = openpyxl.Workbook()
     for nombre, cab, filas in (("Familias", FAM_CAB, [f + EXTRA_F for f in RIQ]),
-                               ("Taludes", TAL_CAB, [T() + EXTRA_T])):
+                               ("Taludes", TAL_CAB, [t + EXTRA_T for t in tf])):
         ws = wb.create_sheet(nombre)
         for linea in [cab, *filas]:
             ws.append([None if c == "" else (float(c) if c.replace(".", "").isdigit() else c)
@@ -68,7 +71,9 @@ def test_ida_y_vuelta_csv_y_excel(tmp_path):
     wb.save(tmp_path / "x.xlsx")
     b = rm.assess_slopes(rm.load_slope_faces(tmp_path / "x.xlsx"), rm.load_families(tmp_path / "x.xlsx"))
     assert repr(a) == repr(b)  # los objetos del núcleo no definen igualdad
-    assert tf  # (fila con Q-slope y sin SMR: abajo)
+    assert [r.id_talud for r in a] == [r.id_talud for r in b] == ["T1", "T2"]
+    assert [r.id_tramo for r in b] == ["R1", "R1"]
+    assert a[1].q_slope is not None and a[1].q_slope.jr_ja_0 == b[1].q_slope.jr_ja_0 == pytest.approx(2.025)
 
 
 def test_cinematica_igual_a_mano_y_limite_lateral(tmp_path):
@@ -142,7 +147,10 @@ def test_conteos_y_resultados(tmp_path):
     assert c["slopes"] == 2 and c["warnings"] == 1 and sum(c[f"smr_d_{k}"] for k in range(1, 6)) == 2
     p = rm.save_slope_results(rs, tmp_path / "out.csv")
     txt = p.read_text(encoding="utf-8-sig")
-    assert txt.splitlines()[0].count(";") + txt.splitlines()[0].count(",") >= 24 and "ZZSENT" not in txt
+    import re
+    from rockmasspy.slopes import _RESULT_COLUMNS
+    assert re.split("[;,]", txt.splitlines()[0]) == list(_RESULT_COLUMNS) and "ZZSENT" not in txt
+    assert "smr_caso_continuo" in _RESULT_COLUMNS
     assert len(txt.splitlines()) == 3
 
 
@@ -150,9 +158,10 @@ def test_methods(tmp_path):
     (r,) = correr(tmp_path, [T(q=Q, srf=",,2.5")])
     ids = [m.method_id for m in r.methods]
     assert len(set((m.method_id, m.source) for m in r.methods)) == len(r.methods)
-    for pref in ("SMR-Romana1985", "Q-slope-BarBarton2017"):
-        assert pref in ids
-    assert len(ids) >= 7
+    for mid in ("Fisher1953-set-statistics", "Kinematic-PlanarSliding", "Kinematic-WedgeSliding",
+                "Kinematic-FlexuralToppling-Goodman1980", "Kinematic-DirectToppling-HudsonHarrison1997",
+                "SMR-Romana1985", "Q-slope-BarBarton2017"):
+        assert mid in ids
 
 
 @pytest.mark.parametrize("fila,col", [
@@ -160,6 +169,11 @@ def test_methods(tmp_path):
     (T(dir_="400"), "dir_buz_cara_grados"), (T(dir_="nan"), "dir_buz_cara_grados"),
     (T(fr="0"), "friccion_grados"), (T(fr="90"), "friccion_grados"), (T(lim="0"), "limite_lateral_grados"),
     (T(lim="90"), "limite_lateral_grados"), (T(exc=""), "excavacion"), (T(exc="explosivo"), "excavacion"),
+    (T(q="150,9,1.5,1,0.75,0.7", srf=",,2.5"), "rqd_pct"), (T(q="-5,9,1.5,1,0.75,0.7", srf=",,2.5"), "rqd_pct"),
+    (T(q="80,0,1.5,1,0.75,0.7", srf=",,2.5"), "jn"), (T(q="80,9,-1,1,0.75,0.7", srf=",,2.5"), "jr_a"),
+    (T(q="80,9,1.5,0,0.75,0.7", srf=",,2.5"), "ja_a"), (T(q="80,9,1.5,1,0,0.7", srf=",,2.5"), "o_a"),
+    (T(q="80,9,1.5,1,0.75,0", srf=",,2.5"), "jwice"), (T(q=Q, srf=",,0"), "srf_c"),
+    (T(rmr="101"), "rmr_basico"), (T(rmr="-1"), "rmr_basico"),
     (T(q=Q, b="2,1,", srf=",,2.5"), "o_b"), (T(q=Q), "srf_a"), (T(q="80,9,1.5,1,0.75,", srf=",,2.5"), "jwice"),
 ])
 def test_hoja_mal_escrita(tmp_path, fila, col):
@@ -167,7 +181,7 @@ def test_hoja_mal_escrita(tmp_path, fila, col):
         rm.load_slope_faces(tal(tmp_path, [fila]))
     m = str(e.value)
     assert col in m and "Taludes" in m and "row 2" in m
-    for v in ("95", "-5", "400", "nan", "explosivo"):
+    for v in ("95", "-5", "400", "nan", "explosivo", "150", "101"):
         assert v not in m.replace("row 2", "")
 
 
@@ -196,3 +210,70 @@ def test_privacidad(tmp_path):
     with pytest.raises(ValueError) as e:
         rm.load_slope_faces(tal(tmp_path, [T("T-ZZSENT", "R-ZZSENT", buz="95")]))
     assert "ZZSENT" not in str(e.value)
+
+
+def test_eje_vertical_sin_lado(tmp_path):
+    # un plano vertical anotado de los dos lados da el mismo SMR (el menos favorable)
+    r = [correr(tmp_path, [T(dir_="0", buz="72")], jf=[f"R1,,90,{d}"])[0] for d in (0, 180)]
+    assert r[0].smr_discrete.discrete.smr == r[1].smr_discrete.discrete.smr
+    assert r[0].smr_discrete.discrete.smr_class == r[1].smr_discrete.discrete.smr_class == 5
+    assert r[0].smr_discrete.discrete.smr == pytest.approx(17)
+
+
+@pytest.mark.parametrize("giro", [0, 45, 90, 180, 270])
+@pytest.mark.parametrize("planos", [
+    [(90, 0), (90, 90)],                 # intersección vertical
+    [(40, 0), (40, 180)],                # intersección horizontal
+    [(87, 325), (20, 119), (83, 234), (62, 62)],
+    [(60, 20), (70, 100), (50, 200)],
+])
+def test_giro_no_cambia_el_smr(tmp_path, giro, planos):
+    def corre(g):
+        jf = [f"R1,,{b},{(d + g) % 360}" for b, d in planos]
+        return correr(tmp_path, [T(dir_=str((133 + g) % 360))], jf=jf)[0]
+    a, b = corre(0), corre(giro)
+    assert b.smr_discrete.discrete.smr == pytest.approx(a.smr_discrete.discrete.smr)
+    assert b.smr_continuous.continuous.smr == pytest.approx(a.smr_continuous.continuous.smr)
+    assert len(a.smr_cases) == len(b.smr_cases)
+
+
+@pytest.mark.parametrize("cara", [90, 270])
+def test_cuna_horizontal_con_cara_a_90_y_270(tmp_path, cara):
+    (r,) = correr(tmp_path, [T(dir_=str(cara))], jf=["R1,J1,40,0", "R1,J2,40,180"])
+    assert [c.label for c in r.smr_cases] == ["J1", "J2", "J1×J2"]
+
+
+def test_alpha95_indefinido_avisa(tmp_path):
+    # polos muy dispersos: no hay alpha95
+    jf = ["R1,J1,90,180", "R1,J1,90,270"]
+    (r,) = correr(tmp_path, [T()], jf=jf)
+    assert r.families[0].fisher.alpha95_deg is None
+    assert any(w.startswith("J1: ") and "alpha95" in w for w in r.warnings) and r.needs_attention
+
+
+def test_avisos_de_familia_no_se_juntan(tmp_path):
+    jf = ["R1,J1,90,180", "R1,J1,90,270", "R1,J2,90,180", "R1,J2,90,270"]
+    (r,) = correr(tmp_path, [T()], jf=jf)
+    ws = [w for w in r.warnings if "alpha95" in w]
+    assert any(w.startswith("J1: ") for w in ws) and any(w.startswith("J2: ") for w in ws)
+
+
+def test_excavacion_a_mano_fuera_de_vocabulario():
+    import dataclasses
+    from rockmasspy.slopes import SlopeFace
+    f = SlopeFace("T", "R", 72, 133, None, None, 42, "explosivo-ZZSENT", *[None] * 12, 2)
+    j = rm.JointRecord("R", "J1", 60, 133, 2)
+    with pytest.raises(ValueError, match="one of") as e:
+        rm.assess_slopes([f], [j])
+    assert "ZZSENT" not in str(e.value) and "row 2" in str(e.value)
+    assert dataclasses  # silencio
+
+
+def test_nota_planar_sin_limites(tmp_path):
+    # J1 está fuera del límite lateral de 30 pero dentro sin límites
+    (r,) = correr(tmp_path, [T(dir_="0", buz="70")], jf=["R1,J1,50,60"])
+    k = r.kinematics
+    assert k.planar_no_limits > k.planar
+    assert f"planar count without lateral limits is higher ({k.planar_no_limits} vs {k.planar})" in r.notes
+    (r,) = correr(tmp_path, [T(dir_="0", buz="70")], jf=["R1,J1,50,10"])
+    assert not any("without lateral limits" in n for n in r.notes)

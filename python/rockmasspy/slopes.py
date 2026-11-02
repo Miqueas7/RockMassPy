@@ -5,6 +5,7 @@ Solo se leen las columnas de `JOINT_COLUMNS` y `FACE_COLUMNS` (códigos de labor
 `id_talud` e `id_tramo` pueden ir al archivo de resultados, nunca a un mensaje ni a un repr.
 """
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -30,6 +31,7 @@ _Q_FIELDS = ("rqd_pct", "jn", "jr_a", "ja_a", "o_a", "jwice")
 _SET_B = ("jr_b", "ja_b", "o_b")
 _SRF = ("srf_a", "srf_b", "srf_c")
 _EPS = 1e-9
+_AXIS_TOL = 1e-6  # un plano a 90 o una intersección a 0 o 90 es un eje: sus dos sentidos valen
 
 
 # ---------------------------------------------------------------- lectura
@@ -103,6 +105,9 @@ def _face(vals, n, sheet):
     _rango(vals, sheet, n, "friccion_grados", 0, 90, lo_open=True, hi_open=True)
     _rango(vals, sheet, n, "limite_lateral_grados", 0, 90, lo_open=True, hi_open=True)
     _rango(vals, sheet, n, "rmr_basico", 0, 100)
+    _rango(vals, sheet, n, "rqd_pct", 0, 100)
+    for c in ("jn", "jr_a", "ja_a", "o_a", "jwice", *_SET_B, *_SRF):
+        _rango(vals, sheet, n, c, 0, math.inf, lo_open=True)
     if vals["rmr_basico"] is not None:
         if vals["excavacion"] is None:
             falta("excavacion")
@@ -194,9 +199,10 @@ class SlopeResult:
     @property
     def needs_attention(self) -> bool:
         k = self.kinematics
-        return bool(self.warnings or (k is not None and any(getattr(k, c) for c in _CRITICAL))
-                    or any(c is not None and c.discrete.smr_class >= 4 for c in (self.smr_discrete,))
-                    or any(c is not None and c.continuous.smr_class >= 4 for c in (self.smr_continuous,))
+        d, c = self.smr_discrete, self.smr_continuous
+        return bool(self.warnings or (k is not None and any(getattr(k, x) for x in _CRITICAL))
+                    or (d is not None and d.discrete.smr_class >= 4)
+                    or (c is not None and c.continuous.smr_class >= 4)
                     or self.face_steeper_than_beta)
 
 
@@ -213,8 +219,14 @@ def _delta(a, b):
 
 
 def _smr_cases(f: SlopeFace, planes, labels, face):
-    """Un caso por plano medio (familia) o fila suelta, y uno de cuña por cada par con intersección."""
-    exc = _EXCAVATIONS[f.excavacion]
+    """Un caso por plano medio (familia) o fila suelta, y uno de cuña por cada par con intersección.
+
+    Un eje (plano vertical, intersección horizontal) se evalúa por sus dos sentidos y gobierna el menor SMR;
+    una intersección vertical toma la tendencia de la cara.
+    """
+    exc = _EXCAVATIONS.get((f.excavacion or "").strip().casefold())
+    if exc is None:
+        raise ValueError(f"excavacion must be one of {sorted(_EXCAVATIONS)}")
 
     def caso(label, mode, d, dip):
         ang = rm.smr_angles(mode, d, dip, face)
@@ -223,18 +235,37 @@ def _smr_cases(f: SlopeFace, planes, labels, face):
                        rm.smr(f.rmr_basico, mode, rm.SmrFunctions.Discrete, exc, ang),
                        rm.smr(f.rmr_basico, mode, rm.SmrFunctions.Continuous, exc, ang))
 
+    def peor(cands):
+        best = None
+        for c in cands:
+            if best is None or (c.discrete.smr, c.continuous.smr) < (best.discrete.smr, best.continuous.smr):
+                best = c
+        return best
+
+    alpha_s = face.dip_direction_deg
     out = []
     for p, lab in zip(planes, labels):
-        dd = _delta(p.dip_direction_deg, face.dip_direction_deg)
-        modes = ([rm.SmrMode.Planar] if dd < 90 - _EPS else [rm.SmrMode.Toppling] if dd > 90 + _EPS
-                 else [rm.SmrMode.Planar, rm.SmrMode.Toppling])
-        out.append(_first_min([caso(lab, m, p.dip_direction_deg, p.dip_deg) for m in modes],
-                              lambda c: c.discrete))
+        sentidos = [p.dip_direction_deg] + ([p.dip_direction_deg + 180.0] if p.dip_deg >= 90 - _AXIS_TOL else [])
+        cands = []
+        for d in sentidos:
+            dd = _delta(d, alpha_s)
+            modes = ([rm.SmrMode.Planar] if dd < 90 - _EPS else [rm.SmrMode.Toppling] if dd > 90 + _EPS
+                     else [rm.SmrMode.Planar, rm.SmrMode.Toppling])
+            cands += [caso(lab, m, d % 360.0, p.dip_deg) for m in modes]
+        out.append(peor(cands))
     for i in range(len(planes)):
         for j in range(i + 1, len(planes)):
             line = rm.plane_intersection(planes[i], planes[j])
-            if line is not None and _delta(line.trend_deg, face.dip_direction_deg) <= 90 + _EPS:
-                out.append(caso(f"{labels[i]}×{labels[j]}", rm.SmrMode.Wedge, line.trend_deg, line.plunge_deg))
+            if line is None:
+                continue
+            if line.plunge_deg >= 90 - _AXIS_TOL:
+                trends = [alpha_s]
+            else:
+                trends = [line.trend_deg] + ([line.trend_deg + 180.0] if line.plunge_deg <= _AXIS_TOL else [])
+            cands = [caso(f"{labels[i]}×{labels[j]}", rm.SmrMode.Wedge, t % 360.0, line.plunge_deg)
+                     for t in trends if _delta(t, alpha_s) <= 90 + _EPS]
+            if cands:
+                out.append(peor(cands))
     return out
 
 
@@ -253,7 +284,7 @@ def _assess_one(f: SlopeFace, joints, lateral_limit_deg):
         ps = [p for p, x in zip(planes, fams) if x == name]
         fs = rm.fisher_stats([rm.pole_of(p) for p in ps])
         stats.append(FamilyStats(name, fs.n, rm.plane_of(fs.mean), fs))
-        warnings += fs.warnings
+        warnings += [f"{name}: {w}" for w in fs.warnings]
         methods.append(fs.info)
     kin = None
     if not joints:
@@ -265,6 +296,8 @@ def _assess_one(f: SlopeFace, joints, lateral_limit_deg):
         kin = rm.kinematic_analysis(list(planes), [names.index(x) if x is not None else -1 for x in fams],
                                     rm.KinematicInput(face, f.friccion_grados, lim))
         notes += kin.notes
+        if kin.planar_no_limits > kin.planar:
+            notes.append(f"planar count without lateral limits is higher ({kin.planar_no_limits} vs {kin.planar})")
         methods += kin.methods
     cases = []
     if joints and f.rmr_basico is not None:
@@ -276,7 +309,7 @@ def _assess_one(f: SlopeFace, joints, lateral_limit_deg):
                 labels.append(f"row {j.fila}")
         cases = _smr_cases(f, sp, labels, face)
         for c in cases:
-            warnings += c.discrete.warnings + c.continuous.warnings
+            warnings += [f"{c.label}: {w}" for w in c.discrete.warnings + c.continuous.warnings]
             methods += [c.discrete.info, c.continuous.info]
     q, steeper = None, None
     if f.rqd_pct is not None:
@@ -308,7 +341,7 @@ def assess_slopes(faces: Iterable[SlopeFace], joints: Iterable[JointRecord], *,
         try:
             out.append(_assess_one(f, por_tramo.get(f.id_tramo, []), lateral_limit_deg))
         except ValueError as e:
-            raise ValueError(f"sheet '{f.hoja}', row {f.fila}: {e}") from None
+            raise ValueError(f"sheet '{f.hoja}', row {f.fila}: {str(e).split('Received:')[0].strip()}") from None
     return out
 
 
@@ -337,7 +370,7 @@ def slope_counts(results: Iterable[SlopeResult]) -> dict[str, int]:
 _RESULT_COLUMNS = ("id_talud", "id_tramo", "buz_cara", "dir_cara", "friccion", "limite_lateral", "n_planos",
                    "n_intersecciones", "planar", "planar_sin_limites", "cuna_primaria", "cuna_secundaria",
                    "volteo_flexural", "volteo_directo", "volteo_directo_oblicuo", "smr_discreto",
-                   "smr_clase_discreto", "smr_continuo", "smr_clase_continuo", "smr_caso", "q_slope",
+                   "smr_clase_discreto", "smr_continuo", "smr_clase_continuo", "smr_caso", "smr_caso_continuo", "q_slope",
                    "beta_grados", "cara_mas_empinada_que_beta", "avisos", "notas")
 
 
@@ -353,7 +386,7 @@ def save_slope_results(results: Iterable[SlopeResult], path) -> Path:
         rows.append([r.id_talud, r.id_tramo, r.face.dip_deg, r.face.dip_direction_deg, *kin,
                      d.discrete.smr if d else None, d.discrete.smr_class if d else None,
                      c.continuous.smr if c else None, c.continuous.smr_class if c else None,
-                     d.label if d else None, r.q_slope.q_slope if r.q_slope else None,
+                     d.label if d else None, c.label if c else None, r.q_slope.q_slope if r.q_slope else None,
                      r.q_slope.beta_deg if r.q_slope else None,
                      None if r.face_steeper_than_beta is None else ("si" if r.face_steeper_than_beta else "no"),
                      " | ".join(r.warnings), " | ".join(r.notes)])
