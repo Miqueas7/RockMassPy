@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -69,7 +70,12 @@ def _classify_all(a):
     esr = _esr_specs(a.esr) if a.esr else None  # antes de clasificar: un --esr malo falla temprano
     results = classify_tramos(tramos, tables)
     if esr:
-        results = add_q_chart_reference(results, esr, edition=a.q_edition)
+        try:
+            results = add_q_chart_reference(results, esr, edition=a.q_edition)
+        except ValueError as e:  # la biblioteca habla de tuplas de Python; la CLI, de A:<esr>
+            raise ValueError(re.sub(r"ESR category (\w) covers ([\d.]+)-([\d.]+); pass \(category, esr\)",
+                                    lambda m: f"ESR category {m[1]} covers {m[2]}-{m[3]}; use {m[1]}:<esr>, "
+                                              f"e.g. {m[1]}:{(float(m[2]) + float(m[3])) / 2:g}", str(e))) from None
     return results, tables
 
 
@@ -155,9 +161,9 @@ def _qsupport(a) -> int:
     if a.chart:
         from .viz import Style, plot_q_chart, save_figure
 
-        fig = plot_q_chart(r.edition, points=[(a.q, ro.de_m)], style=Style(lang=a.lang))
+        fig = plot_q_chart(r.edition, points=[(ro.q, ro.de_m)], style=Style(lang=a.lang))
         print(f"chart: {save_figure(fig, a.chart)}")
-    return 2 if r.warnings or ro.category >= 7 else 0
+    return 2 if r.warnings or max(ro.category, r.walls.category if r.walls else 0) >= 7 else 0
 
 
 class _Parser(argparse.ArgumentParser):

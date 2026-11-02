@@ -275,3 +275,26 @@ def test_esr_bad_spec_exit_one(tmp_path, tabla, capsys, bad):
     assert main(args + ["--esr", bad]) == 1
     err = capsys.readouterr().err
     assert err.startswith("error: ") and err.count("\n") == 1
+
+
+def test_classify_esr_sin_numero_dice_a_dos_puntos(tmp_path, tabla, capsys):  # M2
+    args = ["classify", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(tmp_path / "r.csv")]
+    assert main(args + ["--esr", "A"]) == 1
+    assert capsys.readouterr().err == "error: ESR category A covers 3-5; use A:<esr>, e.g. A:4\n"
+
+
+def test_qsupport_paredes_categoria_7_sale_con_2(capsys):  # M4
+    assert main(["qsupport", "--q", "0.12", "--span", "6", "--esr-category", "E", "--edition", "Q-NGI-2015",
+                 "--wall-height", "25"]) == 2
+    assert "walls category: 7" in capsys.readouterr().out
+
+
+def test_qsupport_estrella_en_la_lectura_ajustada(tmp_path, monkeypatch, capsys):  # M5
+    pytest.importorskip("matplotlib")
+    import rockmasspy.viz as viz
+
+    seen = {}
+    real = viz.plot_q_chart
+    monkeypatch.setattr(viz, "plot_q_chart", lambda *a, **k: seen.update(k) or real(*a, **k))
+    main(["qsupport", "--q", "2000", "--span", "6", "--esr-category", "E", "--chart", str(tmp_path / "q.png")])
+    assert seen["points"][0][0] == 1000

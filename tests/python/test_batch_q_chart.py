@@ -128,3 +128,10 @@ def test_sin_secreto_en_avisos_foco5():
           for i, (q, l) in enumerate([(0.01, 3.0), (5000.0, 2.0), (1.0, 40.0)])]
     res = rm.add_q_chart_reference(classify(ts), ("A", 5.0))
     assert not any("SECRETO-123" in w for r in res for w in r.q_chart_warnings)
+
+
+def test_avisos_del_q_calculado_en_tramos_por_tabla_rmr():  # M1
+    t = tr("P", q_valor=None, rmr_valor=70, rqd_pct=100, jn=0.5, jr=4, ja=0.75, jw=1, srf=0.5)
+    [r] = rm.add_q_chart_reference(classify([t]), "C")
+    assert r.method != "Q" and r.q_chart_warnings[0] == "Q outside 0.001-1000"
+    assert len(set(r.q_chart_warnings)) == len(r.q_chart_warnings)

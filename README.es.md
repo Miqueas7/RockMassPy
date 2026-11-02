@@ -140,6 +140,7 @@ print(w.wall_q)                                           # 1.0
 ```
 
 Hoek publica la categoría 4 para esta cámara, leída en una carta anterior (1993); las cartas digitalizadas 2025 y 2015 dan 3.
+La longitud de perno de la carta (columnas `q_carta_longitud_*`) está dada para ESR = 1; con otro ESR, compárala con la fórmula de Barton et al. (1980) y con tu criterio.
 Los puntos en las zonas a trazos de la carta (sin datos empíricos) siguen sus líneas y llevan `no_empirical_data` y un aviso.
 En el lote, `rm.add_q_chart_reference(resultados, {"*": "C"})` agrega la lectura del techo con el Q propio del tramo, y el
 informe suma la sección 5.1; `viz.plot_q_chart` dibuja la carta con los tramos (sin rótulos). Desde la línea de comandos:
@@ -167,13 +168,16 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 | RMR89 | Bieniawski 1989 | Secondary |
 | RMR14 | Celada et al. 2014 | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Sistema Q, ediciones NGI (2025 por defecto) | Primary |
+| Q-NGI-2025-chart / Q-NGI-2015-chart | Regiones de la carta de sostenimiento Q, digitalizadas por RockMassPy (error máximo medido 0.017 / 0.008 década, con los empalmes) | Primary |
+| Q-Barton1980 | Fórmulas de luz máxima sin sostén y longitud de perno (Hoek, según Barton et al. 1980) | Secondary |
+| Q-GrimstadBarton1993 | Presión de sostenimiento del techo (Hoek, según Grimstad y Barton 1993); la unidad aún está por confirmar | Secondary |
 | GSI-2013 | GSI cuantificado (Hoek, Carter y Diederichs) | Primary |
 | HB-2002 / HB-2018 | Parámetros del criterio de Hoek-Brown (`hb_params`) y Mohr-Coulomb equivalente (`hb_mohr_coulomb`); 2018 por defecto | Primary |
 | HB-2002 | Módulo del macizo Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Módulo del macizo (Hoek y Diederichs) | Primary |
 | Correlaciones (nombre del enum, p. ej. `RmrFromQ_Bieniawski1976`) | Correlaciones globales, sin encadenar | Primary o Secondary, ver `rm.correlate(...).info` |
 
-Fuera de la fase 1A: Fe de tuneladora, Q 1974, ecuación 3 del GSI, tablas de mi/MR, presión de soporte y luz máxima.
+Fuera de la fase 1A: Fe de tuneladora, Q 1974, ecuación 3 del GSI, tablas de mi/MR.
 
 ## Notas de Python
 

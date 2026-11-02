@@ -118,6 +118,12 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "the chart does not change any class or support. The chart is digitized by RockMassPy, so a reading near "
               "a boundary may differ from the printed chart.",
     },
+    "qchart_esr_note": {
+        "es": "La longitud de perno de la carta (columnas q_carta_longitud_*) está dada para ESR = 1. Con otro ESR, "
+              "compárala con la fórmula de Barton et al. (1980) y con tu criterio; es uno de los valores por confirmar.",
+        "en": "The chart bolt length (q_carta_longitud_* columns) is given for ESR = 1. With another ESR, compare it "
+              "with the Barton et al. (1980) formula and your own judgement; it is one of the values still to be confirmed.",
+    },
     "qchart_none": {"es": "Ningún tramo obtuvo referencia de la carta Q; revisa los avisos de la carta en la sección 7.",
                     "en": "No section got a Q chart reference; see the Q chart warnings in section 7."},
     "cap_esr": {"es": "ESR por labor", "en": "ESR by excavation"},

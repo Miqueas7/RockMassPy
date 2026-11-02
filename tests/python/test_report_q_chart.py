@@ -142,3 +142,16 @@ def test_leyenda_en_ingles_marca_7_a_9_indicativas():
     r = rp.build_memoria(con_ref(), TABLES, title="M", lang="en", figures=False)
     leg = tablas(sec(r, "5.1"))[2]
     assert all("(indicative)" in leg.rows[k][1] for k in (6, 7, 8))
+
+
+def _parrafos(s):
+    return [b.text for b in s.blocks if isinstance(b, rp.Paragraph)]
+
+
+@pytest.mark.parametrize("esr_cat, hay", [("C", True), ("E", False)])
+def test_nota_esr_en_51(esr_cat, hay):  # I2
+    r = rp.build_memoria(rm.add_q_chart_reference(base(), esr_cat), TABLES, title="M", figures=False)
+    ps = _parrafos(sec(r, "5.1"))
+    assert any("columnas q_carta_longitud_*" in p and "ESR = 1" in p for p in ps) is hay
+    if hay:
+        assert "columnas q_carta_longitud_*" in ps[1]  # justo después de la introducción

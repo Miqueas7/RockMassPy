@@ -112,3 +112,8 @@ def test_info(ed, method_id, fig):
     assert ch.info.method_id == method_id
     assert ch.info.verification == rm.Verification.Primary
     assert fig in ch.info.source and "digitized" in ch.info.source
+
+
+def test_fuente_declara_el_error_maximo_con_empalmes():  # I4
+    assert "error <= 0.017 decade" in Q_CHARTS["Q-NGI-2025"].info.source
+    assert "error <= 0.008 decade" in Q_CHARTS["Q-NGI-2015"].info.source

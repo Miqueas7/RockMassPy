@@ -256,7 +256,7 @@ Q_CHARTS["Q-NGI-2025"] = QChartData(
     edition="Q-NGI-2025",
     info=MethodInfo("Q-NGI-2025-chart", Verification.Primary,
                     "NGI (2025) Using the Q-system, Fig. 4-1, pp. 31-32; boundaries digitized by RockMassPy "
-                    "(error <= 0.005 decade)"),
+                    "(error <= 0.017 decade)"),
     regions=_regions(_B25_UPPER, _B25_LOWER, _B25_7_8, _B25_6_7, _B25_5_6, _B25_4_5, _B25_3_4, _B25_2_3),
     no_data=_no_data(_B25_LOWER, 2.6006),  # Q = 400 en x = 1857.1 px
     # rayas sobre la frontera superior, px x: 632.5, 793.0, 899.0, 1059.0, 1165.0, 1325.0, 1431.0, 1511.0

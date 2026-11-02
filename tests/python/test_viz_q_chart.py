@@ -143,3 +143,9 @@ def test_categorias_7_a_9_referenciales():
 def test_puntos_invalidos(bad):
     with pytest.raises(ValueError, match="points"):
         plot_q_chart(points=[bad])
+
+
+def test_edicion_distinta_de_los_resultados_lanza():  # I1
+    with pytest.raises(ValueError, match="results were read on Q-NGI-2025, not on Q-NGI-2015"):
+        plot_q_chart("Q-NGI-2015", results=_res("Q-NGI-2025"))
+    plot_q_chart("Q-NGI-2015", results=_res("Q-NGI-2015"))

@@ -174,8 +174,10 @@ def _q_chart_blocks(results, lang: str, figures: bool) -> tuple:
                  for s in sorted({s for s, _ in ct}, key=lambda s: (s == "unclassified", s)))
     legend = tuple((str(k), text(f"q_cat_{k}", lang), _range(c.shotcrete_mm), _str(c.sfr_energy_j), c.rrs or "-")
                    for k, c in sorted(Q_CHARTS[edition].categories.items()))
+    nota = (Paragraph(t("qchart_esr_note", lang)),) if any(r.q_chart.notes for r in refs) else ()
     return (
         intro,
+        *nota,
         Table(t("cap_esr", lang), (t("h_labor", lang), t("h_esr_cat", lang), t("h_esr", lang)),
               tuple((a, b, _str(c)) for a, b, c in labors.values())),
         Table(t("cap_crosstab", lang), (t("h_support", lang), *(f"Q {c}" for c in cats)), rows),

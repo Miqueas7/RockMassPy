@@ -138,6 +138,7 @@ print(w.wall_q)                                           # 1.0
 ```
 
 Hoek publishes category 4 for this chamber, read on an older (1993) chart; the digitized 2025 and 2015 charts give 3.
+The chart bolt length (`q_carta_longitud_*` columns) is given for ESR = 1; with another ESR, compare it with the Barton et al. (1980) formula and your own judgement.
 Points in the dashed zones of the chart (no empirical data) follow their lines and carry `no_empirical_data` and a warning.
 In batch, `rm.add_q_chart_reference(results, {"*": "C"})` adds the roof reading using only the tramo's own Q, and the
 report gets section 5.1; `viz.plot_q_chart` draws the chart with the tramos (never labelled). From the command line:
@@ -165,13 +166,16 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | RMR89 | Bieniawski 1989 | Secondary |
 | RMR14 | Celada et al. 2014 | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Q system, NGI editions (2025 is the default) | Primary |
+| Q-NGI-2025-chart / Q-NGI-2015-chart | Q support chart regions, digitized by RockMassPy (max. measured error 0.017 / 0.008 decade, including junctions) | Primary |
+| Q-Barton1980 | Maximum unsupported span and bolt length formulas (Hoek, after Barton et al. 1980) | Secondary |
+| Q-GrimstadBarton1993 | Roof support pressure (Hoek, after Grimstad & Barton 1993); the unit is still to be confirmed | Secondary |
 | GSI-2013 | Quantified GSI (Hoek, Carter & Diederichs) | Primary |
 | HB-2002 / HB-2018 | Hoek-Brown criterion parameters (`hb_params`) and equivalent Mohr-Coulomb (`hb_mohr_coulomb`); 2018 is the default | Primary |
 | HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Rock mass modulus (Hoek & Diederichs) | Primary |
 | Correlations (enum name, e.g. `RmrFromQ_Bieniawski1976`) | Global correlations, never chained | Primary or Secondary, see `rm.correlate(...).info` |
 
-Out of phase 1A: TBM Fe, Q 1974, GSI equation 3, mi/MR tables, support pressure and maximum span.
+Out of phase 1A: TBM Fe, Q 1974, GSI equation 3, mi/MR tables.
 
 ## Python notes
 

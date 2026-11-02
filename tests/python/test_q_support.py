@@ -160,3 +160,9 @@ def test_edition_travels(q, de, edition):
     r = read_q_chart(q, de, edition=edition)
     assert r.edition == edition and r.info.method_id == Q_CHARTS[edition].info.method_id
     assert 1 <= r.category <= 9
+
+
+def test_foco1_de_punta_a_punta():  # M3
+    r = recommend_q_support(2, 3, esr_category="A", esr=4)
+    assert r.roof.de_m == 1.0 and r.roof.category == 1
+    assert "De below the chart (1 m); read at De = 1" in r.warnings

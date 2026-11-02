@@ -53,6 +53,9 @@ def plot_q_chart(edition: str = "Q-NGI-2025", *, results: Sequence[TramoResult] 
     drawn = [r for r in results if r.q_chart is not None] if results is not None else []
     if results is not None and not drawn:
         raise ValueError("none of the sections has a Q chart reference")
+    for r in drawn:
+        if r.q_chart.edition != edition:
+            raise ValueError(f"results were read on {r.q_chart.edition}, not on {edition}")
     lang = style.lang
     fig = new_figure(style)  # primero: si falta matplotlib, el error nombra rockmasspy[viz]
     from matplotlib.lines import Line2D

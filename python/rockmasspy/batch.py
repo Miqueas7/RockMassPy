@@ -215,14 +215,16 @@ def _con_carta(r: TramoResult, spec, edition: str) -> TramoResult:
         return replace(r, q_chart_warnings=("Q-1974 not supported",))
     if t.q_edicion is not None and t.q_edicion != edition:
         return replace(r, q_chart_warnings=(f"Q edition {t.q_edicion} differs from chart edition {edition}",))
+    qw: list[str] = []  # avisos del Q calculado; con tabla de Q ya están en r.warnings
     try:
-        q = _tramo_q(t, edition, [])
+        q = _tramo_q(t, edition, qw if r.method != "Q" else [])
         if q is None:
             return replace(r, q_chart_warnings=("missing Q",))
         c = recommend_q_support(q, t.luz_m, esr_category=spec[0], esr=spec[1], edition=edition)
     except ValueError as e:  # solo nombres y números; nunca columnas de identificación
-        return replace(r, q_chart_warnings=(str(e),))
-    return replace(r, q_chart=c, q_chart_warnings=c.warnings)
+        return replace(r, q_chart_warnings=tuple(dict.fromkeys((*qw, str(e)))))
+    # los avisos del Q calculado van primero (los del Q-1974 ya se descartaron arriba)
+    return replace(r, q_chart=c, q_chart_warnings=tuple(dict.fromkeys((*qw, *c.warnings))))
 
 
 def q_chart_crosstab(results: Iterable[TramoResult]) -> dict[tuple[str, int], int]:
