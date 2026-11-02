@@ -60,9 +60,11 @@ def _esperado(mode):
     planes = _conjunto()
     ki = rm.KinematicInput(FACE, 30, 30)
     if mode in ("planar", "flexural_toppling"):
-        return sum(getattr(rm.check_plane(p, ki), mode) for p in planes), len(planes)
+        return sum(getattr(rm.check_plane(p, ki), mode) for p in planes), len(planes), None
     ch = [rm.check_intersection(x, ki) for x in _lineas(planes)]
-    return sum((c.wedge_primary or c.wedge_secondary) if mode == "wedge" else c.direct_toppling for c in ch), len(ch)
+    if mode == "direct_toppling":
+        return sum(c.direct_toppling for c in ch), len(ch), sum(c.direct_toppling_oblique for c in ch)
+    return sum(c.wedge_primary or c.wedge_secondary for c in ch), len(ch), None
 
 
 METODO = {"planar": "Kinematic-PlanarSliding", "wedge": "Kinematic-WedgeSliding",
@@ -73,9 +75,15 @@ METODO = {"planar": "Kinematic-PlanarSliding", "wedge": "Kinematic-WedgeSliding"
 @pytest.mark.parametrize("lang, de", [("es", "de"), ("en", "of")])
 @pytest.mark.parametrize("mode", MODES)
 def test_linea_de_conteo_y_metodo(mode, lang, de):
-    k, n = _esperado(mode)
+    k, n, k2 = _esperado(mode)
     textos = _textos(_fig(mode, lang=lang))
-    assert any(t.startswith(f"{k} {de} {n} ({100 * k / n:.0f} %) | ") for t in textos)
+    if k2 is None:
+        cab = f"{k} {de} {n} ({100 * k / n:.0f} %) | "
+    else:
+        ob = {"es": "oblicuo", "en": "oblique"}[lang]
+        di = {"es": "directo", "en": "direct"}[lang]
+        cab = f"{di} {k} {de} {n} ({100 * k / n:.0f} %), {ob} {k2} {de} {n} ({100 * k2 / n:.0f} %) | "
+    assert any(t.startswith(cab) for t in textos)
     assert any(METODO[mode] in t for t in textos)
 
 
@@ -172,3 +180,26 @@ def test_sin_identificadores(tmp_path, mode):
     fig = plot_stereonet(r.planes, families=[(f.familia, f.mean_plane) for f in r.families], **extra)
     svg = save_figure(fig, tmp_path / "s.svg").read_text(encoding="utf-8")
     assert "ZZSENT" not in svg and "F1" in svg
+
+
+def _oblicuo():
+    face, planes = P(180, 80), [P(254, 81), P(233, 79)]
+    ln = rm.plane_intersection(*planes)
+    ci = rm.check_intersection(ln, rm.KinematicInput(face, 35, 30))
+    assert ci.direct_toppling_oblique and not ci.direct_toppling
+    return dict(face=face, friction_deg=35, lateral_limit_deg=30, mode="direct_toppling", intersections=[ln])
+
+
+@pytest.mark.parametrize("lang, de, ob", [("es", "de", "oblicuo"), ("en", "of", "oblique")])
+def test_volteo_oblicuo_solo(lang, de, ob):
+    fig = plot_stereonet([P(254, 81), P(233, 79)], density=False, style=Style(lang=lang), **_oblicuo())
+    textos = _textos(fig)
+    assert any(f", {ob} 1 {de} 1 (100 %) | " in t and t.startswith(("directo 0", "direct 0")) for t in textos)
+    assert any(t in ("Zona oblicua", "Oblique zone") for t in textos)
+    assert any(pt.get_hatch() for pt in fig.axes[0].get_legend().get_patches())  # la trama de la zona 3
+
+
+def test_volteo_directo_solo():
+    fig = plot_stereonet([P(180, 45)], face=FACE, friction_deg=30, lateral_limit_deg=30, mode="direct_toppling",
+                         intersections=[rm.LineOrientation(0, 60)])
+    assert any(t.startswith("directo 1 de 1 (100 %), oblicuo 0 de 1 (0 %) | ") for t in _textos(fig))

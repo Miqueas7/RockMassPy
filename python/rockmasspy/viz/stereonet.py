@@ -71,7 +71,9 @@ def _critical(mode, line, ki):
         c = rm.check_plane(rm.plane_of(line), ki)
         return c.planar if mode == "planar" else c.flexural_toppling
     c = rm.check_intersection(line, ki)
-    return c.wedge_primary or c.wedge_secondary if mode == "wedge" else c.direct_toppling
+    if mode == "wedge":
+        return c.wedge_primary or c.wedge_secondary
+    return 1 if c.direct_toppling else 2 if c.direct_toppling_oblique else 0  # zonas 1-2 y zona 3 (oblicua)
 
 
 def _grid(n, proj):
@@ -91,9 +93,11 @@ def _grid(n, proj):
 def _counts(mode, planes, lines, ki):
     if mode in ("planar", "flexural_toppling"):
         key = "planar" if mode == "planar" else "flexural_toppling"
-        return sum(getattr(rm.check_plane(p, ki), key) for p in planes), len(planes)
+        return sum(getattr(rm.check_plane(p, ki), key) for p in planes), len(planes), None
     ch = [rm.check_intersection(x, ki) for x in lines]
-    return sum(c.wedge_primary or c.wedge_secondary if mode == "wedge" else c.direct_toppling for c in ch), len(ch)
+    if mode == "wedge":
+        return sum(c.wedge_primary or c.wedge_secondary for c in ch), len(ch), None
+    return sum(c.direct_toppling for c in ch), len(ch), sum(c.direct_toppling_oblique for c in ch)
 
 
 def _label(ax, code, plane, proj, taken, style):
@@ -171,12 +175,21 @@ def plot_stereonet(planes: Sequence[rm.PlaneOrientation] = (), *,
         lim = lateral_limit_deg if lateral_limit_deg is not None else 30.0  # la cuña no lo usa
         ki = rm.KinematicInput(face, friction_deg, lim)
         X, Y, at = _grid(_ZONE_GRID, proj)
-        Z = np.array([float(_critical(mode, ln, ki)) for ln in at]).reshape(X.shape)
+        V = np.array([float(_critical(mode, ln, ki)) for ln in at]).reshape(X.shape)
+        Z = (V == 1).astype(float)
+        if (V == 2).any():  # volteo oblicuo (zona 3): mismo tono, con trama
+            for cs in (ax.contourf(X, Y, (V == 2).astype(float), levels=[0.5, 1.5], colors=[_FILL], alpha=0.15,
+                                   hatches=["///"], zorder=2),
+                       ax.contour(X, Y, (V == 2).astype(float), levels=[0.5], colors=[_LINE], linewidths=0.8,
+                                  linestyles="dashed", zorder=2)):
+                cs.set_clip_path(clip)
         if Z.max() > 0:
             for cs in (ax.contourf(X, Y, Z, levels=[0.5, 1.5], colors=[_FILL], alpha=0.35, zorder=2),
                        ax.contour(X, Y, Z, levels=[0.5], colors=[_LINE], linewidths=1.0, zorder=2)):
                 cs.set_clip_path(clip)
         handles.append(Patch(facecolor=_FILL, edgecolor=_LINE, alpha=0.8, label=text("stereo_critical_zone", lang)))
+        if (V == 2).any():
+            handles.append(Patch(facecolor="none", edgecolor=_LINE, hatch="///", label=text("stereo_oblique_zone", lang)))
         seen = set()
         for key, ls, geo in _boundaries(mode, face, friction_deg, lim):
             pts = _great(geo, proj) if isinstance(geo, rm.PlaneOrientation) else xy(geo)
@@ -208,8 +221,11 @@ def plot_stereonet(planes: Sequence[rm.PlaneOrientation] = (), *,
         rm.kinematic_analysis([], [], ki).methods[MODES.index(mode)].method_id if mode else "",
         text("engineer_decides", lang))))]
     if mode:
-        k, n = _counts(mode, list(planes), list(intersections), ki)
+        k, n, k2 = _counts(mode, list(planes), list(intersections), ki)
         if n:
-            lines.insert(0, text("stereo_count", lang).format(k=k, n=n, pct=f"{100 * k / n:.0f}") + " | " + text("stereo_feasibility", lang))
+            pct = f"{100 * k / n:.0f}"
+            head = (text("stereo_count", lang).format(k=k, n=n, pct=pct) if k2 is None else
+                    text("stereo_count_oblique", lang).format(k=k, n=n, pct=pct, k2=k2, pct2=f"{100 * k2 / n:.0f}"))
+            lines.insert(0, head + " | " + text("stereo_feasibility", lang))
     footer(fig, "\n".join(lines), style)
     return fig

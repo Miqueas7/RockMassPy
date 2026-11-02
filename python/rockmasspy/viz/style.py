@@ -151,6 +151,9 @@ TEXTS: dict[str, dict[str, str]] = {
     "stereo_mode_flexural_toppling": {"es": "volteo flexural", "en": "flexural toppling"},
     "stereo_mode_direct_toppling": {"es": "volteo directo", "en": "direct toppling"},
     "stereo_count": {"es": "{k} de {n} ({pct} %)", "en": "{k} of {n} ({pct} %)"},
+    "stereo_count_oblique": {"es": "directo {k} de {n} ({pct} %), oblicuo {k2} de {n} ({pct2} %)",
+                             "en": "direct {k} of {n} ({pct} %), oblique {k2} of {n} ({pct2} %)"},
+    "stereo_oblique_zone": {"es": "Zona oblicua", "en": "Oblique zone"},
     "stereo_feasibility": {"es": "factibilidad, no probabilidad", "en": "feasibility, not probability"},
     "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
 }
