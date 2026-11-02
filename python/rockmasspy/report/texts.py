@@ -109,15 +109,17 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_valid_max": {"es": "Válido hasta", "en": "Valid to"},
     "s5_qchart": {"es": "Carta de sostenimiento Q (referencia)", "en": "Q support chart (reference)"},
     "qchart_text": {
-        "es": "Esta sección es solo una referencia: lee la carta de sostenimiento del sistema Q del NGI ({edition}) con el Q "
+        "es": "Esta sección es solo una referencia: lee la carta de sostenimiento del sistema Q del NGI{edition} con el Q "
               "y la luz de cada tramo y el ESR de su labor, en el techo. Las tablas propias de la labor mandan; "
               "la carta no cambia ninguna clase ni sostenimiento. La carta está digitalizada por RockMassPy, así que "
               "su lectura cerca de una frontera puede diferir de la lámina impresa.",
-        "en": "This section is a reference only: it reads the NGI Q-system support chart ({edition}) with the Q and the "
+        "en": "This section is a reference only: it reads the NGI Q-system support chart{edition} with the Q and the "
               "span of each tramo and the ESR of its excavation, for the roof. The own tables of the excavation govern; "
               "the chart does not change any class or support. The chart is digitized by RockMassPy, so a reading near "
               "a boundary may differ from the printed chart.",
     },
+    "qchart_none": {"es": "Ningún tramo obtuvo referencia de la carta Q; revisa los avisos de la carta en la sección 7.",
+                    "en": "No section got a Q chart reference; see the Q chart warnings in section 7."},
     "cap_esr": {"es": "ESR por labor", "en": "ESR by excavation"},
     "cap_crosstab": {"es": "Tabla cruzada: sostenimiento propio y categoría Q",
                      "en": "Cross-table: own support and Q category"},

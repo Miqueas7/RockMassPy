@@ -147,6 +147,11 @@ def _q_chart_edition(results) -> str | None:
     return eds[0] if eds else None
 
 
+def _has_q(results) -> bool:
+    """Se pidió la referencia de la carta (con o sin éxito); es la misma condición que usa `_columns`."""
+    return any(r.q_chart or r.q_chart_warnings for r in results)
+
+
 def _range(v) -> str:
     return "-" if v is None else f"{v[0]:g}-{v[1]:g}" if v[1] is not None else f">{v[0]:g}"
 
@@ -156,6 +161,9 @@ def _q_chart_blocks(results, lang: str, figures: bool) -> tuple:
     from ..viz.style import Style, text
 
     edition = _q_chart_edition(results)
+    intro = Paragraph(t("qchart_text", lang).format(edition=f" ({edition})" if edition else ""))
+    if edition is None:  # se pidió la referencia pero ningún tramo la obtuvo
+        return (intro, Paragraph(t("qchart_none", lang)))
     refs = [r for r in results if r.q_chart]
     labors: dict[str, tuple] = {}  # _key -> (rótulo como lo escribió el usuario, categoría ESR, ESR usado)
     for r in refs:
@@ -167,7 +175,7 @@ def _q_chart_blocks(results, lang: str, figures: bool) -> tuple:
     legend = tuple((str(k), text(f"q_cat_{k}", lang), _range(c.shotcrete_mm), _str(c.sfr_energy_j), c.rrs or "-")
                    for k, c in sorted(Q_CHARTS[edition].categories.items()))
     return (
-        Paragraph(t("qchart_text", lang).format(edition=edition)),
+        intro,
         Table(t("cap_esr", lang), (t("h_labor", lang), t("h_esr_cat", lang), t("h_esr", lang)),
               tuple((a, b, _str(c)) for a, b, c in labors.values())),
         Table(t("cap_crosstab", lang), (t("h_support", lang), *(f"Q {c}" for c in cats)), rows),
@@ -315,12 +323,12 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
                            tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),)
     else:
         s7_blocks = (Paragraph(t("no_warnings", lang)),)
-    qw = Counter(w for r in results for w in set(r.q_chart_warnings)) if _q_chart_edition(results) else None
+    qw = Counter(w for r in results for w in set(r.q_chart_warnings)) if _has_q(results) else None
     if qw:
         s7_blocks += (Table(t("cap_qwarnings", lang), (t("h_warning", lang), t("h_count", lang)),
                             tuple((w, str(n)) for w, n in sorted(qw.items(), key=lambda kv: (-kv[1], kv[0])))),)
     s5 = _summary_section(results, tables, lang, figures)
-    if _q_chart_edition(results):
+    if _has_q(results):
         s5 = replace(s5, blocks=s5.blocks + (Section("5.1", t("s5_qchart", lang),
                                                      _q_chart_blocks(results, lang, figures)),))
     sections = (
@@ -404,7 +412,7 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
         Table(t("cap_tramos", lang), cols3, tuple(_cols(r, cols3) for r in results)),
         *_profile_figs(results, tables, lang, figures)))
     cols = _columns(results)
-    q_blocks = _q_chart_blocks(results, lang, figures) if _q_chart_edition(results) else ()
+    q_blocks = _q_chart_blocks(results, lang, figures) if _has_q(results) else ()
     s41 = Section("4.1", t("a_s41", lang), (
         Table(t("cap_results", lang), cols,
               tuple(tuple(_str(v) for v in _fila(r, len(cols) > len(_COLUMNS))) for r in results)),

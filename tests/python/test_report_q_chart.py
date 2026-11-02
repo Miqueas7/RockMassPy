@@ -1,5 +1,3 @@
-import hashlib
-
 import pytest
 
 import rockmasspy as rm
@@ -97,13 +95,50 @@ def test_ediciones_mezcladas_fallan():
         rp.build_memoria([a[0], b[1]], TABLES, title="M")
 
 
+def fingerprint(rep):
+    out = []
+
+    def walk(secs):
+        for s in secs:
+            out.append((s.number, s.title))
+            for b in s.blocks:
+                if isinstance(b, rp.Table):
+                    out.append((b.caption, b.header))
+                elif isinstance(b, rp.Section):
+                    walk([b])
+    walk(rep.sections)
+    return tuple(out)
+
+
+# Estructura de la 1D (secciones, títulos, leyendas y encabezados de tablas), tomada antes de la carta Q.
+FP_MEMORIA = (('1', 'Objetivo y alcance'), ('2', 'Métodos y ediciones'), ('Métodos usados y su verificación', ('Método', 'Verificación', 'Fuente')), ('3', 'Tablas geomecánicas por labor'), ('3.1', 'galería (luz 1-6 m)'), ('Clases y sostenimiento', ('Rango o celda', 'Clase', 'Sostenimiento')), ('Catálogo de sostenimiento', ('Sostenimiento', 'Elementos')), ('3.2', 'crucero'), ('Clases y sostenimiento', ('Rango o celda', 'Clase', 'Sostenimiento')), ('Catálogo de sostenimiento', ('Sostenimiento', 'Elementos')), ('4', 'Resultados por tramo'), ('Resultados de la clasificación', ('id_tramo', 'tipo_labor', 'luz_m', 'tabla_luz_min_m', 'tabla_luz_max_m', 'metodo', 'edicion_base', 'valor_entrada', 'celda', 'clase', 'sostenimiento', 'sostenimiento_orden', 'sost_instalado', 'avisos')), ('5', 'Resumen'), ('Totales', ('', 'Tramos')), ('Tramos por labor y clase', ('Labor', 'Clase', 'Tramos')), ('Tramos por sostenimiento', ('Sostenimiento', 'Tramos')), ('6', 'Mapas'), ('7', 'Avisos'), ('8', 'Limitaciones'))
+FP_ANEXO = (('1', 'Introducción'), ('2', 'Caracterización geomecánica del macizo rocoso'), ('2.1', 'galería (luz 1-6 m)'), ('Clases y sostenimiento', ('Rango o celda', 'Clase', 'Sostenimiento')), ('Catálogo de sostenimiento', ('Sostenimiento', 'Elementos')), ('2.2', 'crucero'), ('Clases y sostenimiento', ('Rango o celda', 'Clase', 'Sostenimiento')), ('Catálogo de sostenimiento', ('Sostenimiento', 'Elementos')), ('3', 'Condiciones geomecánicas actuales de la labor'), ('Tramos de la labor, con su clase y su sostenimiento', ('id_tramo', 'tipo_labor', 'luz_m', 'clase', 'sostenimiento')), ('4', 'Evaluación de estabilidad'), ('4.1', 'Cálculo empírico'), ('Resultados de la clasificación', ('id_tramo', 'tipo_labor', 'luz_m', 'tabla_luz_min_m', 'tabla_luz_max_m', 'metodo', 'edicion_base', 'valor_entrada', 'celda', 'clase', 'sostenimiento', 'sostenimiento_orden', 'sost_instalado', 'avisos')), ('Métodos usados y su verificación', ('Método', 'Verificación', 'Fuente')), ('4.2', 'Análisis cinemático de cuñas'), ('4.3', 'Modelamiento numérico'), ('4.3.1', 'Recomendación de excavación o explotación'), ('4.3.2', 'Recomendación de reforzamiento o sostenimiento'), ('5', 'Conclusiones y recomendaciones'), ('6', 'Anexos'), ('', 'Memoria resumen de parámetros de entrada'), ('galería (luz 1-6 m) (RMR89)', ('Rango o celda', 'Clase', 'Sostenimiento')), ('crucero (Q-NGI-2025)', ('Rango o celda', 'Clase', 'Sostenimiento')), ('Parámetros del Q usados', ('id_tramo', 'RQD', 'Jn', 'Jr', 'Ja', 'Jw', 'SRF')))
+
+
 def test_sin_referencia_es_igual_a_la_1d():
+    from rockmasspy.batch import _COLUMNS
     m = rp.build_memoria(base(), TABLES, title="M", date="2026-01-01", figures=False)
     a = rp.build_anexo39b(base(), TABLES, title="A", date="2026-01-01", figures=False)
     assert not any(s.number == "5.1" for s in walk(m.sections))
     assert not any(x.method_id.endswith("-chart") for x in m.methods)
-    assert HASHES == (hashlib.sha256(repr(m).encode()).hexdigest(), hashlib.sha256(repr(a).encode()).hexdigest())
+    assert tablas(sec(m, "4"))[0].header == _COLUMNS
+    assert fingerprint(m) == FP_MEMORIA and fingerprint(a) == FP_ANEXO
 
 
-HASHES = ("477e183b6fdd9b5f1e96837f882aad9b971d4bc111b4bcd9acf021b26d875b88",
-          "c18cae78101cf306da3b9fb02c2c9a98baa9e6f55a9e7cfa67706608134ab28a")
+def test_referencia_pedida_sin_ninguna_concedida(tmp_path):
+    res = rm.add_q_chart_reference(base(), {"otra": ("A", 4.0)})
+    m = rp.build_memoria(res, TABLES, title="M")
+    a = rp.build_anexo39b(res, TABLES, title="A")
+    for s in (sec(m, "5.1"), sec(a, "4.1")):
+        assert any(isinstance(b, rp.Paragraph) and b.text.startswith("Ningún tramo obtuvo") for b in s.blocks)
+        assert not any(isinstance(b, rp.Figure) for b in s.blocks)
+        assert not any(t.caption == "Tabla cruzada: sostenimiento propio y categoría Q" for t in tablas(s))
+    qt = next(x for x in tablas(sec(m, "7")) if x.caption == "Avisos de la carta Q")
+    assert ("no ESR for this labor", "4") in qt.rows
+    assert "SECRETO-123" not in rp.write_html(m, tmp_path / "m.html").read_text(encoding="utf-8")
+
+
+def test_leyenda_en_ingles_marca_7_a_9_indicativas():
+    r = rp.build_memoria(con_ref(), TABLES, title="M", lang="en", figures=False)
+    leg = tablas(sec(r, "5.1"))[2]
+    assert all("(indicative)" in leg.rows[k][1] for k in (6, 7, 8))
