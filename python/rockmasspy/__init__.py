@@ -50,3 +50,4 @@ from .excel_io import load_excel, load_support_catalog_excel, save_excel  # noqa
 from .csv_io import load_csv_dir, load_support_catalog_csv, save_csv_dir  # noqa: E402,F401
 from .tramos import TRAMO_COLUMNS, Tramo, load_tramos  # noqa: E402,F401
 from .batch import BatchSummary, TramoResult, classify_tramos, save_results, summarize  # noqa: E402,F401
+from .table_files import load_table  # noqa: E402,F401

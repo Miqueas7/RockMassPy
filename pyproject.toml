@@ -41,6 +41,9 @@ io = ["pyyaml>=6.0", "openpyxl>=3.1"]
 viz = ["matplotlib>=3.8"]
 report = ["python-docx>=1.1"]
 
+[project.scripts]
+rockmass = "rockmasspy.cli:main"
+
 [tool.scikit-build]
 cmake.build-type = "Release"
 cmake.args = ["-DROCKMASSPY_BUILD_PYTHON=ON", "-DROCKMASSPY_BUILD_TESTS=OFF"]
