@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from .batch import EsrSpec, parse_esr_spec
+
 FORCES = ("law", "guide")
 VERIFICATIONS = ("V1", "V2")
 COMPARISONS = (">", ">=", "<", "<=")
@@ -152,8 +154,10 @@ def _parse_item(raw, sources: dict, jurisdiction: str, fname: str) -> NormItem:
     if check == "esr":
         if len(applies) != 1:
             fail("applies_to", "an esr item needs exactly one labor")
-        if not isinstance(value, str) or not value.strip():  # tarea 2: batch.parse_esr_spec
-            fail("value", "an esr item needs an ESR spec text")
+        try:
+            parse_esr_spec(value)
+        except ValueError:
+            fail("value", "an esr item needs an ESR spec such as C or A:3")
     src = raw["source"]
     if src not in sources:
         fail("source", "not defined in sources")
@@ -245,3 +249,9 @@ def get_profile(profile_id: str) -> NormativeProfile:
     if profile_id not in avail:
         raise ValueError(f"unknown profile {profile_id!r}; available: {', '.join(sorted(avail)) or '(none)'}")
     return load_profile(avail[profile_id])
+
+
+def profile_esr_specs(profile: NormativeProfile, as_of: str) -> dict[str, EsrSpec]:
+    """labor -> ESR de los ítems `esr` vigentes en `as_of`; sin clave "*" (una labor sin entrada queda sin referencia)."""
+    _check_date(as_of, "as_of")
+    return {i.applies_to[0]: parse_esr_spec(i.value) for i in profile.items if i.check == "esr" and i.in_force(as_of)}

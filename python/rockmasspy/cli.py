@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .batch import add_q_chart_reference, classify_tramos, q_chart_crosstab, save_results, summarize
+from .batch import add_q_chart_reference, classify_tramos, parse_esr_spec, q_chart_crosstab, save_results, summarize
 from .q_chart_data import ESR_TABLES
 from .report.texts import t
 from .table_files import load_table
@@ -55,17 +55,17 @@ def _esr_specs(values: Sequence[str]) -> dict:
     out = {}
     for v in values:
         labor, eq, spec = v.rpartition("=")
-        cat, colon, num = spec.partition(":")
-        if (eq and not labor) or not cat or (colon and not num):
+        if eq and not labor:
             raise ValueError(f"invalid --esr {v!r}: {syntax}")
-        if not colon and cat.upper() in _ESR_EXAMPLE:  # A y B tienen rango: la CLI pide el valor
-            lo, hi, _ = ESR_TABLES["Q-NGI-2025"][cat.upper()]
-            raise ValueError(f"ESR category {cat.upper()} covers {lo:g}-{hi:g}; use {cat.upper()}:<esr>, "
-                             f"e.g. {cat.upper()}:{_ESR_EXAMPLE[cat.upper()]}")
         try:
-            out[labor if eq else "*"] = (cat, float(num)) if colon else cat
+            val = parse_esr_spec(spec)
         except ValueError:
             raise ValueError(f"invalid --esr {v!r}: {syntax}") from None
+        if isinstance(val, str) and val in _ESR_EXAMPLE:  # A y B tienen rango: la CLI pide el valor
+            lo, hi, _ = ESR_TABLES["Q-NGI-2025"][val]
+            raise ValueError(f"ESR category {val} covers {lo:g}-{hi:g}; use {val}:<esr>, "
+                             f"e.g. {val}:{_ESR_EXAMPLE[val]}")
+        out[labor if eq else "*"] = val
     return out
 
 
