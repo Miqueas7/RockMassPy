@@ -10,19 +10,11 @@ from ..labor_table import LaborTable
 from ..range_table import RANGE_METHODS
 from ..support import SupportType
 from ..vallejo_lines import RMR_PRIME_LINES
-from .style import TEXTS, Style, footer, new_figure, support_color, text
+from .style import TEXTS, Style, _ink, footer, new_figure, support_color, text
 
 # No aplica: blanco con rayado gris claro, distinto de todo color de sostenimiento también en blanco y negro.
 _NA_BG, _NA_HATCH, _UNDEFINED = "white", "0.75", "#BDBDBD"
 _LINES_CHART = "GSI-Vallejo-Osinergmin2017"  # la única cartilla con líneas RMR′ digitalizadas
-
-
-def _ink(color: str) -> str:
-    """Negro o blanco según la luminosidad del fondo, para que el texto se lea sobre los morados."""
-    from matplotlib.colors import to_rgb
-
-    r, g, b = (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in to_rgb(color))
-    return "black" if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 else "white"
 
 
 def _axis_label(kind: str, code: str, label: str, lang: str) -> str:

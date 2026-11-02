@@ -102,7 +102,11 @@ TEXTS: dict[str, dict[str, str]] = {
     "east_axis": {"es": "Este (m)", "en": "East (m)"},
     "north_axis": {"es": "Norte (m)", "en": "North (m)"},
     "omitted_chainage": {"es": "{n} tramos sin progresivas", "en": "{n} sections without chainage"},
+    "omitted_chainage_1": {"es": "{n} tramo sin progresivas", "en": "{n} section without chainage"},
     "omitted_coords": {"es": "{n} tramos sin coordenadas", "en": "{n} sections without coordinates"},
+    "omitted_coords_1": {"es": "{n} tramo sin coordenadas", "en": "{n} section without coordinates"},
+    "datum_label": {"es": "datum: {d}", "en": "datum: {d}"},
+    "editions_label": {"es": "ediciones base: {e}", "en": "base editions: {e}"},
     "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
 }
 
@@ -150,6 +154,14 @@ def support_color(order: int, n_types: int, style: Style) -> str:
     if n_types == 1:
         return colors[0]
     return colors[round((order - 1) * (len(colors) - 1) / (n_types - 1))]
+
+
+def _ink(color: str) -> str:
+    """Negro o blanco según la luminosidad del fondo, para que el texto se lea sobre los morados."""
+    from matplotlib.colors import to_rgb
+
+    r, g, b = (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in to_rgb(color))
+    return "black" if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 else "white"
 
 
 def new_figure(style: Style):
