@@ -188,6 +188,49 @@ rockmass mrmr --irs 100 --rqd 75 --spacing 0.5 1.0 3.0 --jc 10.8 --hr 30 --chart
 
 See `examples/06-tajeos-mathews-mrmr/`.
 
+## Normative verification (Peru, DS 024-2016-EM)
+
+`rockmass verify` and `verify(...)` compare your inputs (per-labor tables, tramos, stope faces and a design sheet set)
+with the requirements of a **normative profile**: a JSON file in `python/rockmasspy/profiles/`. The first one is
+`PE-DS024-2016`: the Peruvian mining safety regulation (DS 024-2016-EM, with DS 023-2017-EM and DS 034-2023-EM) and the
+Osinergmin (2017) geomechanical criteria guide. Every requirement carries its instrument, article, page, URL and
+force: **law** (the regulation) or **guide** (a recommendation, which never reads "does not comply"). Text that was
+not in force on `--as-of` is reported as not verifiable and says since when the loaded text applies.
+
+Six statuses: complies, does not comply, attention, note, **not checked** (you gave no input for it) and **not
+verifiable by the library** (procedural, or no rule for it). Read this part twice:
+
+- **"Not verifiable by the library" is not a non-compliance.** It means the library cannot judge it (a signed study,
+  posting in the labor, the quarterly inspection); the engineer checks it.
+- **The library never says "approved".** A "complies" only means that the declared numbers meet the numeric limit it
+  could check; the signed study and the engineer's judgment remain.
+- Exit code 0 if nothing fails, 1 for an input error, 2 if something does not comply or needs attention. Notes, items
+  not checked and items not verifiable do not change the code.
+
+```python
+import rockmasspy as rm
+from rockmasspy.design_inputs import DesignInputs, RefugeStation
+from rockmasspy.verify import verify
+
+# one synthetic refuge station: RMR 55 with no declared support, 400 m from the face, 30 m2 for 20 people
+st = RefugeStation("E1", "roca", rmr=55, distancia_frente_m=400, area_m2=30, aforo=20)
+v = verify(rm.get_profile("PE-DS024-2016"), as_of="2026-11-02", design=DesignInputs(refuge_stations=(st,)))
+print(sorted(rm.available_profiles()))                  # ['PE-DS024-2016']
+print(v.counts())                                       # {'complies': 2, 'does_not_comply': 1, 'attention': 0, 'note': 0, 'not_checked': 12, 'not_verifiable': 9}
+print(v.exit_code)                                      # 2
+```
+
+The design sheets are `Estaciones_refugio`, `Refugios_peatonales`, `Resumen_QC`, `Factores_seguridad` and `Autosoporte`
+(an xlsx workbook, or one CSV per sheet named after it; all optional). Row identifiers never reach the console or the
+report. From the command line:
+
+```bash
+rockmass verify --profile PE-DS024-2016 --as-of 2026-11-02 --tables galeria.json --tramos Tramos.csv \
+  --surfaces Superficies.csv --design Estaciones_refugio.csv Resumen_QC.csv --report verificacion.html
+```
+
+See `examples/07-verificacion-normativa-peru/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a

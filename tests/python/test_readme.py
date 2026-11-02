@@ -93,3 +93,18 @@ def test_readme_stope_example(archivo, titulo):
     with contextlib.redirect_stdout(salida):
         exec(compile(codigo[0], archivo, "exec"), {})
     assert salida.getvalue().splitlines() == esperado
+
+
+VSECCION = [("README.md", "## Normative verification (Peru, DS 024-2016-EM)"),
+            ("README.es.md", "## Verificación normativa (Perú, DS 024-2016-EM)")]
+
+
+@pytest.mark.parametrize("archivo,titulo", VSECCION)
+def test_readme_verify_example(archivo, titulo):
+    codigo = bloques(archivo, titulo)
+    assert len(codigo) == 1, f"{archivo}: expected one python block under {titulo!r}"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[0].splitlines() if ln.startswith("print(") and "#" in ln]
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        exec(compile(codigo[0], archivo, "exec"), {})
+    assert salida.getvalue().splitlines() == esperado
