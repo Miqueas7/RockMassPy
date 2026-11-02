@@ -69,3 +69,10 @@ def test_monotonia_e_exclusiones(pl, face, phi, lim):
 def test_directo_y_oblicuo_exclusivos(t, pl, face, phi, lim):
     c = rm.check_intersection(rm.LineOrientation(t, pl), kin(phi, lim, face))
     assert not (c.direct_toppling and c.direct_toppling_oblique)
+
+
+def test_plano_vertical_contra_cara_vertical_de_los_dos_lados():
+    k = kin(30, 30, (180, 90))
+    a, b = rm.check_plane(P(180, 90), k), rm.check_plane(P(0, 90), k)
+    assert a.planar and (a.planar, a.planar_no_limits, a.direct_toppling_base_zone) == (
+        b.planar, b.planar_no_limits, b.direct_toppling_base_zone)

@@ -113,3 +113,15 @@ def test_none_and_omission_mean_unset():
     i.srf_b = None
     assert rm.q_slope(i).srf_slope == 2.5
     assert any("product of sets A and B" in n for n in rm.q_slope(base(jr_b=2, ja_b=1, o_factor_b=0.9)).notes)
+
+
+@pytest.mark.parametrize("x", [float("inf"), float("-inf"), float("nan")])
+def test_srf_b_rechaza_infinito_y_nan(x):
+    with pytest.raises(ValueError, match="ucs_over_sigma1") as e:
+        t.srf_b(x)
+    assert "inf" not in str(e.value) and "nan" not in str(e.value)
+
+
+def test_aviso_de_rango_sin_el_valor():
+    w = rm.q_slope(base(jn=27.3)).warnings
+    assert "jn outside the table range [0.5, 20]" in w and not any("27.3" in x for x in w)

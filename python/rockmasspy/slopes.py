@@ -32,6 +32,7 @@ _SET_B = ("jr_b", "ja_b", "o_b")
 _SRF = ("srf_a", "srf_b", "srf_c")
 _EPS = 1e-9
 _AXIS_TOL = 1e-6  # un plano a 90 o una intersección a 0 o 90 es un eje: sus dos sentidos valen
+_LOOSE_NOTE = 30  # más filas sueltas que esto: nota para agruparlas en familias
 
 
 # ---------------------------------------------------------------- lectura
@@ -172,6 +173,8 @@ class FamilyStats:
 
 @dataclass(frozen=True)
 class SmrCase:
+    """Un caso SMR. `mode` y los ángulos son los del sentido que gobierna el discreto; el continuo toma el suyo."""
+
     label: str
     mode: str  # planar, toppling o wedge
     discrete: rm.SmrResult
@@ -221,8 +224,8 @@ def _delta(a, b):
 def _smr_cases(f: SlopeFace, planes, labels, face):
     """Un caso por plano medio (familia) o fila suelta, y uno de cuña por cada par con intersección.
 
-    Un eje (plano vertical, intersección horizontal) se evalúa por sus dos sentidos; el SMR discreto y el continuo toman cada uno el menor;
-    una intersección vertical toma la tendencia de la cara.
+    Un eje (plano vertical, intersección horizontal) se evalúa por sus dos sentidos; un plano horizontal, con αs y αs + 180;
+    el SMR discreto y el continuo toman cada uno el menor; una intersección vertical toma la tendencia de la cara.
     """
     exc = _EXCAVATIONS.get((f.excavacion or "").strip().casefold())
     if exc is None:
@@ -244,7 +247,10 @@ def _smr_cases(f: SlopeFace, planes, labels, face):
     alpha_s = face.dip_direction_deg
     out = []
     for p, lab in zip(planes, labels):
-        sentidos = [p.dip_direction_deg] + ([p.dip_direction_deg + 180.0] if p.dip_deg >= 90 - _AXIS_TOL else [])
+        if p.dip_deg <= _AXIS_TOL:  # buzamiento 0: sin dirección
+            sentidos = [alpha_s, alpha_s + 180.0]
+        else:
+            sentidos = [p.dip_direction_deg] + ([p.dip_direction_deg + 180.0] if p.dip_deg >= 90 - _AXIS_TOL else [])
         cands = []
         for d in sentidos:
             dd = _delta(d, alpha_s)
@@ -252,6 +258,7 @@ def _smr_cases(f: SlopeFace, planes, labels, face):
                      else [rm.SmrMode.Planar, rm.SmrMode.Toppling])
             cands += [caso(lab, m, d % 360.0, p.dip_deg) for m in modes]
         out.append(peor(cands))
+    # shortcut: pairwise loose-row wedges are O(N²), cap or group when real field sheets need it
     for i in range(len(planes)):
         for j in range(i + 1, len(planes)):
             line = rm.plane_intersection(planes[i], planes[j])
@@ -307,6 +314,11 @@ def _assess_one(f: SlopeFace, joints, lateral_limit_deg):
                 sp.append(p)
                 labels.append(f"row {j.fila}")
         cases = _smr_cases(f, sp, labels, face)
+        n_loose = len(sp) - len(stats)
+        if n_loose > _LOOSE_NOTE:
+            fam_pairs = {f"{a}×{b}" for i, a in enumerate(names) for b in names[i + 1:]}
+            k = sum(c.mode == "wedge" and c.label not in fam_pairs for c in cases)
+            notes.append(f"{n_loose} loose rows produce {k} wedge cases; group them into families")
         for c in cases:
             warnings += [f"{c.label}: {w}" for w in c.discrete.warnings + c.continuous.warnings]
             methods += [c.discrete.info, c.continuous.info]
@@ -332,6 +344,8 @@ def _assess_one(f: SlopeFace, joints, lateral_limit_deg):
 def assess_slopes(faces: Iterable[SlopeFace], joints: Iterable[JointRecord], *,
                   lateral_limit_deg: float = 30.0) -> list[SlopeResult]:
     """Evalúa cada talud con los planos de `Familias` de su `id_tramo`. Un dato imposible lanza con hoja y fila."""
+    if not (math.isfinite(lateral_limit_deg) and 0 < lateral_limit_deg < 90):
+        raise ValueError("lateral_limit_deg must be within (0, 90)")
     por_tramo: dict[str, list[JointRecord]] = {}
     for j in joints:
         por_tramo.setdefault(j.id_tramo, []).append(j)

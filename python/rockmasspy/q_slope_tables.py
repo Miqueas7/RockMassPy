@@ -3,6 +3,8 @@
 Los números son los de la fuente; los rótulos de las claves son propios.
 """
 
+import math
+
 SOURCE = (
     "Bar & Barton (2018) Periodica Polytechnica Civ. Eng. 62(4) 893-900: eq. 1 (p. 894), eq. 3 (p. 896), "
     "Tables 1-9 (pp. 894-896); SRFslope = max(SRFa, SRFb, SRFc) (p. 895)"
@@ -70,8 +72,8 @@ def srf_a(category: str) -> float:
 
 def srf_b(ucs_over_sigma1: float) -> float:
     x = float(ucs_over_sigma1)
-    if not x > 0:  # también atrapa NaN
-        raise ValueError(f"ucs_over_sigma1 must be a positive number, got {ucs_over_sigma1!r}")
+    if not (x > 0 and math.isfinite(x)):  # también atrapa NaN
+        raise ValueError("ucs_over_sigma1 must be a positive finite number")
     pts = _SRF_B_POINTS
     if x >= pts[0][0]:
         return pts[0][1]

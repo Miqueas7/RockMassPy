@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 import rockmasspy as rm
@@ -147,7 +149,6 @@ def test_conteos_y_resultados(tmp_path):
     assert c["slopes"] == 2 and c["warnings"] == 1 and sum(c[f"smr_d_{k}"] for k in range(1, 6)) == 2
     p = rm.save_slope_results(rs, tmp_path / "out.csv")
     txt = p.read_text(encoding="utf-8-sig")
-    import re
     from rockmasspy.slopes import _RESULT_COLUMNS
     assert re.split("[;,]", txt.splitlines()[0]) == list(_RESULT_COLUMNS) and "ZZSENT" not in txt
     assert "smr_caso_continuo" in _RESULT_COLUMNS
@@ -259,14 +260,12 @@ def test_avisos_de_familia_no_se_juntan(tmp_path):
 
 
 def test_excavacion_a_mano_fuera_de_vocabulario():
-    import dataclasses
     from rockmasspy.slopes import SlopeFace
     f = SlopeFace("T", "R", 72, 133, None, None, 42, "explosivo-ZZSENT", *[None] * 12, 2)
     j = rm.JointRecord("R", "J1", 60, 133, 2)
     with pytest.raises(ValueError, match="one of") as e:
         rm.assess_slopes([f], [j])
     assert "ZZSENT" not in str(e.value) and "row 2" in str(e.value)
-    assert dataclasses  # silencio
 
 
 def test_nota_planar_sin_limites(tmp_path):
@@ -290,3 +289,87 @@ def test_eje_vertical_discreto_y_continuo_cada_uno_su_lado(tmp_path):
     assert abs(cont[0] - cont[1]) > 0.5
     (r,) = correr(tmp_path, [T(dir_="0", buz="90")], jf=["R1,,90,0"])
     assert r.smr_continuous.continuous.smr == pytest.approx(min(cont))
+
+
+# --- revisión final de la 3A ---
+
+def _cara(dd, dip, rmr=60.0):
+    from rockmasspy.slopes import SlopeFace
+    return SlopeFace("T1", "R1", dip, dd, 30.0, None, rmr, "voladura_normal", *[None] * 12, 2)
+
+
+def _filas(spec):
+    return [rm.JointRecord("R1", fam, dip, dd, i + 2) for i, (fam, dd, dip) in enumerate(spec)]
+
+
+def _uno(cara, spec):
+    return rm.assess_slopes([cara], _filas(spec))[0]
+
+
+def test_media_de_fisher_en_el_limite_toma_la_clase_peor():
+    # familia de tres filas paralela a la cara (C = 0) y familia de una fila con C = -10, RMRb 60
+    r = _uno(_cara(7, 60), [("J1", 7, 60)] * 3)
+    assert r.smr_discrete.discrete.smr == pytest.approx(35.0) and r.smr_discrete.discrete.smr_class == 4
+    r = _uno(_cara(0, 40), [("J1", 0, 30)])
+    assert r.smr_discrete.discrete.smr == pytest.approx(18.0) and r.smr_discrete.discrete.smr_class == 5
+
+
+def test_barrido_de_limites_c_con_familia_de_una_fila():
+    malos = 0
+    for dd in range(360):
+        for dip in (40.0, 50.0, 60.0, 70.0):
+            for jdip, f3 in ((dip, -25), (dip - 10, -60), (dip + 10, -6)):
+                malos += _uno(_cara(dd, dip), [("J1", dd, jdip)]).smr_cases[0].discrete.f3 != f3
+    assert malos == 0  # de 4320 casos
+
+
+def test_barrido_de_limites_a_b_y_vuelco():
+    malos = 0
+    for dd in range(0, 360, 3):
+        for a, f1 in {5: 1.0, 10: 0.85, 20: 0.70, 30: 0.40}.items():
+            malos += _uno(_cara(dd, 75), [("J1", (dd + a) % 360, 50.0)]).smr_cases[0].discrete.f1 != f1
+        for b, f2 in {20: 0.40, 30: 0.70, 35: 0.85, 45: 1.00}.items():
+            malos += _uno(_cara(dd, 75), [("J1", dd, float(b))]).smr_cases[0].discrete.f2 != f2
+        for jdip, f3 in ((50.0, -6), (60.0, -25)):  # vuelco con C = 110 y C = 120
+            malos += _uno(_cara(dd, 60), [("J1", (dd + 180) % 360, jdip)]).smr_cases[0].discrete.f3 != f3
+    assert malos == 0
+
+
+@pytest.mark.parametrize("familia", [None, "J1"])
+def test_plano_horizontal_no_depende_de_la_cara_ni_de_la_notacion(familia):
+    rs = [_uno(_cara(g, 60, rmr=69.0), [(familia, d, 0.0)] * (2 if familia else 1))
+          for g in (0, 90, 180, 270) for d in (0, 180)]
+    assert len({round(r.smr_discrete.discrete.smr, 9) for r in rs}) == 1
+    assert len({round(r.smr_continuous.continuous.smr, 9) for r in rs}) == 1
+    assert rs[0].smr_discrete.discrete.smr == pytest.approx(60.0)  # planar con A = 0: 1 · 0.15 · (-60)
+
+
+@pytest.mark.parametrize("giro", [45, 90, 180, 270])
+def test_giro_no_cambia_el_smr_con_familias(giro):
+    planos = [("J1", 20, 60), ("J1", 25, 62), ("J2", 100, 70), ("J2", 105, 68), ("J3", 200, 50), (None, 300, 40)]
+
+    def corre(g):
+        return _uno(_cara((133 + g) % 360, 72), [(f, (d + g) % 360, b) for f, d, b in planos])
+    a, b = corre(0), corre(giro)
+    assert b.smr_discrete.discrete.smr == pytest.approx(a.smr_discrete.discrete.smr)
+    assert b.smr_continuous.continuous.smr == pytest.approx(a.smr_continuous.continuous.smr)
+    assert [c.label for c in a.smr_cases] == [c.label for c in b.smr_cases]
+    assert [c.discrete.smr for c in a.smr_cases] == pytest.approx([c.discrete.smr for c in b.smr_cases])
+
+
+@pytest.mark.parametrize("lim", [95.0, 0.0, float("nan")])
+def test_limite_lateral_de_la_api_no_se_atribuye_a_la_hoja(lim):
+    with pytest.raises(ValueError) as e:
+        rm.assess_slopes([_cara(133, 72)], _filas([("J1", 133, 60)]), lateral_limit_deg=lim)
+    m = str(e.value)
+    assert "lateral_limit_deg" in m and "row" not in m and "sheet" not in m and "95" not in m
+
+
+def test_muchas_filas_sueltas_dejan_nota():
+    def notas(n):
+        return _uno(_cara(133, 72), [(None, (7 * i) % 360, 20 + i % 60) for i in range(n)])
+    assert not any("loose rows" in x for x in notas(30).notes)
+    r = notas(31)
+    k = sum(c.mode == "wedge" for c in r.smr_cases)
+    assert f"31 loose rows produce {k} wedge cases; group them into families" in r.notes
+    assert not r.warnings or all("loose" not in w for w in r.warnings)

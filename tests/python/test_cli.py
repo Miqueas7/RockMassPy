@@ -604,3 +604,22 @@ def test_slope_warning_lines_unambiguous(tmp_path, capsys):
     files = slope_files(tmp_path, [T(tramo="R-ZZSENT", fr="")])
     _, out, _ = run_slope(tmp_path, capsys, files=files)
     assert "warnings: 1 in 1 slope" in out.splitlines() and "(1 slope)" in out
+
+
+def test_slope_q_warning_without_cell_value(tmp_path, capsys):
+    from test_slopes import T
+
+    tf = [T(id_="T1", tramo="R-ZZSENT", q="80,27.3,1.5,1,0.75,0.7", srf="2.5,,"),
+          T(id_="T2", tramo="R-ZZSENT", q="80,31.7,1.5,1,0.75,0.7", srf="2.5,,")]
+    code, out, err = run_slope(tmp_path, capsys, files=slope_files(tmp_path, tf))
+    assert code == 2 and "27.3" not in out + err and "31.7" not in out + err
+    assert [ln for ln in out.splitlines() if "jn outside" in ln] == [
+        "warning: jn outside the table range [0.5, 20] (2 slopes)"]
+
+
+def test_slope_kinematics_count_says_what_it_counts(tmp_path, capsys):
+    from test_slopes import T
+
+    tf = [T(id_="T1", tramo="R-ZZSENT"), T(id_="T2", tramo="R-ZZSENT", fr="")]
+    _, out, _ = run_slope(tmp_path, capsys, files=slope_files(tmp_path, tf))
+    assert "kinematics run on 1 of 2 slopes; planes: 4" in out.splitlines()
