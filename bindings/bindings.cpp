@@ -13,6 +13,7 @@
 #include "rockmasspy/hoek_brown.hpp"
 #include "rockmasspy/method_info.hpp"
 #include "rockmasspy/q_support.hpp"
+#include "rockmasspy/mathews.hpp"
 #include "rockmasspy/q_system.hpp"
 #include "rockmasspy/rmr14.hpp"
 #include "rockmasspy/rmr76.hpp"
@@ -202,6 +203,18 @@ NB_MODULE(_rockmasspy_core, m) {
           "Roof bolt length 2 + 0.15*B/ESR in m (Barton et al. 1980) [V2].");
     m.def("roof_pressure_grimstad_barton", &roof_pressure_grimstad_barton, nb::arg("q"), nb::arg("jn"),
           nb::arg("jr"), "Roof support pressure (Grimstad and Barton 1993); unit not stated in the source [V2].");
+    nb::class_<FactorResult>(m, "FactorResult", "Mathews stability-graph factor with its source.")
+        .def_ro("value", &FactorResult::value).def_ro("info", &FactorResult::info);
+    m.def("mathews_factor_a", &mathews_factor_a, nb::arg("ucs_mpa"), nb::arg("induced_stress_mpa"),
+          "Mathews factor A (Potvin 1988); 1.0 under relaxation.");
+    m.def("mathews_factor_c_gravity", &mathews_factor_c_gravity, nb::arg("surface_inclination_deg"),
+          "Mathews factor C for gravity fall and slabbing: 8 - 6 cos(alpha).");
+    m.def("mathews_factor_c_sliding", &mathews_factor_c_sliding, nb::arg("joint_dip_deg"),
+          "Mathews factor C for sliding on the critical joint.");
+    m.def("hydraulic_radius", &hydraulic_radius, nb::arg("area_m2"), nb::arg("perimeter_m"),
+          "Hydraulic radius = area / perimeter (m).");
+    m.def("hydraulic_radius_rect", &hydraulic_radius_rect, nb::arg("width_m"), nb::arg("length_m"),
+          "Hydraulic radius of a rectangular face (m).");
     nb::class_<WallQResult>(m, "WallQResult", "Wall Q with the factor applied (5, 2.5 or 1).")
         .def_ro("q_wall", &WallQResult::q_wall).def_ro("factor", &WallQResult::factor)
         .def_ro("info", &WallQResult::info);
