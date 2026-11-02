@@ -29,6 +29,12 @@ ROWS = [
     ("laser", "J2", 121, 16, 45, P, 12, 16, -56, 0.70, 0.15, -60, 38, 4),
     ("laser", "W23", 139, 15, 42, W, 6, 15, -57, 0.85, 0.15, -60, 34, 4),
     ("laser", "W24", 113, 16, 45, W, 20, 16, -56, 0.70, 0.15, -60, 38, 4),
+    ("SfM", "W12", 53, 4, 44, W, 80, 4, -68, 0.15, 0.15, -60, 42, 3),
+    ("SfM", "W14", 51, 57, 44, W, 82, 57, -15, 0.15, 1, -60, 35, 4),
+    ("laser", "J3", 225, 75, 42, T, 88, 75, 147, 0.15, 1, -25, 38, 4),
+    ("laser", "J4", 34, 57, 47, T, 81, 57, 129, 0.15, 1, -25, 43, 3),
+    ("laser", "W12", 51, 6, 44, W, 82, 6, -66, 0.15, 0.15, -60, 42, 3),
+    ("laser", "W14", 46, 56, 44, W, 87, 56, -16, 0.15, 1, -60, 35, 4),
 ]
 
 
@@ -50,7 +56,7 @@ def test_riquelme_table4(row):
 
 
 def test_boundary_convention_difference_with_riquelme():
-    # SfM J1 323/89 (A = 10) y campo J2 119/20 (B = 20): la tabla usa el lado favorable (SMRTool); aquí, el desfavorable.
+    # SfM J1 323/89 (A = 10; RMRb 44 de la Tabla 4) y campo J2 119/20 (B = 20; RMRb 45): la tabla usa el lado favorable (SMRTool); aquí, el desfavorable.
     r = rm.smr(44, T, D.Discrete, NORMAL, rm.smr_angles(T, 323, 89, FACE))
     assert (r.f1, round(r.smr, 6), r.smr_class) == (0.85, 22.75, 4)
     r = rm.smr(45, P, D.Discrete, NORMAL, rm.smr_angles(P, 119, 20, FACE))
@@ -90,6 +96,8 @@ def test_f4_probability_info_and_range():
                   (C.DeficientBlasting, -8)]:
         assert run(50, P, D.Discrete, 40, 45, 20, e).f4 == f4
     r = run(50, P, D.Discrete, 40, 45, 20)
+    assert [rm.smr(x, P, D.Discrete, NORMAL, rm.SmrAngles(40, 90, 20)).failure_probability
+            for x in (90, 10)] == [0.0, 0.9]  # clases I y V (f1*f2*f3 = 0)
     assert r.failure_probability == 0.4 and r.info.method_id == "SMR-Romana1985"
     assert run(50, W, D.Discrete, 40, 45, 20).info.verification == rm.Verification.Secondary
     assert run(50, W, D.Continuous, 40, 45, 20).info.verification == rm.Verification.PrimaryLaterAuthors
@@ -103,6 +111,16 @@ def test_errors(args):
     rmr, mode, a, b, c = args
     with pytest.raises(ValueError):
         run(rmr, mode, D.Discrete, a, b, c)
+
+
+@given(st.floats(0, 180))
+def test_f1_continuous_bounds(a):
+    assert 0.10 <= run(50, P, D.Continuous, a, 45, 0).f1 <= 1.0  # asíntota 16/25 - 0.006*90 = 0.10
+
+
+@given(st.floats(0, 180))
+def test_f3_continuous_toppling_range(c):
+    assert -26 <= run(50, T, D.Continuous, 40, 45, c).f3 <= 1
 
 
 @given(st.floats(0, 180), st.floats(0, 180))
@@ -123,12 +141,12 @@ def test_f3_continuous_increases(x, y):
     assert run(50, P, D.Continuous, 40, 45, hi).f3 >= run(50, P, D.Continuous, 40, 45, lo).f3 - 1e-12
 
 
-# A <= 90: con A > 100 el F1 continuo baja a 0.121, por debajo del 0.15 discreto menos 0.01 (propiedad del brief, no cumplida)
-@given(st.floats(0, 90), st.floats(0, 90), st.floats(-90, 90))
+@given(st.floats(0, 180), st.floats(0, 90), st.floats(-90, 90))
 def test_continuous_within_discrete_extremes(a, b, c):
     k = run(50, P, D.Continuous, a, b, c)
-    assert 0.15 - 0.01 <= k.f1 <= 1.0 + 0.01 and 0.15 - 0.01 <= k.f2 <= 1.0 + 0.01
+    assert 0.10 <= k.f1 <= 1.0 + 0.01 and 0.15 - 0.01 <= k.f2 <= 1.0 + 0.01
     assert -60 - 1 <= k.f3 <= 0 + 1
+
 
 
 @given(st.floats(0, 100), st.floats(0, 100), st.sampled_from(list(C.__members__.values())))

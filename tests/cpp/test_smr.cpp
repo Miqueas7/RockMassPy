@@ -26,6 +26,9 @@ const std::vector<Row> kRows = {  // campo, SfM y láser de la Tabla 4
     {W, 114, 24, 45, 19, 24, -48, 0.70, 0.40, -60, 28, 4}, {T, 321, 87, 44, 8, 87, 159, 0.85, 1, -25, 22, 4},
     {P, 121, 16, 45, 12, 16, -56, 0.70, 0.15, -60, 38, 4}, {W, 139, 15, 42, 6, 15, -57, 0.85, 0.15, -60, 34, 4},
     {W, 113, 16, 45, 20, 16, -56, 0.70, 0.15, -60, 38, 4},
+    {W, 53, 4, 44, 80, 4, -68, 0.15, 0.15, -60, 42, 3},  {W, 51, 57, 44, 82, 57, -15, 0.15, 1, -60, 35, 4},
+    {T, 225, 75, 42, 88, 75, 147, 0.15, 1, -25, 38, 4},  {T, 34, 57, 47, 81, 57, 129, 0.15, 1, -25, 43, 3},
+    {W, 51, 6, 44, 82, 6, -66, 0.15, 0.15, -60, 42, 3},  {W, 46, 56, 44, 87, 56, -16, 0.15, 1, -60, 35, 4},
 };
 }  // namespace
 
@@ -45,7 +48,7 @@ TEST(Smr, Riquelme2016Table4) {
 }
 
 TEST(Smr, BoundaryConventionDifferenceWithRiquelme) {
-    // SfM J1 323/89 (A = 10): la tabla usa F1 = 0.70 (SMR 26); nuestra regla da 0.85. Campo J2 119/20 (B = 20):
+    // SfM J1 323/89 (A = 10; RMRb 44 de la Tabla 4): la tabla usa F1 = 0.70 (SMR 26); nuestra regla da 0.85. Campo J2 119/20 (B = 20):
     // la tabla usa F2 = 0.15 (SMR 38); nuestra regla da 0.40. No es errata: convención de SMRTool en el límite.
     auto r = smr(44, SmrMode::Toppling, kDis, kNormal, smr_angles(SmrMode::Toppling, 323, 89, kFace));
     EXPECT_EQ(r.f1, 0.85);
@@ -105,6 +108,8 @@ TEST(Smr, F4AndProbabilityAndInfo) {
                    SlopeExcavation::DeficientBlasting})
         EXPECT_EQ(smr(50, SmrMode::Planar, kDis, e, a).f4, expect[i++]);
     EXPECT_EQ(smr(50, SmrMode::Planar, kDis, kNormal, a).failure_probability, 0.4);
+    EXPECT_EQ(smr(90, SmrMode::Planar, kDis, kNormal, {40, 90, 20}).failure_probability, 0.0);  // clase I
+    EXPECT_EQ(smr(10, SmrMode::Planar, kDis, kNormal, {40, 90, 20}).failure_probability, 0.9);  // clase V
     EXPECT_EQ(smr(50, SmrMode::Planar, kDis, kNormal, a).info.method_id, "SMR-Romana1985");
     EXPECT_EQ(smr(50, SmrMode::Wedge, kDis, kNormal, a).info.verification, Verification::Secondary);
     EXPECT_EQ(smr(50, SmrMode::Wedge, kCon, kNormal, a).info.method_id, "SMR-Tomas2007");
