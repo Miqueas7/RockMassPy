@@ -242,7 +242,7 @@ def _verify(a) -> int:
         if f.status in ("does_not_comply", "attention"):
             print(f"{f.status.replace('_', ' ')}: {f.item.article} [{f.item.force}] {f.message}")
     if a.report:
-        title = a.title or {"es": "Verificación normativa", "en": "Normative verification"}[a.lang]
+        title = a.title or t("verif_title", a.lang)
         rep = rp.build_verification_report(v, title=title, lang=a.lang, author=a.author or "")
         out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
         print(f"report: {out}")
