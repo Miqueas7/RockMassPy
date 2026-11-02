@@ -23,6 +23,7 @@ namespace nb = nanobind;
 using namespace rockmasspy;
 
 NB_MODULE(_rockmasspy_core, m) {
+    nb::set_leak_warnings(false);  // el aviso de salida tapaba el `error:` de la CLI
     m.doc() = "RockMassPy core: rock mass classifications, Hoek-Brown strength and mining geomechanics.";
 
     nb::enum_<Verification>(m, "Verification", "How well the method's source was verified.")

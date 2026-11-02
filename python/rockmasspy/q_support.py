@@ -49,6 +49,7 @@ class QSupportResult:
     roof_pressure: rm.SupportFormulaResult | None
     warnings: tuple[str, ...]
     methods: tuple[rm.MethodInfo, ...]
+    notes: tuple[str, ...] = ()
 
 
 def _check(value, name):
@@ -176,8 +177,7 @@ def recommend_q_support(q: float, span_m: float, *, esr_category: str, esr: floa
         if f is not None:
             warns += f.warnings
             infos.append(f.info)
-    if esr_used != 1:
-        warns.append("chart bolt length is given for ESR = 1")
+    notes = ("chart bolt length is given for ESR = 1",) if esr_used != 1 else ()  # nota, no aviso (ruling 9)
 
     methods, seen = [], set()
     for i in infos:
@@ -185,4 +185,4 @@ def recommend_q_support(q: float, span_m: float, *, esr_category: str, esr: floa
             seen.add((i.method_id, i.source))
             methods.append(i)
     return QSupportResult(edition, cat, esr_used, roof, walls, wq, span_f, bolt_f, press,
-                          tuple(dict.fromkeys(warns)), tuple(methods))
+                          tuple(dict.fromkeys(warns)), tuple(methods), notes)

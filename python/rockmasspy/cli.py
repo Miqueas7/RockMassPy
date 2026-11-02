@@ -124,10 +124,10 @@ def _report(a) -> int:
 def _qsupport(a) -> int:
     from .q_support import recommend_q_support
 
-    r = recommend_q_support(a.q, a.span, esr_category=a.esr_category, esr=a.esr, edition=a.edition,
-                            wall_height_m=a.wall_height, high_stress=a.high_stress, jn=a.jn, jr=a.jr)
     if (a.jn is None) != (a.jr is None):
         raise ValueError("--jn and --jr go together")
+    r = recommend_q_support(a.q, a.span, esr_category=a.esr_category, esr=a.esr, edition=a.edition,
+                            wall_height_m=a.wall_height, high_stress=a.high_stress, jn=a.jn, jr=a.jr)
     ro = r.roof
     print(f"edition: {r.edition}")
     print(f"esr: {r.esr_used:g} (category {r.esr_category})")
@@ -139,16 +139,18 @@ def _qsupport(a) -> int:
         for k in ("label", "shotcrete_mm", "sfr_energy_j", "bolt_spacing_with_sfr_m",
                   "bolt_spacing_without_sfr_m", "bolt_length_chart_m"):
             print(f"{name} {k}: {getattr(x, k)}")
-        print(f"{name} chart: [{x.info.method_id}, {x.info.verification}]")
+        print(f"{name} chart: [{x.info.method_id}, {x.info.verification.name}]")
     if r.wall_q is not None:
         print(f"wall q: {r.wall_q:g}")
     fs = [("max unsupported span", r.max_unsupported_span), ("bolt length", r.bolt_length_formula)]
     if r.roof_pressure is not None:
         fs.append(("pressure", r.roof_pressure))
     for name, f in fs:
-        print(f"{name}: {f.value:.3g} {f.unit} [{f.info.method_id}, {f.info.verification}]")
+        print(f"{name}: {f.value:.3g} {f.unit}".rstrip() + f" [{f.info.method_id}, {f.info.verification.name}]")
     for w in r.warnings:
         print(f"warning: {w}")
+    for n in r.notes:
+        print(f"note: {n}")
     print("the library recommends, the engineer decides")
     if a.chart:
         from .viz import Style, plot_q_chart, save_figure

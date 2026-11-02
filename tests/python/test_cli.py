@@ -190,6 +190,21 @@ def test_qsupport_hoek_case(capsys):
     assert "the library recommends, the engineer decides" in out and "pressure" in out
 
 
+def test_qsupport_note_is_not_warning(capsys):
+    assert main(QS + ["--q", "4.5", "--span", "15"]) == 0
+    out = capsys.readouterr().out
+    assert "note: chart bolt length is given for ESR = 1" in out and "warning:" not in out
+    assert "[Q-Barton1980, Secondary]" in out
+
+
+def test_no_nanobind_noise():
+    r = subprocess.run([sys.executable, "-m", "rockmasspy.cli", "--help"], capture_output=True, text=True)
+    assert "leaked" not in r.stderr
+    r = subprocess.run([sys.executable, "-m", "rockmasspy.cli", "qsupport", "--q", "4.5", "--span", "15",
+                        "--esr-category", "A"], capture_output=True, text=True)
+    assert r.returncode == 1 and r.stderr.startswith("error:") and r.stderr.count(chr(10)) == 1
+
+
 def test_qsupport_exit_codes(tmp_path, capsys):
     assert main(["qsupport", "--esr-category", "E", "--q", "10", "--span", "5"]) == 0  # ESR 1: sin aviso
     assert "warning:" not in capsys.readouterr().out

@@ -109,8 +109,9 @@ def test_low_q_forces_esr_1():
     assert r.esr_used == 1.0
     assert any("ESR set to 1.0" in w for w in r.warnings)
     assert not any("chart bolt length" in w for w in r.warnings)
-    assert any("chart bolt length is given for ESR = 1" in w
-               for w in recommend_q_support(5, 5, esr_category="C").warnings)
+    assert not any("chart bolt length" in w for w in recommend_q_support(5, 5, esr_category="C").warnings)
+    assert "chart bolt length is given for ESR = 1" in recommend_q_support(5, 5, esr_category="C").notes
+    assert recommend_q_support(5, 5, esr_category="E").notes == ()
 
 
 def test_wall_height_rule_by_edition():
