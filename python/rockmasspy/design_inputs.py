@@ -1,4 +1,4 @@
-"""Declaraciones de diseño que las reglas de `verify` inspeccionan (solo los tipos; el lector va en la tarea 4).
+"""Declaraciones de diseño que las reglas de `verify` inspeccionan: los tipos y el lector de archivos (`load_design_inputs`).
 
 Cada tipo valida en `__post_init__` con ValueError que nombra el campo y nunca el valor. Los identificadores
 de fila (`id_refugio`, `id_via`, `id_analisis`) no salen en ningún mensaje de la verificación.
@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
+
+from .excel_io import _where
+from .intact_rock import _strip
 
 REFUGE_TYPES = ("roca", "movil")
 VIAS = ("galeria", "rampa", "otra")
@@ -124,3 +129,101 @@ class DesignInputs:
     qc: tuple = ()
     safety_factors: tuple = ()
     standup: tuple = ()
+
+
+# hoja -> (campo de DesignInputs, tipo, columnas, obligatorias, numéricas, id_column)
+DESIGN_SHEETS = {
+    "Estaciones_refugio": ("refuge_stations", RefugeStation,
+                           ("id_refugio", "tipo", "rmr", "distancia_frente_m", "area_m2", "aforo", "sostenido"),
+                           ("id_refugio", "tipo", "rmr", "distancia_frente_m", "area_m2", "aforo"),
+                           ("rmr", "distancia_frente_m", "area_m2", "aforo"), "id_refugio"),
+    "Refugios_peatonales": ("pedestrian_refuges", PedestrianRefugeSpacing,
+                            ("id_via", "via", "geometria", "espaciado_max_m"),
+                            ("id_via", "via", "espaciado_max_m"), ("espaciado_max_m",), "id_via"),
+    "Resumen_QC": ("qc", QcMonth, ("periodo", "sostenimiento", "instalados", "ensayados"),
+                   ("periodo", "sostenimiento", "instalados", "ensayados"), ("instalados", "ensayados"), None),
+    "Factores_seguridad": ("safety_factors", SafetyFactor, ("id_analisis", "plazo", "fs"),
+                           ("id_analisis", "plazo", "fs"), ("fs",), "id_analisis"),
+    "Autosoporte": ("standup", StandupTime, ("tipo_labor", "autosoporte_h"), ("tipo_labor", "autosoporte_h"),
+                    ("autosoporte_h",), None),
+}
+_SI_NO = {"si": True, "no": False}
+
+
+def _norm_text(s):
+    return _strip(s).casefold()
+
+
+def _read_sheet(src, sheet):
+    from .tramos import read_records  # import perezoso: tramos no depende de este módulo
+    campo, tipo, columns, required, numeric, id_column = DESIGN_SHEETS[sheet]
+    text = tuple(c for c in columns if c not in numeric)
+    # los números también van como `ident`: un valor inválido nunca se repite en el mensaje
+    recs = read_records(src, sheet, None, columns=columns, text=text, required=required, ident=numeric,
+                        id_column=id_column, dates=("periodo",) if sheet == "Resumen_QC" else ())
+    out, vistos = [], {}
+    for n, vals in recs:
+        for c, v in vals.items():
+            if v is None or c == id_column or c.startswith("id_") or c in numeric:
+                continue
+            vals[c] = _norm_text(v)
+        if "sostenido" in vals:
+            s = vals["sostenido"]
+            if s not in (None, "si", "no"):
+                raise ValueError(f"{_where(sheet, n, 'sostenido')}: expected si or no")
+            vals["sostenido"] = _SI_NO.get(s, False)
+        if sheet == "Resumen_QC":
+            vals["periodo"] = re.sub(r"^(\d{4}-\d{2})-\d{2}$", r"\1", vals["periodo"])
+        for c in ("aforo", "instalados", "ensayados"):
+            if vals.get(c) is not None and float(vals[c]).is_integer():
+                vals[c] = int(vals[c])  # 2.5 queda decimal y lo rechaza el tipo
+        try:
+            obj = tipo(**vals, fila=n)
+        except ValueError as e:
+            col, _, motivo = str(e).partition(": ")
+            raise ValueError(f"{_where(sheet, n, col)}: {motivo}") from None
+        if sheet == "Resumen_QC":
+            clave = (obj.periodo, obj.sostenimiento)
+            if clave in vistos:
+                raise ValueError(f"{_where(sheet, n, 'sostenimiento')}: (periodo, sostenimiento) repeated from row "
+                                 f"{vistos[clave]}")
+            vistos[clave] = n
+        out.append(obj)
+    return campo, tuple(out)
+
+
+def load_design_inputs(paths: Sequence[str | Path]) -> DesignInputs:
+    """Lee las declaraciones de diseño: un .xlsx con hojas de DESIGN_SHEETS o un .csv por hoja (el nombre es la hoja)."""
+    from .csv_io import _CsvSource
+    from .excel_io import _open
+    nombres = ", ".join(DESIGN_SHEETS)
+    canon = {k.casefold(): k for k in DESIGN_SHEETS}
+    campos = {}
+    for path in paths:
+        p = Path(path)
+        ext = p.suffix.lower()
+        if ext == ".csv":
+            hoja = canon.get(p.stem.casefold())
+            if hoja is None:
+                raise ValueError(f"{p.name}: the file name must be one of the design sheets: {nombres}")
+            fuentes = [(_CsvSource({hoja: p}), [hoja], None)]
+        elif ext == ".xlsx":
+            wb = _open(p)
+            hojas = [h for h in DESIGN_SHEETS if h in wb.sheetnames]
+            if not hojas:
+                wb.wb.close()
+                raise ValueError(f"{p.name}: no design sheet found; expected at least one of: {nombres}")
+            fuentes = [(wb, hojas, wb.wb)]
+        else:
+            raise ValueError(f"{p.name}: unsupported file type '{p.suffix}'; save it as .xlsx or .csv")
+        for src, hojas, cierre in fuentes:
+            try:
+                for h in hojas:
+                    campo, filas = _read_sheet(src, h)
+                    if campo in campos:
+                        raise ValueError(f"{p.name}: sheet '{h}' given more than once")
+                    campos[campo] = filas
+            finally:
+                if cierre is not None:
+                    cierre.close()
+    return DesignInputs(**campos)
