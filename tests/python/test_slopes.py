@@ -1,0 +1,198 @@
+import pytest
+
+import rockmasspy as rm
+
+FAM_CAB = "id_tramo,familia,buzamiento_grados,dir_buzamiento_grados,codigo_mina,labor_codigo,este_m,observaciones"
+TAL_CAB = ("id_talud,id_tramo,buz_cara_grados,dir_buz_cara_grados,friccion_grados,limite_lateral_grados,rmr_basico,"
+           "excavacion,rqd_pct,jn,jr_a,ja_a,o_a,jwice,jr_b,ja_b,o_b,srf_a,srf_b,srf_c,"
+           "codigo_mina,labor_codigo,este_m,observaciones")
+EXTRA_F = ",ZZSENT,ZZSENT,ZZSENT,ZZSENT"
+EXTRA_T = ",ZZSENT,ZZSENT,ZZSENT,ZZSENT"
+RIQ = ["R1,J1,87,325", "R1,J2,20,119", "R1,J3,83,234", "R1,J4,62,62"]
+
+
+def fam(tmp_path, filas, cab=FAM_CAB):
+    p = tmp_path / "Familias.csv"
+    p.write_text("\n".join([cab, *[f + EXTRA_F for f in filas]]) + "\n", encoding="utf-8")
+    return p
+
+
+def tal(tmp_path, filas, cab=TAL_CAB):
+    p = tmp_path / "Taludes.csv"
+    p.write_text("\n".join([cab, *[f + EXTRA_T for f in filas]]) + "\n", encoding="utf-8")
+    return p
+
+
+def T(id_="T1", tramo="R1", buz="72", dir_="133", fr="35", lim="", rmr="42", exc="voladura_normal",
+      q=",,,,,", b=",,", srf=",,"):
+    return f"{id_},{tramo},{buz},{dir_},{fr},{lim},{rmr},{exc},{q},{b},{srf}"
+
+
+Q = "80,9,1.5,1,0.75,0.7"  # rqd, jn, jr_a, ja_a, o_a, jwice
+
+
+def correr(tmp_path, tf, jf=RIQ, **kw):
+    return rm.assess_slopes(rm.load_slope_faces(tal(tmp_path, tf)), rm.load_families(fam(tmp_path, jf)), **kw)
+
+
+def test_riquelme_por_la_hoja(tmp_path):
+    (r,) = correr(tmp_path, [T()])
+    labels = [c.label for c in r.smr_cases]
+    assert labels == ["J1", "J2", "J3", "J4", "J1×J2", "J1×J4", "J2×J3", "J2×J4", "J3×J4"]
+    face = rm.PlaneOrientation(133, 72)
+    # J1 y J3 vuelcan; J2 y J4 son planares (dirección dentro de 90 de la cara); las cuñas, por su intersección
+    assert [c.mode for c in r.smr_cases[:4]] == ["toppling", "planar", "toppling", "planar"]
+    esperado = min(c.discrete.smr for c in r.smr_cases)
+    assert r.smr_discrete.discrete.smr == esperado
+    assert r.smr_discrete is next(c for c in r.smr_cases if c.discrete.smr == esperado)
+    assert r.smr_continuous.continuous.smr == min(c.continuous.smr for c in r.smr_cases)
+    j1 = r.smr_cases[0]
+    a = rm.smr_angles(rm.SmrMode.Toppling, r.families[0].mean_plane.dip_direction_deg,
+                      r.families[0].mean_plane.dip_deg, face)
+    exc = rm.SlopeExcavation.NormalBlastingOrMechanical
+    assert j1.discrete.smr == rm.smr(42, rm.SmrMode.Toppling, rm.SmrFunctions.Discrete, exc, a).smr
+
+
+def test_ida_y_vuelta_csv_y_excel(tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    tf = [T(), T("T2", fr="", rmr="", exc="", q=Q, srf=",,2.5")]
+    a = correr(tmp_path, [T()])
+    wb = openpyxl.Workbook()
+    for nombre, cab, filas in (("Familias", FAM_CAB, [f + EXTRA_F for f in RIQ]),
+                               ("Taludes", TAL_CAB, [T() + EXTRA_T])):
+        ws = wb.create_sheet(nombre)
+        for linea in [cab, *filas]:
+            ws.append([None if c == "" else (float(c) if c.replace(".", "").isdigit() else c)
+                       for c in linea.split(",")])
+    del wb["Sheet"]
+    wb.save(tmp_path / "x.xlsx")
+    b = rm.assess_slopes(rm.load_slope_faces(tmp_path / "x.xlsx"), rm.load_families(tmp_path / "x.xlsx"))
+    assert repr(a) == repr(b)  # los objetos del núcleo no definen igualdad
+    assert tf  # (fila con Q-slope y sin SMR: abajo)
+
+
+def test_cinematica_igual_a_mano_y_limite_lateral(tmp_path):
+    planes = [rm.PlaneOrientation(d, b) for b, d in ((87, 325), (20, 119), (83, 234), (62, 62))]
+    face = rm.PlaneOrientation(133, 72)
+    for celda, llamada, usado in (("", 25.0, 25.0), ("20", 25.0, 20.0)):
+        (r,) = correr(tmp_path, [T(lim=celda)], lateral_limit_deg=llamada)
+        k = rm.kinematic_analysis(planes, [0, 1, 2, 3], rm.KinematicInput(face, 35, usado))
+        for c in ("planar", "planar_no_limits", "wedge_primary", "wedge_secondary", "flexural_toppling",
+                  "direct_toppling", "direct_toppling_oblique", "n_intersections", "n_parallel_pairs"):
+            assert getattr(r.kinematics, c) == getattr(k, c)
+        assert r.kinematics.input.lateral_limit_deg == usado
+
+
+def test_tramo_sin_familias(tmp_path):
+    (r,) = correr(tmp_path, [T(tramo="R9")])
+    assert r.kinematics is None and r.smr_cases == () and r.smr_discrete is None
+    assert any("no Familias rows" in w for w in r.warnings) and r.needs_attention
+
+
+def test_sin_friccion_avisa(tmp_path):
+    (r,) = correr(tmp_path, [T(fr="")])
+    assert r.kinematics is None and "kinematics not run: friccion_grados is empty" in r.warnings
+    assert r.smr_cases  # el SMR no necesita fricción
+
+
+def test_una_familia_y_familia_de_una_fila(tmp_path):
+    (r,) = correr(tmp_path, [T()], jf=["R1,J1,60,133"])
+    assert r.kinematics.n_intersections == 0 and len(r.smr_cases) == 1
+    f = r.families[0].fisher
+    assert f.n == 1 and f.kappa is None and f.alpha95_deg is None
+
+
+def test_familias_paralelas_son_una_nota(tmp_path):
+    (r,) = correr(tmp_path, [T()], jf=["R1,J1,60,133", "R1,J2,60,133"])
+    assert r.kinematics.n_parallel_pairs == 1 and r.kinematics.n_intersections == 0
+    assert r.notes and not [c for c in r.smr_cases if "×" in c.label]
+
+
+def test_filas_sin_familia(tmp_path):
+    (r,) = correr(tmp_path, [T()], jf=["R1,,60,133", "R1,,45,250"])
+    assert [c.label for c in r.smr_cases][:2] == ["row 2", "row 3"] and r.families == ()
+
+
+def test_modo_en_90_gobierna_el_menor(tmp_path):
+    (r,) = correr(tmp_path, [T(dir_="0")], jf=["R1,J1,50,90"])
+    c = r.smr_cases[0]
+    exc = rm.SlopeExcavation.NormalBlastingOrMechanical
+    smrs = [rm.smr(42, m, rm.SmrFunctions.Discrete, exc,
+                   rm.smr_angles(m, r.families[0].mean_plane.dip_direction_deg,
+                                 r.families[0].mean_plane.dip_deg, rm.PlaneOrientation(0, 72))).smr
+            for m in (rm.SmrMode.Planar, rm.SmrMode.Toppling)]
+    assert c.discrete.smr == min(smrs)
+
+
+def test_q_slope_y_cara_igual_a_beta(tmp_path):
+    q = Q
+    (r,) = correr(tmp_path, [T(q=q, srf=",,2.5")])
+    assert r.q_slope is not None and r.q_slope.beta_deg == pytest.approx(73.943, abs=1e-3)
+    assert r.face_steeper_than_beta is False
+    beta = r.q_slope.beta_deg
+    (r,) = correr(tmp_path, [T(buz=repr(beta), q=q, srf=",,2.5")])
+    assert r.face_steeper_than_beta is True and r.needs_attention
+    (r,) = correr(tmp_path, [T(q=Q, b="2,1,0.9", srf="2.5,,")])
+    assert r.q_slope.jr_ja_0 == pytest.approx(2.025)
+
+
+def test_conteos_y_resultados(tmp_path):
+    rs = correr(tmp_path, [T(), T("T2", fr="")])
+    c = rm.slope_counts(rs)
+    assert c["slopes"] == 2 and c["warnings"] == 1 and sum(c[f"smr_d_{k}"] for k in range(1, 6)) == 2
+    p = rm.save_slope_results(rs, tmp_path / "out.csv")
+    txt = p.read_text(encoding="utf-8-sig")
+    assert txt.splitlines()[0].count(";") + txt.splitlines()[0].count(",") >= 24 and "ZZSENT" not in txt
+    assert len(txt.splitlines()) == 3
+
+
+def test_methods(tmp_path):
+    (r,) = correr(tmp_path, [T(q=Q, srf=",,2.5")])
+    ids = [m.method_id for m in r.methods]
+    assert len(set((m.method_id, m.source) for m in r.methods)) == len(r.methods)
+    for pref in ("SMR-Romana1985", "Q-slope-BarBarton2017"):
+        assert pref in ids
+    assert len(ids) >= 7
+
+
+@pytest.mark.parametrize("fila,col", [
+    (T(buz="95"), "buz_cara_grados"), (T(buz="0"), "buz_cara_grados"), (T(dir_="-5"), "dir_buz_cara_grados"),
+    (T(dir_="400"), "dir_buz_cara_grados"), (T(dir_="nan"), "dir_buz_cara_grados"),
+    (T(fr="0"), "friccion_grados"), (T(fr="90"), "friccion_grados"), (T(lim="0"), "limite_lateral_grados"),
+    (T(lim="90"), "limite_lateral_grados"), (T(exc=""), "excavacion"), (T(exc="explosivo"), "excavacion"),
+    (T(q=Q, b="2,1,", srf=",,2.5"), "o_b"), (T(q=Q), "srf_a"), (T(q="80,9,1.5,1,0.75,", srf=",,2.5"), "jwice"),
+])
+def test_hoja_mal_escrita(tmp_path, fila, col):
+    with pytest.raises(ValueError) as e:
+        rm.load_slope_faces(tal(tmp_path, [fila]))
+    m = str(e.value)
+    assert col in m and "Taludes" in m and "row 2" in m
+    for v in ("95", "-5", "400", "nan", "explosivo"):
+        assert v not in m.replace("row 2", "")
+
+
+def test_id_talud_repetido_y_joints_mal(tmp_path):
+    with pytest.raises(ValueError, match="duplicate id_talud"):
+        rm.load_slope_faces(tal(tmp_path, [T(), T()]))
+    for fila, col in (("R1,J1,95,10", "buzamiento_grados"), ("R1,J1,50,-5", "dir_buzamiento_grados"),
+                      ("R1,J1,50,400", "dir_buzamiento_grados"), ("R1,J1,nan,10", "buzamiento_grados")):
+        with pytest.raises(ValueError) as e:
+            rm.load_families(fam(tmp_path, [fila]))
+        assert col in str(e.value) and "row 2" in str(e.value) and "Familias" in str(e.value)
+        assert "95" not in str(e.value) and "nan" not in str(e.value)
+
+
+def test_privacidad(tmp_path):
+    tf = [T("T-ZZSENT", "R-ZZSENT", fr="")]
+    jf = ["R-ZZSENT,J1,60,133", "R-ZZSENT,J2,60,133"]
+    faces = rm.load_slope_faces(tal(tmp_path, tf))
+    joints = rm.load_families(fam(tmp_path, jf))
+    rs = rm.assess_slopes(faces, joints)
+    for o in (*faces, *joints, *rs):
+        assert "ZZSENT" not in repr(o)
+    assert not any("ZZSENT" in s for r in rs for s in (*r.warnings, *r.notes))
+    txt = rm.save_slope_results(rs, tmp_path / "o.csv").read_text(encoding="utf-8-sig")
+    assert "T-ZZSENT" in txt and "R-ZZSENT" in txt and txt.count("ZZSENT") == 2
+    with pytest.raises(ValueError) as e:
+        rm.load_slope_faces(tal(tmp_path, [T("T-ZZSENT", "R-ZZSENT", buz="95")]))
+    assert "ZZSENT" not in str(e.value)
