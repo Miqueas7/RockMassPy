@@ -21,6 +21,7 @@
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 #include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/q_slope.hpp"
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
 
@@ -460,4 +461,23 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("smr_class", &smr_class, nb::arg("smr"), "1 (I) to 5 (V).");
     m.def("smr", &smr, nb::arg("rmr_basic"), nb::arg("mode"), nb::arg("functions"), nb::arg("excavation"),
           nb::arg("angles"));
+
+    // Q-slope de Bar y Barton
+    nb::class_<QSlopeInput>(m, "QSlopeInput", "Q-slope parameters as numbers; set B and two of the SRFs are optional.")
+        .def(nb::init<>())
+        .def_rw("rqd_pct", &QSlopeInput::rqd_pct).def_rw("jn", &QSlopeInput::jn)
+        .def_rw("jr_a", &QSlopeInput::jr_a).def_rw("ja_a", &QSlopeInput::ja_a)
+        .def_rw("o_factor_a", &QSlopeInput::o_factor_a)
+        .def_rw("jr_b", &QSlopeInput::jr_b).def_rw("ja_b", &QSlopeInput::ja_b)
+        .def_rw("o_factor_b", &QSlopeInput::o_factor_b).def_rw("jwice", &QSlopeInput::jwice)
+        .def_rw("srf_a", &QSlopeInput::srf_a).def_rw("srf_b", &QSlopeInput::srf_b)
+        .def_rw("srf_c", &QSlopeInput::srf_c);
+    nb::class_<QSlopeResult>(m, "QSlopeResult", "Q-slope, the unsupported slope angle beta and its inputs.")
+        .def_ro("q_slope", &QSlopeResult::q_slope).def_ro("beta_deg", &QSlopeResult::beta_deg)
+        .def_ro("rqd_used", &QSlopeResult::rqd_used).def_ro("jr_ja_0", &QSlopeResult::jr_ja_0)
+        .def_ro("srf_slope", &QSlopeResult::srf_slope).def_ro("beta_capped", &QSlopeResult::beta_capped)
+        .def_ro("info", &QSlopeResult::info).def_ro("warnings", &QSlopeResult::warnings)
+        .def_ro("notes", &QSlopeResult::notes);
+    m.def("q_slope_beta", &q_slope_beta, nb::arg("q_slope"), "beta = 20*log10(Q-slope) + 65, uncapped.");
+    m.def("q_slope", &q_slope, nb::arg("input"));
 }
