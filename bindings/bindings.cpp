@@ -20,6 +20,7 @@
 #include "rockmasspy/rmr76.hpp"
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
+#include "rockmasspy/kinematics.hpp"
 #include "rockmasspy/stereonet.hpp"
 
 namespace nb = nanobind;
@@ -401,4 +402,37 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("warnings", &FisherStats::warnings);
     m.def("fisher_stats", &fisher_stats, nb::arg("poles"));
     m.def("pole_density", &pole_density, nb::arg("poles"), nb::arg("at"), nb::arg("area_fraction") = 0.01);
+
+    // Cinemática de Markland
+    nb::class_<KinematicInput>(m, "KinematicInput", "Slope face, friction angle and lateral limit, degrees.")
+        .def(nb::init<PlaneOrientation, double, double>(), nb::arg("face"), nb::arg("friction_deg"),
+             nb::arg("lateral_limit_deg"))
+        .def_ro("face", &KinematicInput::face).def_ro("friction_deg", &KinematicInput::friction_deg)
+        .def_ro("lateral_limit_deg", &KinematicInput::lateral_limit_deg);
+    nb::class_<PlaneChecks>(m, "PlaneChecks", "Kinematic checks of one plane.")
+        .def_ro("planar", &PlaneChecks::planar).def_ro("planar_no_limits", &PlaneChecks::planar_no_limits)
+        .def_ro("flexural_toppling", &PlaneChecks::flexural_toppling)
+        .def_ro("direct_toppling_base_zone", &PlaneChecks::direct_toppling_base_zone);
+    nb::class_<IntersectionChecks>(m, "IntersectionChecks", "Kinematic checks of one intersection line.")
+        .def_ro("line", &IntersectionChecks::line).def_ro("wedge_primary", &IntersectionChecks::wedge_primary)
+        .def_ro("wedge_secondary", &IntersectionChecks::wedge_secondary)
+        .def_ro("direct_toppling", &IntersectionChecks::direct_toppling)
+        .def_ro("direct_toppling_oblique", &IntersectionChecks::direct_toppling_oblique);
+    nb::class_<KinematicResult>(m, "KinematicResult", "Kinematic analysis of a set of planes (feasibility, not probability).")
+        .def_ro("planes", &KinematicResult::planes).def_ro("intersections", &KinematicResult::intersections)
+        .def_ro("pair_a", &KinematicResult::pair_a).def_ro("pair_b", &KinematicResult::pair_b)
+        .def_ro("n_planes", &KinematicResult::n_planes).def_ro("n_intersections", &KinematicResult::n_intersections)
+        .def_ro("n_parallel_pairs", &KinematicResult::n_parallel_pairs).def_ro("planar", &KinematicResult::planar)
+        .def_ro("planar_no_limits", &KinematicResult::planar_no_limits)
+        .def_ro("flexural_toppling", &KinematicResult::flexural_toppling)
+        .def_ro("wedge_primary", &KinematicResult::wedge_primary)
+        .def_ro("wedge_secondary", &KinematicResult::wedge_secondary)
+        .def_ro("direct_toppling", &KinematicResult::direct_toppling)
+        .def_ro("direct_toppling_oblique", &KinematicResult::direct_toppling_oblique)
+        .def_ro("base_zone_1", &KinematicResult::base_zone_1).def_ro("base_zone_2", &KinematicResult::base_zone_2)
+        .def_ro("base_zone_3", &KinematicResult::base_zone_3).def_ro("input", &KinematicResult::input)
+        .def_ro("methods", &KinematicResult::methods).def_ro("notes", &KinematicResult::notes);
+    m.def("check_plane", &check_plane, nb::arg("plane"), nb::arg("input"));
+    m.def("check_intersection", &check_intersection, nb::arg("line"), nb::arg("input"));
+    m.def("kinematic_analysis", &kinematic_analysis, nb::arg("planes"), nb::arg("groups"), nb::arg("input"));
 }
