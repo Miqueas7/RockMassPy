@@ -1,0 +1,271 @@
+"""Informe de RockMassPy: modelo independiente del formato y memoria de cálculo.
+
+No se importa desde `rockmasspy/__init__.py`: se usa con `import rockmasspy.report`.
+El informe nunca muestra labor_codigo, zona_nivel, codigo_mina, evaluador_codigo, observaciones ni coordenadas;
+solo el id_tramo (código propio del usuario).
+"""
+
+from __future__ import annotations
+
+import datetime
+import io
+from collections import Counter
+from dataclasses import dataclass
+from typing import Callable
+
+from .. import __version__
+from .. import _rockmasspy_core as rm
+from ..batch import _COLUMNS, _fila, summarize
+from ..cell_table import CellTable
+from ..gsi_charts import GSI_CHARTS
+from ..labor_table import LaborTable
+from ..range_table import RangeTable
+from .texts import DISCLAIMER, t
+
+
+@dataclass(frozen=True)
+class Paragraph:
+    text: str
+
+
+@dataclass(frozen=True)
+class Table:
+    caption: str
+    header: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
+class Figure:
+    caption: str
+    png: bytes | None
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class MethodRef:
+    method_id: str
+    verification: str
+    source: str
+
+
+@dataclass(frozen=True)
+class Section:
+    number: str
+    title: str
+    blocks: tuple = ()  # Paragraph | Table | Figure | Section
+    to_complete: bool = False
+
+
+@dataclass(frozen=True)
+class Report:
+    title: str
+    subtitle: str
+    lang: str
+    sections: tuple[Section, ...]
+    methods: tuple[MethodRef, ...]
+    disclaimer: str
+    version: str
+    date: str
+
+
+# --- Métodos: la verificación y la fuente salen del `info` del núcleo (se llama cada función una vez) ---
+
+def _rmr89():
+    i = rm.Rmr89Input()
+    i.ucs_mpa, i.rqd_pct, i.spacing_m, i.joint_condition_rating, i.water = 120, 80, 0.5, 20, rm.Water.Dry
+    return rm.rmr89(i).info
+
+
+def _rmr76():
+    i = rm.Rmr76Input()
+    i.ucs_mpa, i.rqd_pct, i.spacing_m = 120, 80, 0.5
+    i.condition, i.water = rm.JointCondition76.SlightlyRoughSlightlyWeathered, rm.Water76.CompletelyDry
+    return rm.rmr76(i).info
+
+
+def _rmr14():
+    i = rm.Rmr14Input()
+    i.strength_rating, i.joints_per_m_rating, i.continuity_m, i.id2_pct = 10, 30, 2.0, 90
+    i.roughness, i.infilling, i.alteration = rm.Roughness14.Rough, rm.Infilling14.HardUnder5mm, rm.Alteration14.Moderately
+    i.water = rm.Water.Damp
+    return rm.rmr14(i).info
+
+
+def _q(edition):
+    return lambda: rm.q_value(rm.QInput(60, 9, 1.5, 1, 1, 2.5), edition).info
+
+
+_CORE_INFO: dict[str, Callable] = {
+    "RMR76": _rmr76, "RMR89": _rmr89, "RMR14": _rmr14,
+    "Q-NGI-2015": _q(rm.QEdition.NGI2015), "Q-NGI-2025": _q(rm.QEdition.NGI2025),
+    "GSI-2013": lambda: rm.gsi_from_jcond89_rqd(15, 60).info,
+}
+_Q_EDITIONS = ("Q-NGI-2015", "Q-NGI-2025")
+
+
+def _method_ref(edition: str, lang: str) -> MethodRef:
+    if edition in _CORE_INFO:
+        i = _CORE_INFO[edition]()
+        return MethodRef(i.method_id, i.verification.name, i.source)
+    chart = GSI_CHARTS.get(edition)  # cartillas GSI: traen su propia verificación y fuente
+    if chart is not None:
+        return MethodRef(chart.chart_id, chart.verification.capitalize(), chart.source)
+    return MethodRef(edition, "-", t("unknown_method", lang))
+
+
+def _methods(results, tables, lang) -> tuple[MethodRef, ...]:
+    eds: dict[str, None] = {}  # orden de aparición, sin repetidos
+    refs: list[MethodRef] = []
+    for lt in tables:
+        eds[lt.table.chart.chart_id if isinstance(lt.table, CellTable) else lt.table.base_edition] = None
+        for c in lt.correlations:
+            refs.append(MethodRef(f"site:{c.name}", "UserDefined", c.source or t("user_defined", lang)))
+    for r in results:  # Q calculado desde sus parámetros: la edición que usó el lote
+        tramo = r.tramo
+        if r.method == "Q" and tramo.q_valor is None and r.input_value is not None:
+            eds[tramo.q_edicion if tramo.q_edicion in _Q_EDITIONS
+                else r.base_edition if r.base_edition in _Q_EDITIONS else "Q-NGI-2025"] = None
+    out: dict[str, MethodRef] = {}
+    for m in [_method_ref(e, lang) for e in eds] + refs:
+        out.setdefault(m.method_id, m)
+    return tuple(out.values())
+
+
+# --- Figuras ---
+
+def _fig(caption, draw, lang, enabled) -> Figure:
+    """PNG en memoria; sin matplotlib (o con figures=False) queda png=None y la nota."""
+    if enabled:
+        try:
+            fig = draw()
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=fig.dpi)
+            return Figure(caption, buf.getvalue())
+        except ImportError:
+            pass
+    return Figure(caption, None, t("no_figures", lang))
+
+
+def _str(v) -> str:
+    return "" if v is None else f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def _label(lt: LaborTable, lang: str) -> str:
+    if not lt.span_m:
+        return lt.labor_type
+    return f"{lt.labor_type} ({t('span', lang)} {lt.span_m[0]:g}-{lt.span_m[1]:g} m)"
+
+
+def _tables_section(tables, lang, figures) -> Section:
+    from ..viz import plot_cartilla
+    from ..viz.cartilla import _describe  # descripción de elementos en palabras; no importa matplotlib
+    from ..viz.style import Style
+
+    head = (t("h_range", lang), t("h_class", lang), t("h_support", lang))
+    subs = []
+    for k, lt in enumerate(tables, 1):
+        tab = lt.table
+        if isinstance(tab, CellTable):
+            rows = tuple((c.cell, c.label or c.cell, c.support or "") for c in tab.cells)
+            edition = tab.base_edition
+        else:
+            rows = tuple((f"{c.lo:g}-{c.hi:g}", c.label, c.support or "")
+                         for c in sorted(tab.classes, key=lambda c: c.lo))
+            edition = tab.base_edition
+        cat = tuple((s.code, _describe(s, lang)) for s in lt.catalog.ordered())
+        blocks = (
+            Paragraph(edition),
+            Table(t("cap_classes", lang), head, rows),
+            Table(t("cap_catalog", lang), (t("h_support", lang), t("h_description", lang)), cat),
+            _fig(f"{t('fig_cartilla', lang)}: {_label(lt, lang)}",
+                 lambda lt=lt: plot_cartilla(lt, style=Style(lang=lang, size="cartilla")), lang, figures),
+        )
+        subs.append(Section(f"3.{k}", _label(lt, lang), blocks))
+    return Section("3", t("s3", lang), tuple(subs))
+
+
+def _summary_section(results, tables, lang, figures) -> Section:
+    from ..viz import plot_class_histogram
+    from ..viz.style import Style
+
+    s = summarize(results)
+    blocks = [
+        Table(t("cap_totals", lang), ("", t("h_count", lang)),
+              ((t("total", lang), str(s.total)), (t("classified", lang), str(s.classified)),
+               (t("unclassified", lang), str(s.unclassified)))),
+        Table(t("cap_by_class", lang), (t("h_labor", lang), t("h_class", lang), t("h_count", lang)),
+              tuple((a, b, str(n)) for (a, b), n in sorted(s.by_labor_class.items()))),
+        Table(t("cap_by_support", lang), (t("h_support", lang), t("h_count", lang)),
+              tuple((k, str(n)) for k, n in sorted(s.by_support.items()))),
+    ]
+    for lt in tables:
+        if isinstance(lt.table, RangeTable):  # las tablas de celdas solo llevan los conteos
+            vals = [r.input_value for r in results
+                    if r.labor_type == lt.labor_type and r.span_m == lt.span_m and r.input_value is not None]
+            if vals:
+                blocks.append(_fig(
+                    f"{t('fig_hist', lang)}: {_label(lt, lang)}",
+                    lambda lt=lt, vals=vals: plot_class_histogram(vals, lt.table, catalog=lt.catalog,
+                                                                  style=Style(lang=lang)),
+                    lang, figures))
+    return Section("5", t("s5", lang), tuple(blocks))
+
+
+def _maps_section(results, tables, lang, figures) -> Section:
+    from ..viz import plot_labor_profile, plot_plan_map
+    from ..viz.style import Style
+
+    st = Style(lang=lang)
+    cat_of = {}
+    for lt in tables:
+        cat_of.setdefault(lt.labor_type, lt.catalog)
+    blocks = []
+    chained = [r for r in results if r.tramo.progresiva_inicio_m is not None and r.tramo.progresiva_fin_m is not None]
+    for labor in sorted({r.tramo.tipo_labor for r in chained}):
+        blocks.append(_fig(f"{t('fig_profile', lang)}: {labor}",
+                           lambda labor=labor: plot_labor_profile(chained, labor_type=labor,
+                                                                  catalog=cat_of.get(labor), style=st),
+                           lang, figures))
+    if any(r.tramo.este_m is not None and r.tramo.norte_m is not None for r in results):
+        cat = next(iter(cat_of.values())) if len(cat_of) == 1 else None  # varios catálogos: color por orden
+        blocks.append(_fig(t("fig_plan", lang), lambda: plot_plan_map(results, catalog=cat, style=st), lang, figures))
+    if not blocks:
+        blocks.append(Paragraph(t("no_maps", lang)))
+    return Section("6", t("s6", lang), tuple(blocks))
+
+
+def build_memoria(results, tables, *, title: str, lang: str = "es", author: str = "", date: str = "",
+                  figures: bool = True) -> Report:
+    """Memoria de cálculo con las 8 secciones; independiente del formato de salida."""
+    if lang not in DISCLAIMER:
+        raise ValueError(f"lang must be one of 'es', 'en', got {lang!r}")
+    results, tables = list(results), list(tables)
+    methods = _methods(results, tables, lang)
+    s2 = Section("2", t("s2", lang), (Table(
+        t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
+        tuple((m.method_id, m.verification, m.source) for m in methods)),))
+    s4 = Section("4", t("s4", lang), (Table(
+        t("cap_results", lang), _COLUMNS, tuple(tuple(_str(v) for v in _fila(r)) for r in results)),))
+    # avisos únicos con la cantidad de tramos que los tienen; nunca qué id_tramo
+    counts = Counter(w for r in results for w in set(r.warnings))
+    if counts:
+        s7_blocks = (Table(t("cap_warnings", lang), (t("h_warning", lang), t("h_count", lang)),
+                           tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),)
+    else:
+        s7_blocks = (Paragraph(t("no_warnings", lang)),)
+    sections = (
+        Section("1", t("s1", lang), (Paragraph(t("s1_text", lang)),)),
+        s2,
+        _tables_section(tables, lang, figures),
+        s4,
+        _summary_section(results, tables, lang, figures),
+        _maps_section(results, tables, lang, figures),
+        Section("7", t("s7", lang), s7_blocks),
+        Section("8", t("s8", lang), (Paragraph(t("s8_text", lang)),)),
+    )
+    return Report(title, author, lang, sections, methods, DISCLAIMER[lang], __version__,
+                  date or datetime.date.today().isoformat())
+
+
+from .html import write_html  # noqa: E402,F401
