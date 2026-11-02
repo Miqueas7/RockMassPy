@@ -89,7 +89,10 @@ def _classify(t: Tramo, lt: LaborTable) -> TramoResult:
             if t.rmr_edicion and t.rmr_edicion != tab.base_edition:
                 warns.append(f"RMR edition {t.rmr_edicion} differs from table edition {tab.base_edition}")
         elif method == "Q":
-            value = _q_input(t, tab, warns)
+            try:
+                value = _q_input(t, tab, warns)
+            except ValueError as e:  # parámetros Q fuera de dominio: solo nombres y números
+                return TramoResult(**{**base, "method": method}, warnings=tuple(warns + [str(e)]))
         else:
             value = t.gsi_valor
     base.update(method=method, input_value=value, input_cell=cell)

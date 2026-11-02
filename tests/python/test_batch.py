@@ -58,6 +58,13 @@ def test_q_computed_and_q1974():
     assert r.label == "poor" and "Q-1974 not supported; value used as given" in r.warnings
 
 
+def test_bad_q_parameters_do_not_stop_batch():
+    bad = tr("A", labor="crucero", rqd_pct=150, jn=4, jr=3, ja=1, jw=1, srf=15)
+    rs = rm.classify_tramos([bad, tr("B", labor="crucero", q_valor=5)], TABLES)
+    assert rs[0].label is None and "rqd_pct" in " ".join(rs[0].warnings)
+    assert rs[1].label == "fair"
+
+
 def test_rmr_edition_and_installed_support():
     r = one(tr(rmr_valor=70, rmr_edicion="RMR76", sost_instalado="II"))
     assert r.warnings == ("RMR edition RMR76 differs from table edition RMR89",
@@ -103,7 +110,7 @@ COLS = ["id_tramo", "tipo_labor", "luz_m", "tabla_luz_min_m", "tabla_luz_max_m",
 
 
 def results():
-    return rm.classify_tramos([tr("A", rmr_valor=70, sost_instalado="II"), tr("B", labor="tunel")], TABLES)
+    return rm.classify_tramos([tr("A", luz=3.7, rmr_valor=70.0, sost_instalado="II"), tr("B", labor="tunel")], TABLES)
 
 
 def test_save_xlsx(tmp_path):
@@ -111,9 +118,9 @@ def test_save_xlsx(tmp_path):
     p = rm.save_results(results(), tmp_path / "r.xlsx")
     rows = list(openpyxl.load_workbook(p).active.values)
     assert list(rows[0]) == COLS
-    assert rows[1][:2] == ("A", "galeria") and rows[1][9:12] == ("good", "I", 1) and rows[1][12] == "II"
-    assert "differs from recommended" in rows[1][13]
-    assert rows[2][9] is None and "no table" in rows[2][13]
+    assert rows[1][:13] == ("A", "galeria", 3.7, None, None, "RMR", "RMR89", 70, None, "good", "I", 1, "II")
+    assert rows[1][13] == "installed support II differs from recommended I"
+    assert rows[2][:2] == ("B", "tunel") and rows[2][9] is None and rows[2][13].startswith("no table")
 
 
 def test_save_csv(tmp_path):
@@ -121,7 +128,10 @@ def test_save_csv(tmp_path):
     head, a, b = p.read_text(encoding="utf-8-sig").splitlines()
     sep = ";" if ";" in head else ","
     assert head.split(sep) == COLS
-    assert a.split(sep)[0] == "A" and b.split(sep)[9] == ""
+    dec = "," if sep == ";" else "."
+    assert a.split(sep) == ["A", "galeria", "3" + dec + "7", "", "", "RMR", "RMR89", "70" + dec + "0", "", "good", "I",
+                            "1", "II", "installed support II differs from recommended I"]
+    assert b.split(sep)[9] == ""
 
 
 def test_save_bad_extension(tmp_path):
