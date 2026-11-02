@@ -21,6 +21,7 @@
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 #include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
 
 namespace nb = nanobind;
@@ -435,4 +436,28 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("check_plane", &check_plane, nb::arg("plane"), nb::arg("input"));
     m.def("check_intersection", &check_intersection, nb::arg("line"), nb::arg("input"));
     m.def("kinematic_analysis", &kinematic_analysis, nb::arg("planes"), nb::arg("groups"), nb::arg("input"));
+
+    // SMR de Romana y Tomás
+    nb::enum_<SmrMode>(m, "SmrMode", "SMR failure mode.")
+        .value("Planar", SmrMode::Planar).value("Toppling", SmrMode::Toppling).value("Wedge", SmrMode::Wedge);
+    nb::enum_<SmrFunctions>(m, "SmrFunctions", "Discrete (Romana) or continuous (Tomas) adjustment functions.")
+        .value("Discrete", SmrFunctions::Discrete).value("Continuous", SmrFunctions::Continuous);
+    nb::enum_<SlopeExcavation>(m, "SlopeExcavation", "Slope excavation method (SMR F4).")
+        .value("NaturalSlope", SlopeExcavation::NaturalSlope).value("Presplitting", SlopeExcavation::Presplitting)
+        .value("SmoothBlasting", SlopeExcavation::SmoothBlasting)
+        .value("NormalBlastingOrMechanical", SlopeExcavation::NormalBlastingOrMechanical)
+        .value("DeficientBlasting", SlopeExcavation::DeficientBlasting);
+    nb::class_<SmrAngles>(m, "SmrAngles", "SMR angles A, B and C in degrees.")
+        .def(nb::init<double, double, double>(), nb::arg("a_deg"), nb::arg("b_deg"), nb::arg("c_deg"))
+        .def_ro("a_deg", &SmrAngles::a_deg).def_ro("b_deg", &SmrAngles::b_deg).def_ro("c_deg", &SmrAngles::c_deg);
+    nb::class_<SmrResult>(m, "SmrResult", "SMR with its factors, class and failure probability (Table 3).")
+        .def_ro("smr", &SmrResult::smr).def_ro("f1", &SmrResult::f1).def_ro("f2", &SmrResult::f2)
+        .def_ro("f3", &SmrResult::f3).def_ro("f4", &SmrResult::f4).def_ro("smr_class", &SmrResult::smr_class)
+        .def_ro("failure_probability", &SmrResult::failure_probability).def_ro("mode", &SmrResult::mode)
+        .def_ro("functions", &SmrResult::functions).def_ro("angles", &SmrResult::angles)
+        .def_ro("info", &SmrResult::info).def_ro("warnings", &SmrResult::warnings);
+    m.def("smr_angles", &smr_angles, nb::arg("mode"), nb::arg("direction_deg"), nb::arg("dip_deg"), nb::arg("face"));
+    m.def("smr_class", &smr_class, nb::arg("smr"), "1 (I) to 5 (V).");
+    m.def("smr", &smr, nb::arg("rmr_basic"), nb::arg("mode"), nb::arg("functions"), nb::arg("excavation"),
+          nb::arg("angles"));
 }
