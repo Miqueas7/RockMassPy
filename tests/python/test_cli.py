@@ -175,3 +175,128 @@ def test_output_is_directory_exit_one(tmp_path, tabla, capsys):
     assert main(["classify", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(out)]) == 1
     err = capsys.readouterr().err
     assert err.startswith("error: ") and err.count("\n") == 1
+
+
+# ---- Fase 2A: --esr y qsupport ----
+
+QS = ["qsupport", "--esr-category", "C"]
+
+
+def test_qsupport_hoek_case(capsys):
+    # Categoría 3 y no 4: la lectura publicada de Hoek (4) viene de la carta de 1993 (xfail estricto en test_q_support).
+    assert main(QS + ["--q", "4.5", "--span", "15", "--jn", "4", "--jr", "3"]) == 2  # la presión lleva aviso de unidad
+    out = capsys.readouterr().out
+    assert "category: 3" in out and "Q-NGI-2025-chart" in out and "Secondary" in out
+    assert "the library recommends, the engineer decides" in out and "pressure" in out
+
+
+def test_qsupport_note_is_not_warning(capsys):
+    assert main(QS + ["--q", "4.5", "--span", "15"]) == 0
+    out = capsys.readouterr().out
+    assert "note: chart bolt length is given for ESR = 1" in out and "warning:" not in out
+    assert "[Q-Barton1980, Secondary]" in out
+
+
+def test_no_nanobind_noise():
+    r = subprocess.run([sys.executable, "-m", "rockmasspy.cli", "--help"], capture_output=True, text=True)
+    assert "leaked" not in r.stderr
+    r = subprocess.run([sys.executable, "-m", "rockmasspy.cli", "qsupport", "--q", "4.5", "--span", "15",
+                        "--esr-category", "A"], capture_output=True, text=True)
+    assert r.returncode == 1 and r.stderr.startswith("error:") and r.stderr.count(chr(10)) == 1
+
+
+def test_qsupport_exit_codes(tmp_path, capsys):
+    assert main(["qsupport", "--esr-category", "E", "--q", "10", "--span", "5"]) == 0  # ESR 1: sin aviso
+    assert "warning:" not in capsys.readouterr().out
+    assert main(QS + ["--q", "10", "--span", "5", "--esr", "1.5"]) == 2  # ESR fuera de la categoría
+    assert "warning:" in capsys.readouterr().out
+    assert main(QS + ["--q", "0", "--span", "5"]) == 1
+    assert capsys.readouterr().err.startswith("error: ")
+
+
+def test_qsupport_esr_category_needs_esr(capsys):
+    assert main(["qsupport", "--q", "4", "--span", "5", "--esr-category", "A"]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and err.count("\n") == 1 and "Traceback" not in err
+
+
+def test_qsupport_chart_and_walls(tmp_path, capsys):
+    pytest.importorskip("matplotlib")
+    png = tmp_path / "q.png"
+    main(QS + ["--q", "4.5", "--span", "6", "--wall-height", "8", "--high-stress", "--chart", str(png),
+               "--lang", "en", "--edition", "Q-NGI-2015"])
+    out = capsys.readouterr().out
+    assert png.stat().st_size > 0 and "walls" in out and "Q-NGI-2015" in out
+
+
+def test_help_lists_qsupport(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    assert "qsupport" in capsys.readouterr().out
+
+
+def test_classify_esr_adds_reference(tmp_path, tabla, capsys):
+    p = tramos_xlsx(tmp_path, [MALO], name="t2.xlsx")
+    # el tramo sintético no trae Q: la referencia queda sin lectura, pero las columnas y la línea van
+    out = tmp_path / "res.csv"
+    code = main(["classify", str(p), "--tables", str(tabla), "-o", str(out), "--esr", "galeria=C", "*=A:4"])
+    cap = sin_fuga(capsys)
+    assert code == 2  # el 2 viene de 'unclassified', no de la carta (R14)
+    assert "q chart (Q-NGI-2025): 0 with reference, 2 without" in cap.out
+    assert "q_carta_" in out.read_text(encoding="utf-8-sig").splitlines()[0]
+    assert cap.out.index("q chart") < cap.out.index("results:")
+
+
+def test_classify_esr_crosstab_lines(tmp_path, tabla, capsys):
+    cab = CAB + ["q_valor"]
+    p = tramos_xlsx(tmp_path, cab=cab)
+    wb = openpyxl.load_workbook(p)
+    ws = wb.active
+    ws["I2"] = 4.5
+    wb.save(p)
+    out = tmp_path / "res.csv"
+    code = main(["classify", str(p), "--tables", str(tabla), "-o", str(out), "--esr", "galeria=C"])
+    cap = sin_fuga(capsys)
+    assert code == 0
+    assert "q chart (Q-NGI-2025): 1 with reference, 0 without" in cap.out and " / Q cat " in cap.out
+
+
+def test_report_esr_no_leak(tmp_path, tabla, capsys):
+    out = tmp_path / "i.html"
+    assert main(["report", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(out), "--no-figures",
+                 "--esr", "C", "--q-edition", "Q-NGI-2015"]) == 0
+    cap = sin_fuga(capsys)
+    assert "q chart (Q-NGI-2015)" in cap.out
+
+
+@pytest.mark.parametrize("bad", ["Z", "A:x", "=C", "galeria="])
+def test_esr_bad_spec_exit_one(tmp_path, tabla, capsys, bad):
+    args = ["classify", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(tmp_path / "r.csv")]
+    assert main(args + ["--esr", bad]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and err.count("\n") == 1
+
+
+def test_classify_esr_sin_numero_dice_a_dos_puntos(tmp_path, tabla, capsys):  # M2
+    args = ["classify", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(tmp_path / "r.csv")]
+    assert main(args + ["--esr", "A"]) == 1
+    assert capsys.readouterr().err == "error: ESR category A covers 3-5; use A:<esr>, e.g. A:4\n"
+    assert main(args + ["--esr", "galeria=b"]) == 1
+    assert capsys.readouterr().err == "error: ESR category B covers 2-2.5; use B:<esr>, e.g. B:2.5\n"
+
+
+def test_qsupport_paredes_categoria_7_sale_con_2(capsys):  # M4
+    assert main(["qsupport", "--q", "0.12", "--span", "6", "--esr-category", "E", "--edition", "Q-NGI-2015",
+                 "--wall-height", "25"]) == 2
+    assert "walls category: 7" in capsys.readouterr().out
+
+
+def test_qsupport_estrella_en_la_lectura_ajustada(tmp_path, monkeypatch, capsys):  # M5
+    pytest.importorskip("matplotlib")
+    import rockmasspy.viz as viz
+
+    seen = {}
+    real = viz.plot_q_chart
+    monkeypatch.setattr(viz, "plot_q_chart", lambda *a, **k: seen.update(k) or real(*a, **k))
+    main(["qsupport", "--q", "2000", "--span", "6", "--esr-category", "E", "--chart", str(tmp_path / "q.png")])
+    assert seen["points"][0][0] == 1000

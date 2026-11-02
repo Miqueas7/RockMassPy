@@ -65,3 +65,17 @@ def test_readme_tramos_example(archivo, previo, titulo, tmp_path, monkeypatch):
             exec(compile(bloque, archivo, "exec"), espacio)
     assert salida.getvalue().splitlines()[-len(esperado):] == esperado
     assert (tmp_path / SALIDA[archivo]).is_file()
+
+
+QSECCION = [("README.md", "## Q support chart (reference)"), ("README.es.md", "## Carta de sostenimiento Q (referencia)")]
+
+
+@pytest.mark.parametrize("archivo,titulo", QSECCION)
+def test_readme_q_chart_example(archivo, titulo):
+    codigo = bloques(archivo, titulo)
+    assert len(codigo) == 1, f"{archivo}: expected one python block under {titulo!r}"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[0].splitlines() if ln.startswith("print(") and "#" in ln]
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        exec(compile(codigo[0], archivo, "exec"), {})
+    assert salida.getvalue().splitlines() == esperado

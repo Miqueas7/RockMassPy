@@ -120,6 +120,36 @@ rockmass report tramos.xlsx --tables galeria.json -o report.docx --template anex
 
 See `examples/04-informe/`.
 
+## Q support chart (reference)
+
+Digitized from the NGI Q-system support chart (2025, Fig. 4-1; 2015 edition, Fig. 7), with the ESR table, the
+equivalent dimension De = span / ESR and three classical formulas marked **Secondary**. It is a reference next to your own
+tables, never a replacement. ESR is a safety decision: `esr_category` is required, and categories with a range (A, B) also need `esr`.
+
+```python
+from rockmasspy.q_support import recommend_q_support
+
+r = recommend_q_support(4.5, 15.0, esr_category="C")      # public Hoek chamber: Q 4.5, span 15 m
+print(r.roof.category)                                    # 3
+print(f"{r.roof.de_m:.3f}")                               # 9.375
+print(r.roof.no_empirical_data)                           # False
+w = recommend_q_support(0.4, 4.5, esr_category="C", edition="Q-NGI-2015", wall_height_m=4.5)
+print(w.wall_q)                                           # 1.0
+```
+
+Hoek publishes category 4 for this chamber, read on an older (1993) chart; the digitized 2025 and 2015 charts give 3.
+The chart bolt length (`q_carta_longitud_*` columns) is given for ESR = 1; with another ESR, compare it with the Barton et al. (1980) formula and your own judgement.
+Points in the dashed zones of the chart (no empirical data) follow their lines and carry `no_empirical_data` and a warning.
+In batch, `rm.add_q_chart_reference(results, {"*": "C"})` adds the roof reading using only the tramo's own Q, and the
+report gets section 5.1; `viz.plot_q_chart` draws the chart with the tramos (never labelled). From the command line:
+
+```bash
+rockmass qsupport --q 4.5 --span 15 --esr-category C --chart point.png      # exit 2 on a warning or category 7 or higher
+rockmass classify tramos.xlsx --tables galeria.json --esr "*=C" -o results.csv
+```
+
+See `examples/05-sostenimiento-q/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
@@ -136,13 +166,16 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | RMR89 | Bieniawski 1989 | Secondary |
 | RMR14 | Celada et al. 2014 | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Q system, NGI editions (2025 is the default) | Primary |
+| Q-NGI-2025-chart / Q-NGI-2015-chart | Q support chart regions, digitized by RockMassPy (max. measured error 0.017 / 0.008 decade, including junctions) | Primary |
+| Q-Barton1980 | Maximum unsupported span and bolt length formulas (Hoek, after Barton et al. 1980) | Secondary |
+| Q-GrimstadBarton1993 | Roof support pressure (Hoek, after Grimstad & Barton 1993); the unit is still to be confirmed | Secondary |
 | GSI-2013 | Quantified GSI (Hoek, Carter & Diederichs) | Primary |
 | HB-2002 / HB-2018 | Hoek-Brown criterion parameters (`hb_params`) and equivalent Mohr-Coulomb (`hb_mohr_coulomb`); 2018 is the default | Primary |
 | HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Rock mass modulus (Hoek & Diederichs) | Primary |
 | Correlations (enum name, e.g. `RmrFromQ_Bieniawski1976`) | Global correlations, never chained | Primary or Secondary, see `rm.correlate(...).info` |
 
-Out of phase 1A: TBM Fe, Q 1974, GSI equation 3, mi/MR tables, support pressure and maximum span.
+Out of phase 1A: TBM Fe, Q 1974, GSI equation 3, mi/MR tables.
 
 ## Python notes
 

@@ -107,6 +107,38 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_form": {"es": "Forma", "en": "Form"},
     "h_valid_min": {"es": "Válido desde", "en": "Valid from"},
     "h_valid_max": {"es": "Válido hasta", "en": "Valid to"},
+    "s5_qchart": {"es": "Carta de sostenimiento Q (referencia)", "en": "Q support chart (reference)"},
+    "qchart_text": {
+        "es": "Esta sección es solo una referencia: lee la carta de sostenimiento del sistema Q del NGI{edition} con el Q "
+              "y la luz de cada tramo y el ESR de su labor, en el techo. Las tablas propias de la labor mandan; "
+              "la carta no cambia ninguna clase ni sostenimiento. La carta está digitalizada por RockMassPy, así que "
+              "su lectura cerca de una frontera puede diferir de la lámina impresa.",
+        "en": "This section is a reference only: it reads the NGI Q-system support chart{edition} with the Q and the "
+              "span of each tramo and the ESR of its excavation, for the roof. The own tables of the excavation govern; "
+              "the chart does not change any class or support. The chart is digitized by RockMassPy, so a reading near "
+              "a boundary may differ from the printed chart.",
+    },
+    "qchart_esr_note": {
+        "es": "La longitud de perno de la carta (columnas q_carta_longitud_*) está dada para ESR = 1. Con otro ESR, "
+              "compárala con la fórmula de Barton et al. (1980) y con tu criterio; es uno de los valores por confirmar.",
+        "en": "The chart bolt length (q_carta_longitud_* columns) is given for ESR = 1. With another ESR, compare it "
+              "with the Barton et al. (1980) formula and your own judgement; it is one of the values still to be confirmed.",
+    },
+    "qchart_none": {"es": "Ningún tramo obtuvo referencia de la carta Q; revisa los avisos de la carta en la sección 7.",
+                    "en": "No section got a Q chart reference; see the Q chart warnings in section 7."},
+    "cap_esr": {"es": "ESR por labor", "en": "ESR by excavation"},
+    "cap_crosstab": {"es": "Tabla cruzada: sostenimiento propio y categoría Q",
+                     "en": "Cross-table: own support and Q category"},
+    "fig_qchart": {"es": "Carta de sostenimiento Q con los tramos", "en": "Q support chart with the tramos"},
+    "cap_qlegend": {"es": "Categorías de la carta Q", "en": "Q chart categories"},
+    "cap_qwarnings": {"es": "Avisos de la carta Q", "en": "Q chart warnings"},
+    "h_esr_cat": {"es": "Categoría ESR", "en": "ESR category"},
+    "h_esr": {"es": "ESR usado", "en": "ESR used"},
+    "h_qcat": {"es": "Categoría", "en": "Category"},
+    "h_label": {"es": "Rótulo", "en": "Label"},
+    "h_shotcrete": {"es": "Shotcrete (mm)", "en": "Shotcrete (mm)"},
+    "h_energy": {"es": "Energía Sfr (J)", "en": "Sfr energy (J)"},
+    "h_rrs": {"es": "RRS", "en": "RRS"},
     "unknown_method": {"es": "sin información de verificación", "en": "no verification information"},
 }
 

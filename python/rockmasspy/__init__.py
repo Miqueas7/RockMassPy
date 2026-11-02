@@ -43,11 +43,15 @@ from .cell_table import CellClass, CellTable  # noqa: E402,F401
 from .vallejo_lines import (  # noqa: E402,F401
     Q_PRIME_LINES, RMR_PRIME_LINES, VALLEJO_LINES_SOURCE, ChartLine, q_prime_range, rmr_prime_range,
 )
+from .chart_regions import Region, locate  # noqa: E402,F401
+from .q_chart_data import ESR_TABLES, Q_CHART_FRAME, Q_CHARTS, QChartCategory, QChartData  # noqa: E402,F401
+from .q_support import QChartReading, QSupportResult, read_q_chart, recommend_q_support  # noqa: E402,F401
 from .rating_table import CategoricalParam, NumericParam, RatingBin, RatingResult, RatingTable  # noqa: E402,F401
 from .labor_table import Classification, LaborTable, select_table  # noqa: E402,F401
 from .table_io import SCHEMA, SCHEMA_VERSION, from_dict, load_json, load_yaml, save_json, save_yaml, to_dict  # noqa: E402,F401
 from .excel_io import load_excel, load_support_catalog_excel, save_excel  # noqa: E402,F401
 from .csv_io import load_csv_dir, load_support_catalog_csv, save_csv_dir  # noqa: E402,F401
 from .tramos import TRAMO_COLUMNS, Tramo, load_tramos  # noqa: E402,F401
-from .batch import BatchSummary, TramoResult, classify_tramos, save_results, summarize  # noqa: E402,F401
+from .batch import (BatchSummary, EsrSpec, TramoResult, add_q_chart_reference, classify_tramos,  # noqa: E402,F401
+                    q_chart_crosstab, save_results, summarize)  # noqa: E402,F401
 from .table_files import load_table  # noqa: E402,F401
