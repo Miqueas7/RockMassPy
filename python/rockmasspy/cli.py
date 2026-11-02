@@ -250,6 +250,10 @@ def _verify(a) -> int:
     return v.exit_code
 
 
+def _slopes(n: int) -> str:
+    return f"{n} slope" + ("" if n == 1 else "s")
+
+
 def _slope(a) -> int:
     from collections import Counter
 
@@ -279,9 +283,9 @@ def _slope(a) -> int:
     for m, name in (("d", "discrete"), ("c", "continuous")):
         print(f"SMR {name}: " + " | ".join(f"{r} {c[f'smr_{m}_{k}']}" for k, r in enumerate(("I", "II", "III", "IV", "V"), 1)))
     print(f"Q-slope: {c['q_slope_evaluated']} faces, {c['face_steeper_than_beta']} steeper than beta")
-    print(f"warnings: {c['warnings']} in {sum(1 for r in rs if r.warnings)} slopes")
+    print(f"warnings: {c['warnings']} in {_slopes(sum(1 for r in rs if r.warnings))}")
     for w, n in sorted(Counter(w for r in rs for w in set(r.warnings)).items(), key=lambda kv: (-kv[1], kv[0])):
-        print(f"warning: {w} ({n} slopes)")
+        print(f"warning: {w} ({_slopes(n)})")
     print(f"notes: {c['notes']}")
     if a.output:
         print(f"results: {save_slope_results(rs, a.output)}")

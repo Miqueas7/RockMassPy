@@ -1,3 +1,6 @@
+from dataclasses import replace
+from types import SimpleNamespace
+
 import pytest
 
 import rockmasspy.report as rp
@@ -72,3 +75,28 @@ def test_notes_separate_and_empty_caption(tmp_path):
     assert len(paras) == 2 + len(r.notes) and r.notes[0] in paras
     smr = next(b for b in rep.sections[2].blocks if isinstance(b, rp.Paragraph) and "SMR" in b.text)
     assert ".:" not in smr.text and smr.text.endswith("Ninguno.")
+
+
+_KIN = dict(planar=0, wedge_primary=0, wedge_secondary=0, flexural_toppling=0, direct_toppling=0,
+            direct_toppling_oblique=0)
+_CLS = lambda n: SimpleNamespace(discrete=SimpleNamespace(smr_class=n), continuous=SimpleNamespace(smr_class=n))
+
+
+@pytest.mark.parametrize("case", [*_KIN, "smr_d", "smr_c", "qslope", "warning", "note", "quiet"])
+def test_attention_matches_needs_attention(tmp_path, case):
+    (r,) = correr(tmp_path, [T(fr="", rmr="", exc="")])
+    kw = {}
+    if case in _KIN:
+        kw["kinematics"] = SimpleNamespace(**{**_KIN, case: 1})
+    elif case == "smr_d":
+        kw["smr_discrete"] = _CLS(4)
+    elif case == "smr_c":
+        kw["smr_continuous"] = _CLS(5)
+    elif case == "qslope":
+        kw["face_steeper_than_beta"] = True
+    elif case == "warning":
+        kw["warnings"] = ("w",)
+    elif case == "note":
+        kw["notes"] = ("n",)
+    r = replace(r, **{"warnings": (), "notes": (), **kw})
+    assert bool(rp._attention(r)) == r.needs_attention == (case not in ("note", "quiet"))

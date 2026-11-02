@@ -590,6 +590,12 @@ def test_slope_oblique_toppling_visible(tmp_path, capsys):
     text = html.read_text(encoding="utf-8")
     assert "oblicuo" in text and "0/1" in text and "1/1 (100 %)" in text
     assert "volteo directo oblicuo (1)" in text and text.count("<img") == 2
+    from rockmasspy import report as rp
+    from rockmasspy.slopes import assess_slopes, load_families, load_slope_faces
+
+    (r,) = assess_slopes(load_slope_faces(files[0]), load_families(files[1]))
+    fig = rp.slope_figure(r, "direct_toppling", "en")
+    assert any("oblique 1 of 1" in tx.get_text() for tx in fig.texts)  # el conteo crítico incluye el oblicuo
 
 
 def test_slope_warning_lines_unambiguous(tmp_path, capsys):
@@ -597,4 +603,4 @@ def test_slope_warning_lines_unambiguous(tmp_path, capsys):
 
     files = slope_files(tmp_path, [T(tramo="R-ZZSENT", fr="")])
     _, out, _ = run_slope(tmp_path, capsys, files=files)
-    assert "warnings: 1 in 1 slopes" in out and "(1 slopes)" in out
+    assert "warnings: 1 in 1 slope" in out.splitlines() and "(1 slope)" in out
