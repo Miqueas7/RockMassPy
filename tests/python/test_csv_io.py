@@ -1,6 +1,9 @@
+import sys
+
 import pytest
 
 import rockmasspy as rm
+from rockmasspy import csv_io
 from test_labor_table import CAT, rtab
 from test_table_io import cells_lt, range_lt
 
@@ -32,24 +35,49 @@ def test_roundtrip_with_rating(sep, tmp_path):
     assert rm.load_csv_dir(tmp_path / "c") == t
 
 
-def test_written_format_default_comma_and_point(tmp_path):
-    # por defecto, lo que abre bien Excel en es-PE: ',' como separador de listas y punto decimal
-    out = rm.save_csv_dir(range_lt(), tmp_path / "c")
-    lines = (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")
-    assert lines[0].startswith(b"\xef\xbb\xbf") and lines[0].count(b",") == 10
-    assert lines[3].startswith(b"III,3,,split set,2.1,1.5,")  # decimales con punto
+FORMATOS = [(",", "."), (";", ",")]
 
 
-def test_written_format_semicolon_decimal_comma(tmp_path):
-    out = rm.save_csv_dir(range_lt(), tmp_path / "c", separator=";")
-    lines = (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")
-    assert lines[0].startswith(b"\xef\xbb\xbf") and lines[0].count(b";") == 10
-    assert lines[3].startswith(b"III;3;;split set;2,1;1,5;")  # decimales con coma
+@pytest.mark.parametrize("fmt", FORMATOS)
+@pytest.mark.parametrize("make", [range_lt, cells_lt])
+def test_default_follows_system_format_and_roundtrips(make, fmt, tmp_path, monkeypatch):
+    monkeypatch.setattr(csv_io, "_system_csv_format", lambda: fmt)
+    t = make()
+    out = rm.save_csv_dir(t, tmp_path / "c")
+    first = (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")[3]
+    assert first.startswith(f"III{fmt[0]}3{fmt[0]}{fmt[0]}split set{fmt[0]}2{fmt[1]}1{fmt[0]}1{fmt[1]}5{fmt[0]}".encode())
+    assert rm.load_csv_dir(out) == t
 
 
-def test_bad_separator(tmp_path):
-    with pytest.raises(ValueError, match="separator must be ',' or ';'"):
-        rm.save_csv_dir(range_lt(), tmp_path / "c", separator="\t")
+def test_explicit_args_override_system_format(tmp_path, monkeypatch):
+    monkeypatch.setattr(csv_io, "_system_csv_format", lambda: (";", ","))
+    out = rm.save_csv_dir(range_lt(), tmp_path / "c", separator=",", decimal=".")
+    assert (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")[3].startswith(b"III,3,,split set,2.1,1.5,")
+    # solo la marca decimal: el separador se ajusta para no chocar con ella
+    out = rm.save_csv_dir(range_lt(), tmp_path / "d", decimal=",")
+    assert out and (out / "Tipos_sostenimiento.csv").read_bytes().split(b"\n")[3].startswith(b"III;3;;split set;2,1;1,5;")
+    assert rm.load_csv_dir(out) == range_lt()
+
+
+@pytest.mark.parametrize("kw", [{"separator": "	"}, {"separator": ""}, {"decimal": ";"}, {"decimal": "x"},
+                                {"separator": ",", "decimal": ","}, {"separator": ";", "decimal": ";"}])
+def test_invalid_separator_decimal(kw, tmp_path):
+    with pytest.raises(ValueError, match="separator|decimal"):
+        rm.save_csv_dir(range_lt(), tmp_path / "c", **kw)
+
+
+def test_system_format_failure_falls_back(monkeypatch):
+    monkeypatch.setattr(csv_io.locale, "setlocale", lambda *a: (_ for _ in ()).throw(OSError("x")))
+    monkeypatch.setattr(csv_io.sys, "platform", "linux")
+    assert csv_io._system_csv_format() == (",", ".")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="registro de Windows")
+def test_real_system_format_is_accepted(tmp_path):
+    sep, dec = csv_io._system_csv_format()
+    assert sep in (",", ";") and dec in (".", ",") and sep != dec
+    t = range_lt()
+    assert rm.load_csv_dir(rm.save_csv_dir(t, tmp_path / "c")) == t
 
 
 def test_semicolon_decimal_comma_bom(tmp_path):

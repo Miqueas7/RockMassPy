@@ -56,9 +56,9 @@ See `examples/02-tabla-por-labor/`.
 `RatingTable` (your own ratings per parameter, RMR89 by default) is available in Python and is saved with the labor table
 (`LaborTable.rating`) in JSON, YAML, Excel and CSV (`save_csv_dir` / `load_csv_dir`).
 
-CSV is a folder with one file per sheet (UTF-8 with BOM). `save_csv_dir(t, path)` writes `,` with a decimal point, which
-Excel set to Spanish (Peru) or English opens as columns; `separator=";"` writes a decimal comma for Excel set to Spanish
-(Spain). `load_csv_dir` reads both, matches file names case-insensitively (`TABLA.CSV` is `Tabla`) and also takes the
+CSV is a folder with one file per sheet (UTF-8 with BOM). `save_csv_dir(t, path)` writes the number format of the
+computer (on Windows the one Excel uses, elsewhere the locale), so colleagues in Spain or the US open it in their own
+Excel; pass `separator=` (`","` or `";"`) and/or `decimal=` (`"."` or `","`) to force one. `load_csv_dir` reads both, matches file names case-insensitively (`TABLA.CSV` is `Tabla`) and also takes the
 date as `d/m/yyyy` (day first).
 
 ## Charts

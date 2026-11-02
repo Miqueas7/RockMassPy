@@ -8,14 +8,17 @@ archivo. Separador ';' o ',' (se detecta en la primera línea; si no se puede, '
 ("3,5" = 3.5), como exporta Excel en español de España; solo decimales planos: "1.234,5" (miles con punto) se
 rechaza. Con ',' solo vale el punto decimal. Los nombres de archivo se reconocen sin importar mayúsculas
 (TABLA.CSV = Tabla) y la fecha acepta también d/m/aaaa (día primero, como en el Perú).
-Al escribir sale UTF-8 con BOM y, por defecto, ',' con punto decimal: Excel en es-PE usa punto decimal y ',' como
-separador de listas. Con separator=';' sale coma decimal (Excel en es-ES).
+Al escribir sale UTF-8 con BOM y en el formato numérico del computador (en Windows, el del registro que usa Excel;
+en otros sistemas, la configuración regional): así un colega en España o EE. UU. lo abre bien en su Excel. Con
+separator/decimal se fuerza uno. Solo se escribe ',' o ';' (el tabulador no: la lectura no lo detecta).
 """
 
 import csv
 import datetime
 import io
+import locale
 import re
+import sys
 from pathlib import Path
 
 from .excel_io import _catalog, _hojas, _load
@@ -102,23 +105,58 @@ def load_support_catalog_csv(path) -> SupportCatalog:
     return _catalog(_CsvSource({p.stem: p}), p.stem)[1]
 
 
-def _celda(v, decimal_comma):
+def _system_csv_format() -> tuple[str, str]:
+    """(separador de listas, marca decimal) del computador, como los usa Excel; sin tocar estado global."""
+    try:
+        if sys.platform == "win32":
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\International") as k:
+                dec, sep = winreg.QueryValueEx(k, "sDecimal")[0], winreg.QueryValueEx(k, "sList")[0]
+        else:
+            antes = locale.setlocale(locale.LC_NUMERIC)
+            try:
+                locale.setlocale(locale.LC_NUMERIC, "")
+                dec = locale.localeconv()["decimal_point"]
+            finally:
+                locale.setlocale(locale.LC_NUMERIC, antes)
+            sep = ";" if dec == "," else ","
+        # shortcut: el tabulador no se escribe (la lectura solo detecta ',' y ';'); si Windows lo usa, se cae a ',' o ';'
+        if dec not in (".", ","):
+            return ",", "."
+        if sep not in (",", ";") or sep == dec:
+            sep = ";" if dec == "," else ","
+        return sep, dec
+    except Exception:  # sin registro, sin locale o valores raros: el formato de siempre
+        return ",", "."
+
+
+def _celda(v, decimal):
     if v is None:
         return ""
     if isinstance(v, float):
-        s = repr(v)  # repr es exacto: la ida y vuelta no pierde decimales
-        return s.replace(".", ",") if decimal_comma else s
+        return repr(v).replace(".", decimal)  # repr es exacto: la ida y vuelta no pierde decimales
     return str(v)
 
 
-def save_csv_dir(t: LaborTable, path, *, separator: str = ",") -> Path:
-    """Una carpeta con un CSV por hoja, UTF-8 con BOM.
+def save_csv_dir(t: LaborTable, path, *, separator: str | None = None, decimal: str | None = None) -> Path:
+    """Una carpeta con un CSV por hoja, UTF-8 con BOM, en el formato numérico de este computador.
 
-    separator=',' (por defecto): punto decimal, lo que abre bien Excel en es-PE o en inglés.
-    separator=';': coma decimal, para Excel en es-ES. load_csv_dir lee los dos.
+    Sin argumentos, separador y marca decimal salen de la configuración regional (la de Excel en Windows).
+    separator (',' o ';') y decimal ('.' o ',') fuerzan uno; deben ser distintos. load_csv_dir lee las dos formas.
     """
-    if separator not in (",", ";"):
+    if separator is not None and separator not in (",", ";"):
         raise ValueError(f"separator must be ',' or ';', got {separator!r}")
+    if decimal is not None and decimal not in (".", ","):
+        raise ValueError(f"decimal must be '.' or ',', got {decimal!r}")
+    if separator is None or decimal is None:
+        sep0, dec0 = _system_csv_format()
+        if separator is None:  # si solo se fuerza la marca decimal, el separador se ajusta para no chocar
+            separator = sep0 if decimal is None or sep0 != decimal else (";" if decimal == "," else ",")
+        if decimal is None:
+            decimal = dec0 if dec0 != separator else ("." if separator == "," else ",")
+    if separator == decimal:
+        raise ValueError(f"separator and decimal must differ, got {separator!r} for both")
     out = Path(path)
     out.mkdir(parents=True, exist_ok=True)
     for name, cols, rows in _hojas(to_dict(t)):
@@ -126,5 +164,5 @@ def save_csv_dir(t: LaborTable, path, *, separator: str = ",") -> Path:
             w = csv.writer(f, delimiter=separator)
             w.writerow(cols)
             for r in rows:
-                w.writerow([_celda(v, separator == ";") for v in r])
+                w.writerow([_celda(v, decimal) for v in r])
     return out

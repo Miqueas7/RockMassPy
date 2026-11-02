@@ -57,9 +57,9 @@ Ver `examples/02-tabla-por-labor/`.
 `RatingTable` (puntajes propios por parámetro, RMR89 por defecto) ya está disponible en Python y se guarda con la tabla por labor
 (`LaborTable.rating`) en JSON, YAML, Excel y CSV (`save_csv_dir` / `load_csv_dir`).
 
-El CSV es una carpeta con un archivo por hoja (UTF-8 con BOM). `save_csv_dir(t, ruta)` escribe `,` con punto decimal,
-que Excel configurado en español (Perú) o en inglés abre en columnas; `separator=";"` escribe coma decimal para Excel
-en español (España). `load_csv_dir` lee los dos, reconoce los nombres de archivo sin importar mayúsculas (`TABLA.CSV`
+El CSV es una carpeta con un archivo por hoja (UTF-8 con BOM). `save_csv_dir(t, ruta)` escribe en el formato numérico del
+computador (en Windows el que usa Excel, en otros sistemas la configuración regional), así un colega en España o EE. UU.
+lo abre bien en su Excel; pasa `separator=` (`","` o `";"`) y/o `decimal=` (`"."` o `","`) para forzar uno. `load_csv_dir` lee los dos, reconoce los nombres de archivo sin importar mayúsculas (`TABLA.CSV`
 es `Tabla`) y acepta también la fecha como `d/m/aaaa` (día primero).
 
 ## Gráficos
