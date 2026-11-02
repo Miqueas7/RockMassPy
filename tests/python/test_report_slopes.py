@@ -63,3 +63,12 @@ def test_docx_opens(results, tmp_path):
     out = rp.write_docx(rp.build_slope_report(results, title="T", figures=False), tmp_path / "x.docx")
     d = docx.Document(str(out))
     assert any("J1×J2" in c.text for tb in d.tables for row in tb.rows for c in row.cells)
+
+
+def test_notes_separate_and_empty_caption(tmp_path):
+    (r,) = correr(tmp_path, [T(rmr="", exc="")], jf=["R1,J1,20,90", "R1,J2,20,90"])
+    rep = rp.build_slope_report([r], title="T", figures=False)
+    paras = [b.text for b in rep.sections[3].blocks if isinstance(b, rp.Paragraph)]
+    assert len(paras) == 2 + len(r.notes) and r.notes[0] in paras
+    smr = next(b for b in rep.sections[2].blocks if isinstance(b, rp.Paragraph) and "SMR" in b.text)
+    assert ".:" not in smr.text and smr.text.endswith("Ninguno.")

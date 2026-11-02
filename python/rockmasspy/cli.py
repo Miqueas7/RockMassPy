@@ -279,9 +279,9 @@ def _slope(a) -> int:
     for m, name in (("d", "discrete"), ("c", "continuous")):
         print(f"SMR {name}: " + " | ".join(f"{r} {c[f'smr_{m}_{k}']}" for k, r in enumerate(("I", "II", "III", "IV", "V"), 1)))
     print(f"Q-slope: {c['q_slope_evaluated']} faces, {c['face_steeper_than_beta']} steeper than beta")
-    print(f"warnings: {c['warnings']}")
+    print(f"warnings: {c['warnings']} in {sum(1 for r in rs if r.warnings)} slopes")
     for w, n in sorted(Counter(w for r in rs for w in set(r.warnings)).items(), key=lambda kv: (-kv[1], kv[0])):
-        print(f"warning: {w} ({n})")
+        print(f"warning: {w} ({n} slopes)")
     print(f"notes: {c['notes']}")
     if a.output:
         print(f"results: {save_slope_results(rs, a.output)}")

@@ -560,6 +560,7 @@ def test_slope_input_errors(tmp_path, capsys, case):
     assert code == 1 and "Traceback" not in err
     assert len(err.strip().splitlines()) == 1 and err.startswith("error: ")
     assert "ZZSENT" not in out + err
+    assert case != "dip95" or "95" not in err
 
 
 def test_slope_empty_faces(tmp_path, capsys):
@@ -575,3 +576,25 @@ def test_help_lists_slope(capsys):
     with pytest.raises(SystemExit):
         main(["--help"])
     assert "slope" in capsys.readouterr().out
+
+
+def test_slope_oblique_toppling_visible(tmp_path, capsys):
+    from test_slopes import T
+
+    files = slope_files(tmp_path, [T(tramo="R-ZZSENT", buz="80", dir_="180", rmr="", exc="")],
+                        ["R-ZZSENT,J1,81,254", "R-ZZSENT,J2,79,233"])
+    html, ch = tmp_path / "o.html", tmp_path / "ch"
+    code, out, _ = run_slope(tmp_path, capsys, "--report", str(html), "--charts", str(ch), files=files)
+    assert code == 2 and "oblique 1 of 1 intersections" in out
+    assert (ch / "estereograma_1_direct_toppling.png").exists()
+    text = html.read_text(encoding="utf-8")
+    assert "oblicuo" in text and "0/1" in text and "1/1 (100 %)" in text
+    assert "volteo directo oblicuo (1)" in text and text.count("<img") == 2
+
+
+def test_slope_warning_lines_unambiguous(tmp_path, capsys):
+    from test_slopes import T
+
+    files = slope_files(tmp_path, [T(tramo="R-ZZSENT", fr="")])
+    _, out, _ = run_slope(tmp_path, capsys, files=files)
+    assert "warnings: 1 in 1 slopes" in out and "(1 slopes)" in out

@@ -516,7 +516,25 @@ def _slope_critical(r, mode: str) -> tuple[int, int]:
 
 def slope_modes(r) -> list[str]:
     """Modos con al menos un caso crítico: cada uno lleva su estereograma."""
-    return [m for m in _SLOPE_MODES if _slope_critical(r, m)[0] > 0]
+    k = r.kinematics
+    return [m for m in _SLOPE_MODES if _slope_critical(r, m)[0] > 0
+            or (m == "direct_toppling" and k is not None and k.direct_toppling_oblique > 0)]
+
+
+def _attention(r) -> list[str]:
+    """Claves de texto de lo que hace que el talud pida atención (las mismas condiciones de `needs_attention`)."""
+    k, d, c = r.kinematics, r.smr_discrete, r.smr_continuous
+    out = []
+    if k is not None:
+        out += [f"att_{x}" for x in ("planar", "wedge_primary", "wedge_secondary", "flexural_toppling",
+                                     "direct_toppling", "direct_toppling_oblique") if getattr(k, x)]
+    if (d is not None and d.discrete.smr_class >= 4) or (c is not None and c.continuous.smr_class >= 4):
+        out.append("att_smr")
+    if r.face_steeper_than_beta:
+        out.append("att_qslope")
+    if r.warnings:
+        out.append("att_warnings")
+    return out
 
 
 def slope_figure(r, mode: str | None, lang: str, projection: str = "equal_area"):
@@ -555,7 +573,9 @@ def _slope_blocks(results, lang: str, figures: bool, projection: str = "equal_ar
         (r.id_talud, r.id_tramo, _orient(r.face),
          *(_str(v) for v in ((r.kinematics.input.friction_deg, r.kinematics.input.lateral_limit_deg)
                              if r.kinematics else ("", ""))),
-         *(_kcell(*_slope_critical(r, m)) for m in _SLOPE_MODES)) for r in results)
+         *(_kcell(*_slope_critical(r, m)) for m in _SLOPE_MODES),
+         _kcell(r.kinematics.direct_toppling_oblique, r.kinematics.n_intersections) if r.kinematics else "-")
+        for r in results)
     fams: dict[tuple, tuple] = {}
     for r in results:
         for f in r.families:
@@ -586,10 +606,10 @@ def _slope_blocks(results, lang: str, figures: bool, projection: str = "equal_ar
                              lambda r=r, m=m: slope_figure(r, m, lang, projection), lang, figures))
 
     def tab(key, head, rows):
-        return Table(t(key, lang), head, tuple(rows)) if rows else Paragraph(f"{t(key, lang)}: {t('none_items', lang)}")
+        return Table(t(key, lang), head, tuple(rows)) if rows else Paragraph(f"{t(key, lang).rstrip('.')}: {t('none_items', lang)}")
 
     return (
-        tab("cap_slopes", ("id_talud", "id_tramo", t("h_face", lang), "φ (°)", "L (°)", *modes_h), slopes),
+        tab("cap_slopes", ("id_talud", "id_tramo", t("h_face", lang), "φ (°)", "L (°)", *modes_h, t("h_oblique", lang)), slopes),
         tab("cap_families", ("id_tramo", t("h_family", lang), "N", t("h_mean_orientation", lang), "κ", "α95 (°)"),
             fams.values()),
         tab("cap_smr", ("id_talud", t("h_case", lang), t("h_mode_smr", lang), "A", "B", "C", "F1", "F2", "F3", "F4",
@@ -614,8 +634,13 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     s4 = ((Table(t("cap_sl_warnings", lang), (t("h_warning", lang), t("h_slopes", lang)),
                  tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),)
           if counts else (Paragraph(t("no_warnings", lang)),))
+    why = Counter(x for r in results for x in _attention(r))
+    n_att = sum(r.needs_attention for r in results)
+    if n_att:
+        s4 += (Paragraph(t("sl_attention", lang).format(n=n_att, m=len(results), why=", ".join(
+            f"{t(k, lang)} ({v})" for k, v in why.items()))),)
     if notes:
-        s4 += (Paragraph(f"{t('h_notes', lang)}: " + " ".join(notes)),)
+        s4 += (Paragraph(t("h_notes", lang) + ":"), *(Paragraph(n) for n in notes))
     sections = (
         Section("1", t("sl_s1", lang), (Paragraph(t("sl_scope", lang)),)),
         Section("2", t("sl_s2", lang), (Table(
