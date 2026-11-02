@@ -215,6 +215,55 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "none_items": {"es": "Ninguno.", "en": "None."},
     "h_detail": {"es": "Detalle", "en": "Detail"},
     "h_missing": {"es": "Dato que falta", "en": "Missing data"},
+    # --- Informe de taludes (cinemática, SMR, Q-slope) ---
+    "slope_title": {"es": "Estabilidad de taludes en roca", "en": "Rock slope stability"},
+    "sl_s1": {"es": "Alcance", "en": "Scope"},
+    "sl_s2": {"es": "Métodos y ediciones", "en": "Methods and editions"},
+    "sl_s3": {"es": "Resultados", "en": "Results"},
+    "sl_s4": {"es": "Avisos", "en": "Warnings"},
+    "sl_s5": {"es": "Nota", "en": "Note"},
+    "sl_scope": {
+        "es": "Este documento reúne el análisis cinemático de Markland (deslizamiento planar, en cuña y volteo), el SMR "
+              "de Romana y el Q-slope de cada talud. La cinemática dice si el movimiento es posible por geometría: es "
+              "factibilidad, no un factor de seguridad ni una probabilidad. El SMR y el Q-slope son métodos empíricos. "
+              "El factor de seguridad por equilibrio límite llega en la siguiente etapa de la librería, y el ingeniero decide.",
+        "en": "This document gathers Markland's kinematic analysis (planar sliding, wedge sliding and toppling), Romana's "
+              "SMR and the Q-slope of each slope. Kinematics says whether movement is geometrically possible: it is "
+              "feasibility, not a factor of safety or a probability. SMR and Q-slope are empirical methods. The "
+              "limit-equilibrium factor of safety arrives in the library's next stage, and the engineer decides.",
+    },
+    "cap_slopes": {"es": "Taludes evaluados (k de n: casos críticos)", "en": "Slopes assessed (k of n: critical cases)"},
+    "cap_families": {"es": "Familias de discontinuidades (Fisher)", "en": "Discontinuity families (Fisher)"},
+    "cap_smr": {
+        "es": "SMR por caso. D = gobierna el SMR discreto, C = gobierna el continuo. Los factores F se dan como discreto / continuo.",
+        "en": "SMR per case. D = governs the discrete SMR, C = governs the continuous one. F factors are given as discrete / continuous.",
+    },
+    "cap_qslope": {"es": "Q-slope y ángulo de talud sin sostenimiento", "en": "Q-slope and unsupported slope angle"},
+    "cap_sl_warnings": {"es": "Avisos y cantidad de taludes que los tienen", "en": "Warnings and number of slopes that have them"},
+    "fig_stereo_density": {"es": "Red estereográfica con densidad de polos, talud {n}",
+                           "en": "Stereonet with pole density, slope {n}"},
+    "fig_stereo_mode": {"es": "Red estereográfica, {mode}, talud {n}", "en": "Stereonet, {mode}, slope {n}"},
+    "h_face": {"es": "Cara (buz./dir.)", "en": "Face (dip/dir.)"},
+    "h_face_dip": {"es": "Buz. cara (°)", "en": "Face dip (°)"},
+    "h_case": {"es": "Caso", "en": "Case"},
+    "h_mode_smr": {"es": "Modo", "en": "Mode"},
+    "h_beta": {"es": "β (°)", "en": "β (°)"},
+    "h_steeper": {"es": "Cara más empinada que β", "en": "Face steeper than β"},
+    "h_slopes": {"es": "Taludes", "en": "Slopes"},
+    "h_governing": {"es": "Gobierna", "en": "Governs"},
+    "h_family": {"es": "Familia", "en": "Family"},
+    "h_mean_orientation": {"es": "Orientación media (buz./dir.)", "en": "Mean orientation (dip/dir.)"},
+    "h_notes": {"es": "Notas", "en": "Notes"},
+    "sl_yes": {"es": "sí", "en": "yes"},
+    "sl_no": {"es": "no", "en": "no"},
+    "smr_class_1": {"es": "muy buena", "en": "very good"},
+    "smr_class_2": {"es": "buena", "en": "good"},
+    "smr_class_3": {"es": "normal", "en": "fair"},
+    "smr_class_4": {"es": "mala", "en": "bad"},
+    "smr_class_5": {"es": "muy mala", "en": "very bad"},
+    "smr_mode_planar": {"es": "planar", "en": "planar"},
+    "smr_mode_toppling": {"es": "volteo", "en": "toppling"},
+    "smr_mode_wedge": {"es": "cuña", "en": "wedge"},
 }
 
 

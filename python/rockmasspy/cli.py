@@ -250,6 +250,57 @@ def _verify(a) -> int:
     return v.exit_code
 
 
+def _slope(a) -> int:
+    from collections import Counter
+
+    from . import report as rp
+    from .slopes import assess_slopes, load_families, load_slope_faces, save_slope_results, slope_counts
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    if not 0 < a.lateral_limit < 90:
+        raise ValueError("--lateral-limit must be between 0 and 90 degrees")
+    faces = load_slope_faces(a.faces, sheet=a.sheet_faces)
+    if not faces:
+        raise ValueError(f"no slope faces in {Path(a.faces).name}")
+    rs = assess_slopes(faces, load_families(a.families, sheet=a.sheet_families),
+                       lateral_limit_deg=a.lateral_limit)
+    c = slope_counts(rs)
+    proj = a.projection.replace("-", "_")
+    print(f"slopes: {c['slopes']}")
+    print(f"planes: {c['n_planes']}")
+    print(f"intersections: {c['n_intersections']}")
+    print(f"planar sliding: {c['planar']} of {c['n_planes']} poles")
+    print(f"planar sliding (no lateral limits): {c['planar_no_limits']}")
+    print(f"wedge sliding: {c['wedge_primary']} primary, {c['wedge_secondary']} secondary of {c['n_intersections']} intersections")
+    print(f"flexural toppling: {c['flexural_toppling']} of {c['n_planes']} poles")
+    print(f"direct toppling: {c['direct_toppling']}, oblique {c['direct_toppling_oblique']} of {c['n_intersections']} intersections")
+    for m, name in (("d", "discrete"), ("c", "continuous")):
+        print(f"SMR {name}: " + " | ".join(f"{r} {c[f'smr_{m}_{k}']}" for k, r in enumerate(("I", "II", "III", "IV", "V"), 1)))
+    print(f"Q-slope: {c['q_slope_evaluated']} faces, {c['face_steeper_than_beta']} steeper than beta")
+    print(f"warnings: {c['warnings']}")
+    for w, n in sorted(Counter(w for r in rs for w in set(r.warnings)).items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"warning: {w} ({n})")
+    print(f"notes: {c['notes']}")
+    if a.output:
+        print(f"results: {save_slope_results(rs, a.output)}")
+    if a.charts:
+        from .viz import save_figure
+
+        for n, r in enumerate(rs, 1):
+            for mode in (None, *rp.slope_modes(r)):
+                path = Path(a.charts) / f"estereograma_{n}_{mode or 'density'}.png"
+                print(f"chart: {save_figure(rp.slope_figure(r, mode, a.lang, proj), path)}")
+    if a.report:
+        rep = rp.build_slope_report(rs, title=a.title or t("slope_title", a.lang), lang=a.lang, author=a.author or "",
+                                    figures=not a.no_figures, projection=proj)
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if any(r.needs_attention for r in rs) else 0
+
+
 def _snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name.rstrip("_")).lower()
 
@@ -437,6 +488,21 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--author")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.set_defaults(fn=_verify)
+    c = sub.add_parser("slope", help="rock slope kinematics, SMR and Q-slope")
+    c.add_argument("--faces", required=True, metavar="TALUDES")
+    c.add_argument("--families", required=True, metavar="FAMILIAS")
+    c.add_argument("--sheet-faces", default="Taludes")
+    c.add_argument("--sheet-families", default="Familias")
+    c.add_argument("--lateral-limit", type=float, default=30.0, metavar="DEG")
+    c.add_argument("--projection", choices=("equal-area", "equal-angle"), default="equal-area")
+    c.add_argument("-o", "--output", metavar="RESULTADOS.csv|.xlsx")
+    c.add_argument("--charts", metavar="DIR")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.add_argument("--no-figures", action="store_true")
+    c.set_defaults(fn=_slope)
     return p
 
 

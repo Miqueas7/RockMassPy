@@ -484,3 +484,94 @@ def test_verify_design_errors(tmp_path, capsys):
         assert err.count("error:") == 1 and len(err.strip().splitlines()) == 1 and "2.5" not in err
     assert main(["verify", "--profile", "PE-DS024-2016", "--tramos", "t.xlsx"]) == 1
     assert "--tramos needs --tables" in capsys.readouterr().err
+
+
+# --- rockmass slope ---
+
+def slope_files(tmp_path, tf=None, jf=None):
+    from test_slopes import RIQ, T, fam, tal
+
+    return (tal(tmp_path, tf or [T(id_="T-ZZSENT", tramo="R-ZZSENT")]),
+            fam(tmp_path, [r.replace("R1", "R-ZZSENT") for r in (jf or RIQ)]))
+
+
+def run_slope(tmp_path, capsys, *extra, files=None):
+    faces, fams = files or slope_files(tmp_path)
+    code = main(["slope", "--faces", str(faces), "--families", str(fams), *extra])
+    cap = capsys.readouterr()
+    return code, cap.out, cap.err
+
+
+def test_slope_summary_and_privacy(tmp_path, capsys):
+    code, out, err = run_slope(tmp_path, capsys)
+    assert code == 2 and err == ""
+    for line in ("slopes: 1", "planes: 4", "intersections: 6", "planar sliding: ", "planar sliding (no lateral limits): ",
+                 "wedge sliding: ", "flexural toppling: ", "direct toppling: ", "SMR discrete: I ", "SMR continuous: I ",
+                 "Q-slope: 0 faces, 0 steeper than beta", "warnings: ", "notes: "):
+        assert line in out
+    assert out.rstrip().endswith("the library recommends, the engineer decides")
+    assert "ZZSENT" not in out + err
+
+
+def test_slope_quiet_slope_exits_0(tmp_path, capsys):
+    from test_slopes import T
+
+    files = slope_files(tmp_path, [T(tramo="R-ZZSENT", buz="30", dir_="180", fr="35", rmr="", exc="")], ["R-ZZSENT,J1,20,090"])
+    code, out, err = run_slope(tmp_path, capsys, files=files)
+    assert code == 0 and "notes: 0" in out and err == ""
+
+
+def test_slope_files_and_lateral_limit(tmp_path, capsys):
+    res, html, ch = tmp_path / "r.csv", tmp_path / "x.html", tmp_path / "ch"
+    files = slope_files(tmp_path, jf=["R1,J1,50,160", "R1,J2,50,133", "R1,J3,60,300"])
+    code, out, _ = run_slope(tmp_path, capsys, "--output", str(res), "--report", str(html), "--charts", str(ch), files=files)
+    assert code == 2 and res.exists() and html.exists() and (ch / "estereograma_1_density.png").exists()
+    assert f"chart: {ch / 'estereograma_1_density.png'}" in out
+    text = html.read_text(encoding="utf-8")
+    assert "T-ZZSENT" in text and text.count("ZZSENT") == text.count("T-ZZSENT") + text.count("R-ZZSENT")
+    planar = lambda o: next(ln for ln in o.splitlines() if ln.startswith("planar sliding: "))
+    assert planar(run_slope(tmp_path, capsys, "--lateral-limit", "20", files=files)[1]) != planar(out)
+
+
+def test_slope_docx(tmp_path, capsys):
+    pytest.importorskip("docx")
+    code, out, _ = run_slope(tmp_path, capsys, "--report", str(tmp_path / "x.docx"), "--no-figures")
+    assert (tmp_path / "x.docx").exists() and "report:" in out
+
+
+def test_slope_note_alone_keeps_exit_0(tmp_path, capsys):
+    from test_slopes import T
+
+    files = slope_files(tmp_path, [T(tramo="R-ZZSENT", buz="30", dir_="180", rmr="", exc="")], ["R-ZZSENT,J1,20,090", "R-ZZSENT,J2,20,090"])
+    code, out, _ = run_slope(tmp_path, capsys, files=files)
+    assert "notes: 0" not in out and "notes: 1" in out and code == 0
+
+
+@pytest.mark.parametrize("case", ["dip95", "rmr_sin_excavacion", "pdf", "missing", "lateral"])
+def test_slope_input_errors(tmp_path, capsys, case):
+    from test_slopes import T
+
+    tf = {"dip95": [T(buz="95")], "rmr_sin_excavacion": [T(exc="")]}.get(case)
+    files = slope_files(tmp_path, tf)
+    extra = {"pdf": ["--report", "x.pdf"], "lateral": ["--lateral-limit", "95"]}.get(case, [])
+    if case == "missing":
+        files = (tmp_path / "no_existe.csv", files[1])
+    code, out, err = run_slope(tmp_path, capsys, *extra, files=files)
+    assert code == 1 and "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1 and err.startswith("error: ")
+    assert "ZZSENT" not in out + err
+
+
+def test_slope_empty_faces(tmp_path, capsys):
+    from test_slopes import TAL_CAB
+
+    faces = tmp_path / "vacio.csv"
+    faces.write_text(TAL_CAB + "\n", encoding="utf-8")
+    code, _, err = run_slope(tmp_path, capsys, files=(faces, slope_files(tmp_path)[1]))
+    assert code == 1 and err.strip() == "error: no slope faces in vacio.csv"
+
+
+def test_help_lists_slope(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    assert "slope" in capsys.readouterr().out
