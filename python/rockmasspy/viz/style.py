@@ -95,6 +95,15 @@ TEXTS: dict[str, dict[str, str]] = {
     },
     "boundary_rule": {"es": "un valor en el límite toma la clase peor", "en": "a value on a boundary takes the worse class"},
     "site": {"es": "sitio", "en": "site"},
+    "unclassified": {"es": "sin clasificar", "en": "unclassified"},
+    "profile_title": {"es": "Clases a lo largo de la progresiva", "en": "Classes along chainage"},
+    "plan_title": {"es": "Clases en planta", "en": "Classes in plan view"},
+    "chainage_axis": {"es": "Progresiva (m)", "en": "Chainage (m)"},
+    "east_axis": {"es": "Este (m)", "en": "East (m)"},
+    "north_axis": {"es": "Norte (m)", "en": "North (m)"},
+    "omitted_chainage": {"es": "{n} tramos sin progresivas", "en": "{n} sections without chainage"},
+    "omitted_coords": {"es": "{n} tramos sin coordenadas", "en": "{n} sections without coordinates"},
+    "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
 }
 
 
