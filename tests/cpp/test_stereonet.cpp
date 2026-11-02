@@ -139,8 +139,11 @@ TEST(StereonetFisher, AxialNearVertical) {
 }
 
 TEST(StereonetFisher, DispersedWarnsAndErrors) {
-    const auto s = fisher_stats({{0, 0}, {90, 0}, {180, 45}, {270, 30}, {0, 89}});
-    if (!s.alpha95_deg) EXPECT_FALSE(s.warnings.empty());
+    EXPECT_NO_THROW(fisher_stats({{0, 0}, {90, 0}, {180, 45}, {270, 30}, {0, 89}}));
+    const auto s = fisher_stats({{0, 0}, {90, 0}});  // R = sqrt(2): alpha95 no existe
+    EXPECT_FALSE(s.alpha95_deg.has_value());
+    ASSERT_EQ(s.warnings.size(), 1u);
+    EXPECT_EQ(s.warnings[0], "alpha95 undefined: poles too dispersed for their number");
     EXPECT_THROW(fisher_stats({}), std::invalid_argument);
     EXPECT_THROW(fisher_stats({{std::nan(""), 10}}), std::invalid_argument);
 }
@@ -197,4 +200,16 @@ TEST(Stereonet, ObliqueGreatCircle) {
         EXPECT_NEAR(g[90].x, mid.x, 1e-9);
         EXPECT_NEAR(g[90].y, mid.y, 1e-9);
     }
+}
+
+TEST(StereonetDensity, AreaFractionFactor) {
+    const std::vector<LineOrientation> poles(50, LineOrientation{120, 40});
+    EXPECT_NEAR(pole_density(poles, {{120, 40}}, 0.05)[0], 20.0, 1e-9);
+}
+
+TEST(StereonetFisher, HorizontalMeanIndependentOfOrder) {
+    const auto a = fisher_stats({{10, 0}, {190, 0}, {20, 0}});
+    const auto b = fisher_stats({{190, 0}, {10, 0}, {20, 0}});
+    EXPECT_NEAR(a.mean.trend_deg, b.mean.trend_deg, 1e-9);
+    EXPECT_LT(a.mean.trend_deg, 180.0);
 }

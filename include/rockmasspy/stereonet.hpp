@@ -188,14 +188,12 @@ inline FisherStats fisher_stats(const std::vector<LineOrientation>& poles) {
     };
     const auto norm = [](const Vec& a) { return std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); };
     Vec s = sum(v[0]);
-    validation::require(norm(s) > 1e-9, "poles", "resultant vector vanishes (poles cancel out)", norm(s));
     s = sum(s);  // realinea a la media y recalcula
-    const double r = norm(s);
-    validation::require(r > 1e-9, "poles", "resultant vector vanishes (poles cancel out)", r);
+    const double r = norm(s);  // R >= 1: el primer polo tiene producto punto >= 0 con cada otro tras alinear, y la 2.ª pasada solo lo aumenta
     Vec m{s[0] / r, s[1] / r, s[2] / r};
     if (m[2] < 0.0) m = {-m[0], -m[1], -m[2]};
     const int n = static_cast<int>(poles.size());
-    FisherStats out{line_of(m), n, r, std::nullopt, std::nullopt,
+    FisherStats out{line_of(m, true), n, r, std::nullopt, std::nullopt,
                     {"Fisher1953-set-statistics", Verification::Secondary,
                      "Tauxe et al., Essentials of Paleomagnetism (web edition, CC BY 4.0), section 11.2.1, eqs. "
                      "11.14-11.17: mean of unit vectors, k = (N-1)/(N-R), alpha95 with p = 0.05; Fisher (1953) not "

@@ -175,8 +175,10 @@ def test_fisher_axial_casi_vertical():
 
 def test_fisher_dispersos_no_lanza():
     s = rm.fisher_stats([rm.LineOrientation(t, p) for t, p in ((0, 0), (90, 0), (180, 45), (270, 30), (0, 89))])
-    if s.alpha95_deg is None:
-        assert any("alpha95 undefined" in w for w in s.warnings)
+    assert s.n == 5
+    s = rm.fisher_stats([rm.LineOrientation(0, 0), rm.LineOrientation(90, 0)])  # R = sqrt(2)
+    assert s.alpha95_deg is None
+    assert s.warnings == ["alpha95 undefined: poles too dispersed for their number"]
 
 
 def test_fisher_errores():
@@ -196,7 +198,7 @@ def test_fisher_invertir_polo_horizontal_no_cambia(poles, trends):
     flipped = [rm.LineOrientation((t + 180) % 360, 0) for t in trends]
     a, b = rm.fisher_stats(poles + flat), rm.fisher_stats(poles + flipped)
     assert a.resultant_length == pytest.approx(b.resultant_length, abs=1e-9)
-    assert rm.angle_between(a.mean, b.mean) < 1e-4 or a.resultant_length < 1e-3
+    assert rm.angle_between(a.mean, b.mean) < 1e-4
     if a.kappa is not None and math.isfinite(a.kappa):
         assert a.kappa == pytest.approx(b.kappa, rel=1e-6)
 
@@ -239,3 +241,14 @@ def test_densidad_media_uniforme():
     poles = [uniform() for _ in range(300)]
     d = rm.pole_density(poles, [uniform() for _ in range(2000)])
     assert sum(d) / len(d) == pytest.approx(1.0, abs=0.15)
+
+
+def test_densidad_factor_area_fraction():
+    poles = [rm.LineOrientation(120, 40)] * 50
+    assert rm.pole_density(poles, [rm.LineOrientation(120, 40)], 0.05)[0] == pytest.approx(20)
+
+
+def test_fisher_media_horizontal_no_depende_del_orden():
+    a = rm.fisher_stats([rm.LineOrientation(t, 0) for t in (10, 190, 20)])
+    b = rm.fisher_stats([rm.LineOrientation(t, 0) for t in (190, 10, 20)])
+    assert a.mean.trend_deg == pytest.approx(b.mean.trend_deg, abs=1e-9) and a.mean.trend_deg < 180
