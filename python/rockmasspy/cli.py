@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .batch import classify_tramos, save_results, summarize
+from .batch import add_q_chart_reference, classify_tramos, q_chart_crosstab, save_results, summarize
 from .report.texts import t
 from .table_files import load_table
 from .tramos import load_tramos
@@ -47,10 +47,39 @@ def _cartilla(a) -> int:
     return 0
 
 
+def _esr_specs(values: Sequence[str]) -> dict:
+    """`C`, `A:4`, `labor=C` o `labor=A:4`; sin `labor=` va a la clave "*"."""
+    syntax = "expected C, A:4, labor=C or labor=A:4"
+    out = {}
+    for v in values:
+        labor, eq, spec = v.rpartition("=")
+        cat, colon, num = spec.partition(":")
+        if (eq and not labor) or not cat or (colon and not num):
+            raise ValueError(f"invalid --esr {v!r}: {syntax}")
+        try:
+            out[labor if eq else "*"] = (cat, float(num)) if colon else cat
+        except ValueError:
+            raise ValueError(f"invalid --esr {v!r}: {syntax}") from None
+    return out
+
+
 def _classify_all(a):
     tables = [load_table(p) for p in a.tables]
     tramos = load_tramos(a.tramos, sheet=a.sheet, column_map=_column_map(a.column_map))
-    return classify_tramos(tramos, tables), tables
+    esr = _esr_specs(a.esr) if a.esr else None  # antes de clasificar: un --esr malo falla temprano
+    results = classify_tramos(tramos, tables)
+    if esr:
+        results = add_q_chart_reference(results, esr, edition=a.q_edition)
+    return results, tables
+
+
+def _print_chart_summary(a, results) -> None:
+    if not a.esr:
+        return
+    n = sum(1 for r in results if r.q_chart)
+    print(f"q chart ({a.q_edition}): {n} with reference, {len(results) - n} without")
+    for (code, cat), k in sorted(q_chart_crosstab(results).items()):
+        print(f"{code} / Q cat {cat}: {k}")
 
 
 def _print_summary(s) -> int:
@@ -65,6 +94,7 @@ def _classify(a) -> int:
     results, _ = _classify_all(a)
     out = save_results(results, a.output)
     code = _print_summary(summarize(results))
+    _print_chart_summary(a, results)
     print(f"results: {out}")
     return code
 
@@ -86,8 +116,46 @@ def _report(a) -> int:
         rep = rp.build_memoria(results, tables, **kw)
     out = rp.write_docx(rep, a.output, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.output)
     code = _print_summary(summarize(results))
+    _print_chart_summary(a, results)
     print(f"report: {out}")
     return code
+
+
+def _qsupport(a) -> int:
+    from .q_support import recommend_q_support
+
+    r = recommend_q_support(a.q, a.span, esr_category=a.esr_category, esr=a.esr, edition=a.edition,
+                            wall_height_m=a.wall_height, high_stress=a.high_stress, jn=a.jn, jr=a.jr)
+    if (a.jn is None) != (a.jr is None):
+        raise ValueError("--jn and --jr go together")
+    ro = r.roof
+    print(f"edition: {r.edition}")
+    print(f"esr: {r.esr_used:g} (category {r.esr_category})")
+    print(f"de_m: {ro.de_m:.3f}")
+    for name, x in (("roof", ro), ("walls", r.walls)):
+        if x is None:
+            continue
+        print(f"{name} category: {x.category}")
+        for k in ("label", "shotcrete_mm", "sfr_energy_j", "bolt_spacing_with_sfr_m",
+                  "bolt_spacing_without_sfr_m", "bolt_length_chart_m"):
+            print(f"{name} {k}: {getattr(x, k)}")
+        print(f"{name} chart: [{x.info.method_id}, {x.info.verification}]")
+    if r.wall_q is not None:
+        print(f"wall q: {r.wall_q:g}")
+    fs = [("max unsupported span", r.max_unsupported_span), ("bolt length", r.bolt_length_formula)]
+    if r.roof_pressure is not None:
+        fs.append(("pressure", r.roof_pressure))
+    for name, f in fs:
+        print(f"{name}: {f.value:.3g} {f.unit} [{f.info.method_id}, {f.info.verification}]")
+    for w in r.warnings:
+        print(f"warning: {w}")
+    print("the library recommends, the engineer decides")
+    if a.chart:
+        from .viz import Style, plot_q_chart, save_figure
+
+        fig = plot_q_chart(r.edition, points=[(a.q, ro.de_m)], style=Style(lang=a.lang))
+        print(f"chart: {save_figure(fig, a.chart)}")
+    return 2 if r.warnings or ro.category >= 7 else 0
 
 
 class _Parser(argparse.ArgumentParser):
@@ -123,6 +191,8 @@ def _parser() -> argparse.ArgumentParser:
         c.add_argument("-o", "--output", required=True)
         c.add_argument("--sheet", default="Tramos")
         c.add_argument("--column-map", metavar="MAP.json")
+        c.add_argument("--esr", nargs="+", metavar="SPEC", help="Q chart reference: C, A:4, labor=C or labor=A:4")
+        c.add_argument("--q-edition", choices=("Q-NGI-2025", "Q-NGI-2015"), default="Q-NGI-2025")
 
     c = sub.add_parser("classify", help="classify tramos and save the results")
     batch_args(c)
@@ -137,6 +207,20 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--author")
     c.add_argument("--no-figures", action="store_true")
     c.set_defaults(fn=_report)
+
+    c = sub.add_parser("qsupport", help="Q chart support recommendation for one opening")
+    c.add_argument("--q", type=float, required=True)
+    c.add_argument("--span", type=float, required=True, metavar="M")
+    c.add_argument("--esr-category", required=True, metavar="A-G")
+    c.add_argument("--esr", type=float)
+    c.add_argument("--edition", choices=("Q-NGI-2025", "Q-NGI-2015"), default="Q-NGI-2025")
+    c.add_argument("--wall-height", type=float, metavar="M")
+    c.add_argument("--high-stress", action="store_true")
+    c.add_argument("--jn", type=float)
+    c.add_argument("--jr", type=float)
+    c.add_argument("--chart", metavar="OUT.png")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_qsupport)
     return p
 
 
