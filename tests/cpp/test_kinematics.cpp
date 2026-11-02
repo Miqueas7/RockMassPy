@@ -151,3 +151,25 @@ TEST(Kinematics, ObliqueNeedsOutsideLimits) {
     EXPECT_FALSE(inside.direct_toppling_oblique);
     EXPECT_TRUE(check_intersection({90, 45}, in).direct_toppling_oblique);  // fuera de los límites
 }
+
+TEST(Kinematics, DirectAndObliqueNeverTogether) {
+    const KinematicInput in{{180, 90}, 30, 20};
+    for (double t : {0.0, 77.0, 180.0}) {
+        const auto c = check_intersection({t, 90}, in);
+        EXPECT_TRUE(c.direct_toppling);
+        EXPECT_FALSE(c.direct_toppling_oblique);
+    }
+    const auto r = kinematic_analysis({{90, 90}, {0, 90}}, {-1, -1}, in);
+    EXPECT_EQ(r.direct_toppling, 1);
+    EXPECT_EQ(r.direct_toppling_oblique, 0);
+    for (double t = 0; t < 360; t += 15)
+        for (double pl : {0.0, 10.0, 45.0, 89.0, 90.0})
+            for (const auto& k : {in, kIn}) {
+                const auto c = check_intersection({t, pl}, k);
+                EXPECT_FALSE(c.direct_toppling && c.direct_toppling_oblique);
+            }
+}
+
+TEST(Kinematics, ObliqueAtExactLateralLimit) {
+    EXPECT_TRUE(check_intersection({20, 45}, KinematicInput{{180, 30}, 60, 20}).direct_toppling_oblique);
+}

@@ -109,7 +109,7 @@ inline IntersectionChecks eval_line(LineOrientation line, const KinematicInput& 
     const double away = std::fabs(sdiff(line.trend_deg, in.face.dip_direction_deg + 180.0));
     r.direct_toppling = away <= lim + eps && pl >= 90.0 - bs - eps;
     // oblicua (zona 3): fuera de los límites laterales y dentro del cono de fricción de los planos base
-    r.direct_toppling_oblique = !r.direct_toppling && pl >= 90.0 - phi - eps && away > lim;
+    r.direct_toppling_oblique = !r.direct_toppling && pl >= 90.0 - phi - eps && away >= lim - eps;
     return r;
 }
 inline IntersectionChecks merge(IntersectionChecks a, const IntersectionChecks& b) {
@@ -129,12 +129,14 @@ inline IntersectionChecks check_intersection(LineOrientation line, const Kinemat
     if (line.plunge_deg > 90.0 - eps) {  // vertical: tendencia indiferente
         auto r = eval_line({wrap(as + 180.0), 90.0}, in);
         if (in.face.dip_deg > 90.0 - eps) r = merge(r, eval_line({wrap(as), 90.0}, in));  // cara vertical: también cuña
+        r.direct_toppling_oblique = r.direct_toppling_oblique && !r.direct_toppling;  // exclusivas tras unir
         r.line = line;
         return r;
     }
     auto r = eval_line(line, in);
     // horizontal: eje, sin lado; se evalúan t y t + 180 y se unen las banderas
     if (line.plunge_deg < eps) r = merge(r, eval_line({wrap(line.trend_deg + 180.0), 0.0}, in));
+    r.direct_toppling_oblique = r.direct_toppling_oblique && !r.direct_toppling;
     return r;
 }
 

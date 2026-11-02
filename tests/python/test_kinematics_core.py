@@ -63,3 +63,9 @@ def test_monotonia_e_exclusiones(pl, face, phi, lim):
     assert all(c.planar <= c.planar_no_limits for c in base.planes)
     assert all(not (c.wedge_primary and c.wedge_secondary) for c in base.intersections)
     assert all(not (c.direct_toppling and c.direct_toppling_oblique) for c in base.intersections)
+
+
+@given(t=st.integers(0, 360), pl=st.integers(0, 90), face=face_st, phi=st.integers(1, 89), lim=st.integers(1, 89))
+def test_directo_y_oblicuo_exclusivos(t, pl, face, phi, lim):
+    c = rm.check_intersection(rm.LineOrientation(t, pl), kin(phi, lim, face))
+    assert not (c.direct_toppling and c.direct_toppling_oblique)
