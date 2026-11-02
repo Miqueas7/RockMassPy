@@ -118,3 +118,28 @@ def test_muestras():
         pytest.skip("RMP_SAMPLES_DIR no definido")
     for ed, tag in (("Q-NGI-2025", "2025"), ("Q-NGI-2015", "2015")):
         save_figure(plot_q_chart(ed, results=_res(ed), points=[(2.0, 8.0)]), Path(d) / f"t5_carta_q_{tag}_es.png")
+
+
+def test_marcadores_de_tramo_blancos_y_distintos_de_toda_region():
+    fig = plot_q_chart(results=_res(), points=[(2.0, 8.0)])
+    reg = {tuple(p.get_facecolor()) for p in _regiones(fig)}
+    cols = fig.axes[0].collections
+    assert len(cols) == 9
+    for c in cols[:-1]:
+        f = tuple(c.get_facecolor()[0]) if len(c.get_facecolor()) else None
+        if f is None:  # la x sin clasificar no tiene relleno
+            continue
+        assert f == (1.0, 1.0, 1.0, 1.0) and f not in reg
+
+
+def test_categorias_7_a_9_referenciales():
+    from rockmasspy.viz import TEXTS
+    for k in (7, 8, 9):
+        assert TEXTS[f"q_cat_{k}"]["es"].endswith("(referencial)")
+        assert TEXTS[f"q_cat_{k}"]["en"].endswith("(indicative)")
+
+
+@pytest.mark.parametrize("bad", [(float("nan"), 5.0), (1.0, float("inf")), (0.0, 5.0), (1.0, -2.0)])
+def test_puntos_invalidos(bad):
+    with pytest.raises(ValueError, match="points"):
+        plot_q_chart(points=[bad])

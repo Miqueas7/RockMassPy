@@ -120,7 +120,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "q_cat_5": {"es": "shotcrete con fibra grueso y pernos", "en": "thick fibre shotcrete and bolts"},
     "q_cat_6": {"es": "shotcrete muy grueso, costillas y pernos", "en": "very thick shotcrete, ribs and bolts"},
     "q_cat_7": {"es": "refuerzo pesado con costillas (referencial)", "en": "heavy ribbed reinforcement (indicative)"},
-    "q_cat_8": {"es": "refuerzo máximo con costillas", "en": "maximum ribbed reinforcement"},
+    "q_cat_8": {"es": "refuerzo máximo con costillas (referencial)", "en": "maximum ribbed reinforcement (indicative)"},
     "q_cat_9": {"es": "evaluación especial (referencial)", "en": "special evaluation (indicative)"},
     "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
 }

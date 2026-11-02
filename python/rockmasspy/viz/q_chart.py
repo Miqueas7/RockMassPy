@@ -5,6 +5,7 @@ Solo categorías, colores y marcadores: nunca se rotula un id_tramo ni otro iden
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 from ..batch import TramoResult
@@ -46,6 +47,9 @@ def plot_q_chart(edition: str = "Q-NGI-2025", *, results: Sequence[TramoResult] 
     if edition not in Q_CHARTS:
         raise ValueError(f"unknown edition {edition!r}; available: {sorted(Q_CHARTS)}")
     chart = Q_CHARTS[edition]
+    for q, de in points:
+        if not (math.isfinite(q) and math.isfinite(de) and q > 0 and de > 0):
+            raise ValueError(f"points must be finite and > 0, got ({q}, {de})")
     drawn = [r for r in results if r.q_chart is not None] if results is not None else []
     if results is not None and not drawn:
         raise ValueError("none of the sections has a Q chart reference")
@@ -77,14 +81,13 @@ def plot_q_chart(edition: str = "Q-NGI-2025", *, results: Sequence[TramoResult] 
     ax.set_ylabel(text("de_axis", lang), fontsize=style.font_size)
     ax.set_title(text("q_chart_title", lang), fontsize=style.font_size + 2)
 
-    n = max((r.support_order for r in drawn if r.support_order), default=1)
     for r in drawn:  # un scatter por punto, sin rótulo: cada código lleva su forma
         rd = r.q_chart.roof
         if r.support_order is None:
             ax.scatter([rd.q], [rd.de_m], marker=_MARCA_SIN_CLASE, c="0.15", s=60, linewidths=1.8, zorder=4)
         else:
             ax.scatter([rd.q], [rd.de_m], marker=_MARCADORES[(r.support_order - 1) % len(_MARCADORES)],
-                       c=[support_color(r.support_order, n, style)], edgecolors="black", linewidths=0.8, s=60, zorder=4)
+                       c="white", edgecolors="black", linewidths=0.8, s=60, zorder=4)
     for q, de in points:
         ax.scatter([q], [de], marker="*", c="black", edgecolors="white", linewidths=0.6, s=170, zorder=5)
 
@@ -97,7 +100,7 @@ def plot_q_chart(edition: str = "Q-NGI-2025", *, results: Sequence[TramoResult] 
     por_orden = {r.support_order: r.support.code for r in drawn if r.support_order and r.support}
     for o, c in sorted(por_orden.items()):
         handles.append(Line2D([], [], ls="", marker=_MARCADORES[(o - 1) % len(_MARCADORES)], markersize=8,
-                              markerfacecolor=support_color(o, n, style), markeredgecolor="black", label=c))
+                              markerfacecolor="white", markeredgecolor="black", label=c))
     if any(r.support_order is None for r in drawn):
         handles.append(Line2D([], [], ls="", marker=_MARCA_SIN_CLASE, color="0.15", markersize=8,
                               label=text("unclassified", lang)))
