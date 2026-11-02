@@ -122,6 +122,35 @@ rockmass report tramos.xlsx --tables galeria.json -o informe.docx --template ane
 
 Ver `examples/04-informe/`.
 
+## Carta de sostenimiento Q (referencia)
+
+Digitalizada de la carta de sostenimiento del sistema Q de NGI (2025, Fig. 4-1; edición 2015, Fig. 7), con la tabla de ESR,
+la dimensión equivalente De = luz / ESR y tres fórmulas clásicas marcadas **Secondary**. Es una referencia junto a tus tablas
+propias, nunca un reemplazo. El ESR es una decisión de seguridad: `esr_category` es obligatorio y las categorías con rango (A, B) piden también `esr`.
+
+```python
+from rockmasspy.q_support import recommend_q_support
+
+r = recommend_q_support(4.5, 15.0, esr_category="C")      # cámara pública de Hoek: Q 4.5, luz 15 m
+print(r.roof.category)                                    # 3
+print(f"{r.roof.de_m:.3f}")                               # 9.375
+print(r.roof.no_empirical_data)                           # False
+w = recommend_q_support(0.4, 4.5, esr_category="C", edition="Q-NGI-2015", wall_height_m=4.5)
+print(w.wall_q)                                           # 1.0
+```
+
+Hoek publica la categoría 4 para esta cámara, leída en una carta anterior (1993); las cartas digitalizadas 2025 y 2015 dan 3.
+Los puntos en las zonas a trazos de la carta (sin datos empíricos) siguen sus líneas y llevan `no_empirical_data` y un aviso.
+En el lote, `rm.add_q_chart_reference(resultados, {"*": "C"})` agrega la lectura del techo con el Q propio del tramo, y el
+informe suma la sección 5.1; `viz.plot_q_chart` dibuja la carta con los tramos (sin rótulos). Desde la línea de comandos:
+
+```bash
+rockmass qsupport --q 4.5 --span 15 --esr-category C --chart punto.png      # código 2 con un aviso o categoría 7 o mayor
+rockmass classify tramos.xlsx --tables galeria.json --esr "*=C" -o resultados.csv
+```
+
+Ver `examples/05-sostenimiento-q/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en

@@ -120,6 +120,35 @@ rockmass report tramos.xlsx --tables galeria.json -o report.docx --template anex
 
 See `examples/04-informe/`.
 
+## Q support chart (reference)
+
+Digitized from the NGI Q-system support chart (2025, Fig. 4-1; 2015 edition, Fig. 7), with the ESR table, the
+equivalent dimension De = span / ESR and three classical formulas marked **Secondary**. It is a reference next to your own
+tables, never a replacement. ESR is a safety decision: `esr_category` is required, and categories with a range (A, B) also need `esr`.
+
+```python
+from rockmasspy.q_support import recommend_q_support
+
+r = recommend_q_support(4.5, 15.0, esr_category="C")      # public Hoek chamber: Q 4.5, span 15 m
+print(r.roof.category)                                    # 3
+print(f"{r.roof.de_m:.3f}")                               # 9.375
+print(r.roof.no_empirical_data)                           # False
+w = recommend_q_support(0.4, 4.5, esr_category="C", edition="Q-NGI-2015", wall_height_m=4.5)
+print(w.wall_q)                                           # 1.0
+```
+
+Hoek publishes category 4 for this chamber, read on an older (1993) chart; the digitized 2025 and 2015 charts give 3.
+Points in the dashed zones of the chart (no empirical data) follow their lines and carry `no_empirical_data` and a warning.
+In batch, `rm.add_q_chart_reference(results, {"*": "C"})` adds the roof reading using only the tramo's own Q, and the
+report gets section 5.1; `viz.plot_q_chart` draws the chart with the tramos (never labelled). From the command line:
+
+```bash
+rockmass qsupport --q 4.5 --span 15 --esr-category C --chart point.png      # exit 2 on a warning or category 7 or higher
+rockmass classify tramos.xlsx --tables galeria.json --esr "*=C" -o results.csv
+```
+
+See `examples/05-sostenimiento-q/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
