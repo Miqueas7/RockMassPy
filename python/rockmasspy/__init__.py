@@ -45,6 +45,7 @@ from .vallejo_lines import (  # noqa: E402,F401
 )
 from .chart_regions import Region, locate  # noqa: E402,F401
 from .q_chart_data import ESR_TABLES, Q_CHART_FRAME, Q_CHARTS, QChartCategory, QChartData  # noqa: E402,F401
+from .q_support import QChartReading, QSupportResult, read_q_chart, recommend_q_support  # noqa: E402,F401
 from .rating_table import CategoricalParam, NumericParam, RatingBin, RatingResult, RatingTable  # noqa: E402,F401
 from .labor_table import Classification, LaborTable, select_table  # noqa: E402,F401
 from .table_io import SCHEMA, SCHEMA_VERSION, from_dict, load_json, load_yaml, save_json, save_yaml, to_dict  # noqa: E402,F401
