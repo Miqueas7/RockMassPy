@@ -208,6 +208,48 @@ def _mathews(a) -> int:
     return 2 if ws or counts[2] or counts[3] else 0
 
 
+def _verify(a) -> int:
+    import datetime
+
+    from . import report as rp
+    from .design_inputs import load_design_inputs
+    from .normative import get_profile, profile_esr_specs
+    from .stope_surfaces import assess_stope_surfaces, load_stope_surfaces
+    from .verify import verify
+
+    if a.tramos and not a.tables:
+        raise ValueError("--tramos needs --tables")
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    profile = get_profile(a.profile)
+    as_of = a.as_of or datetime.date.today().isoformat()
+    esr = profile_esr_specs(profile, as_of)  # valida la fecha antes de leer archivos
+    tables = [load_table(p) for p in a.tables or ()]
+    results = ()
+    if a.tramos:
+        results = classify_tramos(load_tramos(a.tramos, sheet=a.sheet, column_map=_column_map(a.column_map)), tables)
+        results = add_q_chart_reference(results, esr, edition=a.q_edition)
+    stopes = assess_stope_surfaces(load_stope_surfaces(a.surfaces)) if a.surfaces else ()
+    design = load_design_inputs(a.design) if a.design else None
+    v = verify(profile, as_of=as_of, tables=tables, results=results, stopes=stopes, design=design)
+    c = v.counts()
+    print(f"profile: {profile.profile_id} (as of {v.as_of})\nrequirements: {len(v.findings)}")
+    for s, label in (("complies", "complies"), ("does_not_comply", "does not comply"), ("attention", "attention"),
+                     ("note", "notes"), ("not_checked", "not checked"), ("not_verifiable", "not verifiable by the library")):
+        print(f"{label}: {c[s]}")
+    for f in v.findings:
+        if f.status in ("does_not_comply", "attention"):
+            print(f"{f.status.replace('_', ' ')}: {f.item.article} [{f.item.force}] {f.message}")
+    if a.report:
+        title = a.title or {"es": "Verificación normativa", "en": "Normative verification"}[a.lang]
+        rep = rp.build_verification_report(v, title=title, lang=a.lang, author=a.author or "")
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library verifies what it can check; it does not replace the signed study")
+    return v.exit_code
+
+
 def _snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name.rstrip("_")).lower()
 
@@ -380,6 +422,21 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--chart", metavar="OUT.png")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.set_defaults(fn=_mrmr)
+    c = sub.add_parser("verify", help="check inputs against a normative profile")
+    c.add_argument("--profile", required=True, metavar="ID")
+    c.add_argument("--as-of", metavar="YYYY-MM-DD")
+    c.add_argument("--tables", nargs="+", metavar="TABLE")
+    c.add_argument("--tramos", metavar="TRAMOS")
+    c.add_argument("--sheet", default="Tramos")
+    c.add_argument("--column-map", metavar="MAP.json")
+    c.add_argument("--q-edition", choices=("Q-NGI-2025", "Q-NGI-2015"), default="Q-NGI-2025")
+    c.add_argument("--surfaces", metavar="SUPERFICIES")
+    c.add_argument("--design", nargs="+", metavar="FILE")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_verify)
     return p
 
 
