@@ -117,9 +117,10 @@ def read_records(src, sheet, column_map, *, columns, text, required, ident, id_c
                     if c in ident:
                         raise ValueError(f"{_where(sheet, n, c)}: invalid value") from None
                     raise
-        if vals[id_column] in vistos:
-            raise ValueError(f"sheet '{sheet}': duplicate {id_column} in rows {vistos[vals[id_column]]} and {n}")
-        vistos[vals[id_column]] = n
+        if id_column is not None:  # sin identificador único (p. ej. Resumen_QC) no se revisan repetidos aquí
+            if vals[id_column] in vistos:
+                raise ValueError(f"sheet '{sheet}': duplicate {id_column} in rows {vistos[vals[id_column]]} and {n}")
+            vistos[vals[id_column]] = n
         out.append((n, vals))
     return out
 

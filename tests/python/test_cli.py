@@ -391,3 +391,96 @@ def test_mathews_celda_mala_un_solo_error_sin_el_valor(tmp_path, capsys, col):  
     cap = capsys.readouterr()
     assert cap.err.startswith("error: ") and cap.err.count("error:") == 1 and cap.err.count("\n") == 1
     assert "SECRETO" not in cap.out + cap.err
+
+
+# --- verify (2C, tarea 6) ---
+
+from test_design_inputs import csv as design_csv  # noqa: E402
+
+LEAK = "SECRETO-123"
+V_EST = (["id_refugio", "tipo", "rmr", "distancia_frente_m", "area_m2", "aforo", "sostenido", "labor_codigo", "este_m",
+          "observaciones"],
+         [[f"R-{LEAK}", "roca", 65, 400, 30, 20, "", LEAK, 1, LEAK], ["E2", "roca", 55, 400, 30, 20, "", LEAK, 1, LEAK],
+          ["E3", "roca", 70, 400, 30, 20, "", LEAK, 1, LEAK]])
+V_PEA = (["id_via", "via", "geometria", "espaciado_max_m", "labor_codigo"],
+         [["V1", "galeria", "", 40, LEAK], ["V2", "rampa", "curva", 25, LEAK]])
+V_QC = (["periodo", "sostenimiento", "instalados", "ensayados"], [["2026-01", "I", 100, 2]])
+V_FS = (["id_analisis", "plazo", "fs"], [["A1", "corto", 1.5], ["A2", "largo", 1.5]])
+V_AUT = (["tipo_labor", "autosoporte_h"], [["galeria", 30]])
+V_OK = (["id_refugio", "tipo", "rmr", "distancia_frente_m", "area_m2", "aforo", "sostenido"],
+        [["E1", "roca", 70, 400, 30, 20, ""]])
+
+
+def verify_inputs(tmp_path, tabla):
+    d = tmp_path / "d"
+    d.mkdir()
+    files = [design_csv(d, f"{n}.csv", *h) for n, h in (
+        ("Estaciones_refugio", V_EST), ("Refugios_peatonales", V_PEA), ("Resumen_QC", V_QC),
+        ("Factores_seguridad", V_FS), ("Autosoporte", V_AUT))]
+    tramos = tramos_xlsx(tmp_path, extra=[["TRZ-5", "galeria", LEAK, "N", 1.0, 2.0, 4.0, 70]])
+    surf = stope_csv(tmp_path)
+    return ["verify", "--profile", "PE-DS024-2016", "--as-of", "2026-11-02", "--tables", str(tabla), "--tramos", str(tramos),
+            "--surfaces", str(surf), "--design", *map(str, files)]
+
+
+def test_verify_full(tmp_path, tabla, capsys):
+    args = verify_inputs(tmp_path, tabla)
+    code = main(args)
+    cap = capsys.readouterr()
+    assert code == 2 and cap.err == ""
+    lines = cap.out.splitlines()
+    assert lines[0] == "profile: PE-DS024-2016 (as of 2026-11-02)" and lines[1] == "requirements: 24"
+    for k in ("complies", "does not comply", "attention", "notes", "not checked", "not verifiable by the library"):
+        assert any(l.startswith(f"{k}: ") for l in lines)
+    assert "does not comply: Anexo 19, num. 2.1 y 2.2 (art. 151) [law] 1 of 3 " in cap.out
+    assert any(l.startswith("attention: ") and "[guide]" in l for l in lines)
+    assert lines[-1] == "the library verifies what it can check; it does not replace the signed study"
+    full = cap.out + cap.err
+    assert LEAK not in full and not re.search(r"\b(E2|E3|V1|V2|A1|A2|TRX-77|TRZ-5|S[1-6])\b", full)
+    assert not re.search(r"aprob|aprueb|approv", full, re.I)
+
+
+def test_verify_no_inputs(capsys):
+    assert main(["verify", "--profile", "PE-DS024-2016", "--as-of", "2026-11-02"]) == 0
+    out = capsys.readouterr().out
+    assert "requirements: 24" in out and "not checked: 15" in out and "not verifiable by the library: 9" in out
+
+
+def test_verify_compliant_design_only(tmp_path, capsys):
+    p = design_csv(tmp_path, "Estaciones_refugio.csv", *V_OK)
+    assert main(["verify", "--profile", "PE-DS024-2016", "--design", str(p)]) == 0
+    assert "complies: " in capsys.readouterr().out
+
+
+def test_verify_reports(tmp_path, tabla, capsys):
+    args = verify_inputs(tmp_path, tabla)
+    h = tmp_path / "x.html"
+    assert main([*args, "--report", str(h)]) == 2
+    assert f"report: {h}" in capsys.readouterr().out and h.stat().st_size > 0 and LEAK not in h.read_text(encoding="utf-8")
+    pytest.importorskip("docx")
+    w = tmp_path / "x.docx"
+    assert main([*args, "--report", str(w), "--lang", "en"]) == 2 and w.stat().st_size > 0
+
+
+@pytest.mark.parametrize("extra", [
+    ["--profile", "ZZ"], ["--tramos", "t.xlsx"], ["--as-of", "2026-02-30"], ["--as-of", "2026-W01-1"], ["--report", "x.pdf"],
+])
+def test_verify_input_errors(tmp_path, capsys, extra):
+    base = ["verify", "--profile", "PE-DS024-2016"]
+    if extra[0] == "--profile":
+        base = ["verify"]
+    assert main([*base, *extra]) == 1
+    cap = capsys.readouterr()
+    assert cap.err.count("error:") == 1 and len(cap.err.strip().splitlines()) == 1 and "Traceback" not in cap.err
+    if extra == ["--profile", "ZZ"]:
+        assert "PE-DS024-2016" in cap.err
+
+
+def test_verify_design_errors(tmp_path, capsys):
+    for name, hoja in (("Refugios.csv", V_OK), ("Estaciones_refugio.csv", (V_OK[0], [["E1", "roca", 70, 400, 30, 2.5, ""]]))):
+        p = design_csv(tmp_path, name, *hoja)
+        assert main(["verify", "--profile", "PE-DS024-2016", "--design", str(p)]) == 1
+        err = capsys.readouterr().err
+        assert err.count("error:") == 1 and len(err.strip().splitlines()) == 1 and "2.5" not in err
+    assert main(["verify", "--profile", "PE-DS024-2016", "--tramos", "t.xlsx"]) == 1
+    assert "--tramos needs --tables" in capsys.readouterr().err

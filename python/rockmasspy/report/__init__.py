@@ -12,7 +12,7 @@ import datetime
 import io
 from collections import Counter
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .. import __version__
 from .. import _rockmasspy_core as rm
@@ -23,6 +23,9 @@ from ..labor_table import LaborTable, _key
 from ..q_chart_data import Q_CHARTS
 from ..range_table import RangeTable
 from .texts import DISCLAIMER, t
+
+if TYPE_CHECKING:  # verify importa a report vía build_anexo39b; evita el ciclo
+    from ..verify import VerificationResult
 
 
 @dataclass(frozen=True)
@@ -397,14 +400,19 @@ def _input_summary(results, tables, lang) -> Section:
 
 
 def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None, lang: str = "es",
-                   author: str = "", date: str = "", figures: bool = True) -> Report:
+                   author: str = "", date: str = "", figures: bool = True, stopes=()) -> Report:
     """Informe con la estructura del Anexo 39 B del DS 024-2016-EM; lo que la librería no calcula queda por completar.
+
+    `stopes` (resultados de `assess_stope_surfaces`) agrega las caras de tajeo al final de la 4.1.
 
     `author` va en el subtítulo, igual que en build_memoria; el autor del Word se pasa a write_docx.
     """
     _check_lang(lang)
     results, tables = _filter_labor(list(results), list(tables), labor_type)
     methods = _methods(results, tables, lang)
+    stopes = list(stopes)
+    if stopes:
+        methods = _merge_methods(methods, stopes)
 
     def todo(number, key, guide, *subs):
         return Section(number, t(key, lang), (Paragraph(t(guide, lang)), *subs), True)
@@ -420,7 +428,7 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
               tuple(tuple(_str(v) for v in _fila(r, len(cols) > len(_COLUMNS))) for r in results)),
         Table(t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
               tuple((m.method_id, m.verification, m.source) for m in methods)),
-        *q_blocks))
+        *q_blocks, *(_stope_blocks(stopes, lang, figures) if stopes else ())))
     s4 = Section("4", t("a_s4", lang), (
         s41, todo("4.2", "a_s42", "g42"),
         todo("4.3", "a_s43", "g43", todo("4.3.1", "a_s431", "g431"), todo("4.3.2", "a_s432", "g432"))))
@@ -432,6 +440,15 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
     )
     return Report(title, _subtitle(t("a_subtitle", lang), author, lang), lang, sections, methods, DISCLAIMER[lang], __version__,
                   date or datetime.date.today().isoformat())
+
+
+def _merge_methods(methods, stopes) -> tuple:
+    """Suma los métodos de Mathews a `methods` sin repetir el par (method_id, source)."""
+    out = {(m.method_id, m.source): m for m in methods}
+    for r in stopes:
+        for m in r.mathews.methods:
+            out.setdefault((m.method_id, m.source), MethodRef(m.method_id, m.verification.name, m.source))
+    return tuple(out.values())
 
 
 def _stope_blocks(results, lang: str, figures: bool) -> tuple:
@@ -464,11 +481,7 @@ def build_stope_report(results, *, title: str, lang: str = "es", author: str = "
     results = list(results)
     if not results:
         raise ValueError("results is empty: nothing to report")
-    out: dict[tuple[str, str], MethodRef] = {}
-    for r in results:
-        for m in r.mathews.methods:
-            out.setdefault((m.method_id, m.source), MethodRef(m.method_id, m.verification.name, m.source))
-    methods = tuple(out.values())
+    methods = _merge_methods((), results)
     counts = Counter(w for r in results for w in set(r.mathews.warnings))
     s4 = (Table(t("cap_st_warnings", lang), (t("h_warning", lang), t("h_faces", lang)),
                 tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),
@@ -483,6 +496,59 @@ def build_stope_report(results, *, title: str, lang: str = "es", author: str = "
         Section("5", t("st_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
     )
     return Report(title, _subtitle(t("stope_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang],
+                  __version__, date or datetime.date.today().isoformat())
+
+
+def build_verification_report(verification: "VerificationResult", *, title: str, lang: str = "es", author: str = "",
+                              date: str = "") -> Report:
+    """Informe de verificación normativa: alcance, perfil, hallazgos por sección y nota. Sin identificadores de fila."""
+    _check_lang(lang)
+    prof, as_of = verification.profile, verification.as_of
+    by = {s: [f for f in verification.findings if f.status == s]
+          for s in ("complies", "does_not_comply", "attention", "note", "not_checked", "not_verifiable")}
+
+    def force(i):
+        return t(f"force_{i.force}", lang)
+
+    esr = tuple((i.applies_to[0], str(i.value), force(i), i.source)
+                for i in prof.items if i.check == "esr" and i.in_force(as_of))
+    s2 = [Table(t("cap_profile", lang), (t("h_field", lang), t("h_value", lang)), (
+              (t("h_id", lang), prof.profile_id), (t("h_jurisdiction", lang), prof.jurisdiction),
+              (t("h_instruments", lang), "; ".join(prof.instruments)), (t("h_as_of", lang), as_of))),
+          Table(t("cap_sources", lang), (t("h_source", lang), t("h_title", lang), "URL"),
+                tuple((k, title_, url) for k, (title_, url) in prof.sources.items()))]
+    if esr:
+        s2.append(Table(t("cap_esr_profile", lang),
+                        (t("h_labor", lang), "ESR", t("h_force", lang), t("h_source", lang)), esr))
+    def orNone(table):  # una tabla vacía se reemplaza por un párrafo
+        return (table,) if table.rows else (Paragraph(t("none_items", lang)),)
+
+    judged = [f for s in ("complies", "does_not_comply", "attention", "note") for f in by[s]]
+    counts = verification.counts()
+    sections = (
+        Section("1", t("vr_s1", lang), (Paragraph(t("vr_scope", lang)),)),
+        Section("2", t("vr_s2", lang), tuple(s2)),
+        Section("3", t("vr_s3", lang), (
+            Table(t("cap_status_counts", lang), (t("h_status", lang), t("h_requirements", lang)),
+                  tuple((t(f"st_{s}", lang), str(n)) for s, n in counts.items())),
+            *orNone(Table(t("cap_findings", lang),
+                  (t("h_status", lang), t("h_article", lang), t("h_page", lang), t("h_force", lang),
+                   t("h_mark", lang), t("h_requirement", lang), t("h_detail", lang)),
+                  tuple((t(f"st_{f.status}", lang), f.item.article, f.item.page, force(f.item), f.item.verification,
+                         f.item.summary[lang], f.message) for f in judged))))),
+        Section("4", t("vr_s4", lang), orNone(Table(
+            t("cap_not_checked", lang),
+            (t("h_article", lang), t("h_force", lang), t("h_requirement", lang), t("h_missing", lang)),
+            tuple((f.item.article, force(f.item), f.item.summary[lang], f.message) for f in by["not_checked"])))),
+        Section("5", t("vr_s5", lang), orNone(Table(
+            t("cap_not_verifiable", lang),
+            (t("h_article", lang), t("h_page", lang), t("h_force", lang), t("h_requirement", lang),
+             t("h_detail", lang)),
+            tuple((f.item.article, f.item.page, force(f.item), f.item.summary[lang], f.message)
+                  for f in by["not_verifiable"])))),
+        Section("6", t("vr_s6", lang), (Paragraph(DISCLAIMER[lang]),)),
+    )
+    return Report(title, _subtitle(t("verif_title", lang), author, lang), lang, sections, (), DISCLAIMER[lang],
                   __version__, date or datetime.date.today().isoformat())
 
 

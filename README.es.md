@@ -190,6 +190,49 @@ rockmass mrmr --irs 100 --rqd 75 --spacing 0.5 1.0 3.0 --jc 10.8 --hr 30 --chart
 
 Ve `examples/06-tajeos-mathews-mrmr/`.
 
+## Verificación normativa (Perú, DS 024-2016-EM)
+
+`rockmass verify` y `verify(...)` comparan tus datos (tablas por labor, tramos, caras de tajeo y un juego de hojas de
+diseño) con los requisitos de un **perfil normativo**: un archivo JSON en `python/rockmasspy/profiles/`. El primero es
+`PE-DS024-2016`: el reglamento de seguridad minera del Perú (DS 024-2016-EM, con el DS 023-2017-EM y el DS
+034-2023-EM) y la guía de criterios geomecánicos de Osinergmin (2017). Cada requisito lleva su instrumento, artículo,
+página, URL y fuerza: **ley** (el reglamento) o **guía** (una recomendación, que nunca sale «no cumple»). Un texto
+que no regía en la fecha de `--as-of` sale como no verificable y dice desde cuándo rige el texto cargado.
+
+Seis estados: cumple, no cumple, atención, nota, **no revisado** (no diste datos para él) y **no verificable por la
+librería** (es de procedimiento, o no hay regla). Lee esto dos veces:
+
+- **«No verificable por la librería» no es un incumplimiento.** Significa que la librería no puede juzgarlo (un
+  estudio firmado, la publicación en la labor, la inspección trimestral); lo revisa el ingeniero.
+- **La librería nunca dice «aprobado».** Un «cumple» solo significa que los números declarados cumplen el límite
+  numérico que pudo revisar; el estudio firmado y el criterio del ingeniero siguen en pie.
+- Código de salida 0 si nada falla, 1 si hay un error de entrada, 2 si algo no cumple o pide atención. Las notas, los
+  ítems no revisados y los no verificables no cambian el código.
+
+```python
+import rockmasspy as rm
+from rockmasspy.design_inputs import DesignInputs, RefugeStation
+from rockmasspy.verify import verify
+
+# una estación de refugio inventada: RMR 55 sin sostenimiento declarado, a 400 m del frente, 30 m2 para 20 personas
+st = RefugeStation("E1", "roca", rmr=55, distancia_frente_m=400, area_m2=30, aforo=20)
+v = verify(rm.get_profile("PE-DS024-2016"), as_of="2026-11-02", design=DesignInputs(refuge_stations=(st,)))
+print(sorted(rm.available_profiles()))                  # ['PE-DS024-2016']
+print(v.counts())                                       # {'complies': 2, 'does_not_comply': 1, 'attention': 0, 'note': 0, 'not_checked': 12, 'not_verifiable': 9}
+print(v.exit_code)                                      # 2
+```
+
+Las hojas de diseño son `Estaciones_refugio`, `Refugios_peatonales`, `Resumen_QC`, `Factores_seguridad` y `Autosoporte`
+(un libro xlsx, o un CSV por hoja con ese nombre; todas son opcionales). Los identificadores de fila nunca llegan a la
+consola ni al informe. Por la línea de comandos:
+
+```bash
+rockmass verify --profile PE-DS024-2016 --as-of 2026-11-02 --tables galeria.json --tramos Tramos.csv \
+  --surfaces Superficies.csv --design Estaciones_refugio.csv Resumen_QC.csv --report verificacion.html
+```
+
+Ve `examples/07-verificacion-normativa-peru/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en

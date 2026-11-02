@@ -165,6 +165,56 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "zone_2": {"es": "transición", "en": "transition"},
     "zone_3": {"es": "hundimiento", "en": "caved"},
     "unknown_method": {"es": "sin información de verificación", "en": "no verification information"},
+    # --- Informe de verificación normativa ---
+    "verif_title": {"es": "Verificación normativa", "en": "Regulatory verification"},
+    "vr_s1": {"es": "Alcance", "en": "Scope"},
+    "vr_s2": {"es": "Perfil", "en": "Profile"},
+    "vr_s3": {"es": "Resultados", "en": "Results"},
+    "vr_s4": {"es": "No revisado por falta de datos", "en": "Not checked for lack of data"},
+    "vr_s5": {"es": "No verificable por la librería", "en": "Not verifiable by the library"},
+    "vr_s6": {"es": "Nota", "en": "Note"},
+    "vr_scope": {
+        "es": "Este documento revisa los datos entregados a RockMassPy contra los requisitos del perfil normativo "
+              "indicado, vigentes en la fecha de verificación. Distingue lo que es ley (reglamento) de lo que es guía "
+              "(recomendación) y lista, aparte, lo que la librería no puede verificar. No reemplaza el estudio "
+              "firmado por ingenieros colegiados ni la decisión del ingeniero.",
+        "en": "This document checks the data given to RockMassPy against the requirements of the stated regulatory "
+              "profile in force on the verification date. It tells law (regulation) from guide (recommendation) and "
+              "lists apart what the library cannot verify. It does not replace the study signed by chartered "
+              "engineers or the engineer's decision.",
+    },
+    "cap_profile": {"es": "Perfil normativo", "en": "Regulatory profile"},
+    "cap_sources": {"es": "Fuentes", "en": "Sources"},
+    "cap_esr_profile": {"es": "ESR por labor del perfil", "en": "Profile ESR by excavation"},
+    "cap_status_counts": {"es": "Hallazgos por estado", "en": "Findings by status"},
+    "cap_findings": {"es": "Hallazgos revisados", "en": "Findings reviewed"},
+    "cap_not_checked": {"es": "Requisitos sin datos para revisarlos", "en": "Requirements without data to check them"},
+    "cap_not_verifiable": {"es": "Requisitos que la librería no verifica", "en": "Requirements the library does not verify"},
+    "st_complies": {"es": "cumple", "en": "complies"},
+    "st_does_not_comply": {"es": "no cumple", "en": "does not comply"},
+    "st_attention": {"es": "atención", "en": "attention"},
+    "st_note": {"es": "nota", "en": "note"},
+    "st_not_checked": {"es": "no revisado", "en": "not checked"},
+    "st_not_verifiable": {"es": "no verificable por la librería", "en": "not verifiable by the library"},
+    "force_law": {"es": "ley", "en": "law"},
+    "force_guide": {"es": "guía", "en": "guide"},
+    "h_field": {"es": "Campo", "en": "Field"},
+    "h_value": {"es": "Valor", "en": "Value"},
+    "h_id": {"es": "Id del perfil", "en": "Profile id"},
+    "h_jurisdiction": {"es": "Jurisdicción", "en": "Jurisdiction"},
+    "h_instruments": {"es": "Instrumentos", "en": "Instruments"},
+    "h_as_of": {"es": "Fecha de verificación", "en": "Verification date"},
+    "h_title": {"es": "Título", "en": "Title"},
+    "h_force": {"es": "Fuerza", "en": "Force"},
+    "h_status": {"es": "Estado", "en": "Status"},
+    "h_article": {"es": "Artículo", "en": "Article"},
+    "h_page": {"es": "Página", "en": "Page"},
+    "h_mark": {"es": "Marca", "en": "Mark"},
+    "h_requirement": {"es": "Requisito", "en": "Requirement"},
+    "h_requirements": {"es": "Requisitos", "en": "Requirements"},
+    "none_items": {"es": "Ninguno.", "en": "None."},
+    "h_detail": {"es": "Detalle", "en": "Detail"},
+    "h_missing": {"es": "Dato que falta", "en": "Missing data"},
 }
 
 

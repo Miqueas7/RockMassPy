@@ -177,6 +177,20 @@ def _columns(results: Iterable[TramoResult]) -> tuple[str, ...]:
     return _COLUMNS + _Q_COLUMNS if any(r.q_chart or r.q_chart_warnings for r in results) else _COLUMNS
 
 
+def parse_esr_spec(value: str) -> EsrSpec:
+    """`C` -> "C"; `A:4` -> ("A", 4.0). La categoría se valida después, en `_validar_esr`."""
+    cat, colon, num = str(value).strip().partition(":")
+    if not cat.strip() or (colon and not num.strip()):
+        raise ValueError(f"invalid ESR {value!r}: expected C or A:4")
+    cat = cat.strip().upper()
+    if not colon:
+        return cat
+    try:
+        return (cat, float(num))
+    except ValueError:
+        raise ValueError(f"invalid ESR {value!r}: expected C or A:4") from None
+
+
 def _validar_esr(spec, edition: str) -> tuple[str, float | None]:
     cat, esr = spec if isinstance(spec, tuple) else (spec, None)
     cat = str(cat).upper()
