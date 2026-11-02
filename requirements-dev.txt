@@ -12,6 +12,7 @@ packaging==26.3
 pillow==13.0.0
 pyparsing==3.3.3
 pytest==9.2.0
+python-docx==1.2.0
 python-dateutil==4.0.0
 PyYAML==6.0.3
 scikit_build_core==1.1.1

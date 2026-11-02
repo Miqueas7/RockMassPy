@@ -270,4 +270,5 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
                   date or datetime.date.today().isoformat())
 
 
+from .docx import write_docx  # noqa: E402,F401
 from .html import write_html  # noqa: E402,F401
