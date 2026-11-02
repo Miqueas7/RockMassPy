@@ -20,6 +20,7 @@
 #include "rockmasspy/rmr76.hpp"
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
+#include "rockmasspy/stereonet.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -373,4 +374,24 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("erm_hoek_diederichs_simplified", &erm_hoek_diederichs_simplified, nb::arg("gsi"), nb::arg("d"));
     m.def("erm_hoek_diederichs_generalized", &erm_hoek_diederichs_generalized, nb::arg("gsi"), nb::arg("d"),
           nb::arg("ei_mpa"));
+
+    // Red estereográfica (geometría, sin MethodInfo)
+    nb::enum_<Projection>(m, "Projection", "Stereonet projection.")
+        .value("EqualAngle", Projection::EqualAngle).value("EqualArea", Projection::EqualArea);
+    nb::class_<PlaneOrientation>(m, "PlaneOrientation", "Plane: dip direction and dip, degrees.")
+        .def(nb::init<double, double>(), nb::arg("dip_direction_deg"), nb::arg("dip_deg"))
+        .def_ro("dip_direction_deg", &PlaneOrientation::dip_direction_deg).def_ro("dip_deg", &PlaneOrientation::dip_deg);
+    nb::class_<LineOrientation>(m, "LineOrientation", "Line in the lower hemisphere: trend and plunge, degrees.")
+        .def(nb::init<double, double>(), nb::arg("trend_deg"), nb::arg("plunge_deg"))
+        .def_ro("trend_deg", &LineOrientation::trend_deg).def_ro("plunge_deg", &LineOrientation::plunge_deg);
+    nb::class_<Point2>(m, "Point2", "Point of the unit disk (x east, y north).")
+        .def(nb::init<double, double>(), nb::arg("x"), nb::arg("y"))
+        .def_ro("x", &Point2::x).def_ro("y", &Point2::y);
+    m.def("pole_of", &pole_of, nb::arg("plane"));
+    m.def("plane_of", &plane_of, nb::arg("pole"));
+    m.def("plane_intersection", &plane_intersection, nb::arg("a"), nb::arg("b"), "None if the planes are parallel.");
+    m.def("angle_between", &angle_between, nb::arg("a"), nb::arg("b"), "Axial angle in [0, 90] degrees.");
+    m.def("project", &project, nb::arg("line"), nb::arg("projection"));
+    m.def("unproject", &unproject, nb::arg("point"), nb::arg("projection"));
+    m.def("great_circle", &great_circle, nb::arg("plane"), nb::arg("projection"), nb::arg("n") = 181);
 }
