@@ -221,7 +221,7 @@ def _delta(a, b):
 def _smr_cases(f: SlopeFace, planes, labels, face):
     """Un caso por plano medio (familia) o fila suelta, y uno de cuña por cada par con intersección.
 
-    Un eje (plano vertical, intersección horizontal) se evalúa por sus dos sentidos y gobierna el menor SMR;
+    Un eje (plano vertical, intersección horizontal) se evalúa por sus dos sentidos; el SMR discreto y el continuo toman cada uno el menor;
     una intersección vertical toma la tendencia de la cara.
     """
     exc = _EXCAVATIONS.get((f.excavacion or "").strip().casefold())
@@ -236,11 +236,10 @@ def _smr_cases(f: SlopeFace, planes, labels, face):
                        rm.smr(f.rmr_basico, mode, rm.SmrFunctions.Continuous, exc, ang))
 
     def peor(cands):
-        best = None
-        for c in cands:
-            if best is None or (c.discrete.smr, c.continuous.smr) < (best.discrete.smr, best.continuous.smr):
-                best = c
-        return best
+        # el discreto y el continuo son resultados aparte: cada uno toma su propio lado crítico
+        d = min(cands, key=lambda c: c.discrete.smr)
+        c = min(cands, key=lambda c: c.continuous.smr)
+        return d if d is c else SmrCase(d.label, d.mode, d.discrete, c.continuous)
 
     alpha_s = face.dip_direction_deg
     out = []

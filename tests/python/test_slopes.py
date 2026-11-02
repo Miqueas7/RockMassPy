@@ -277,3 +277,16 @@ def test_nota_planar_sin_limites(tmp_path):
     assert f"planar count without lateral limits is higher ({k.planar_no_limits} vs {k.planar})" in r.notes
     (r,) = correr(tmp_path, [T(dir_="0", buz="70")], jf=["R1,J1,50,10"])
     assert not any("without lateral limits" in n for n in r.notes)
+
+
+def test_eje_vertical_discreto_y_continuo_cada_uno_su_lado(tmp_path):
+    # cara 0/90 y plano vertical 90/0: los dos sentidos empatan en el discreto (35) y difieren en el continuo
+    face = rm.PlaneOrientation(0, 90)
+    exc = rm.SlopeExcavation.NormalBlastingOrMechanical
+    cont = []
+    for d, m in ((0, rm.SmrMode.Planar), (180, rm.SmrMode.Toppling)):
+        a = rm.smr_angles(m, d, 90, face)
+        cont.append(rm.smr(42, m, rm.SmrFunctions.Continuous, exc, a).smr)
+    assert abs(cont[0] - cont[1]) > 0.5
+    (r,) = correr(tmp_path, [T(dir_="0", buz="90")], jf=["R1,,90,0"])
+    assert r.smr_continuous.continuous.smr == pytest.approx(min(cont))
