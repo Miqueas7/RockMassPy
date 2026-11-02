@@ -37,8 +37,9 @@ def _block(b, lang, level) -> str:
 def _section(s, lang, level=2) -> str:
     h = min(level, 6)
     mark = f' <span class="todo">{escape(t("to_complete", lang))}</span>' if s.to_complete else ""
+    num = escape(s.number) + ". " if s.number else ""  # la memoria resumen va sin número
     inner = "".join(_block(b, lang, level + 1) for b in s.blocks)
-    return f"<section><h{h}>{escape(s.number)}. {escape(s.title)}{mark}</h{h}>{inner}</section>"
+    return f"<section><h{h}>{num}{escape(s.title)}{mark}</h{h}>{inner}</section>"
 
 
 def write_html(report, path) -> Path:

@@ -62,7 +62,7 @@ def _figure(doc, b, width) -> None:
 
 
 def _section(doc, s, lang, depth, ctx) -> None:
-    doc.add_heading(f"{s.number}. {s.title}", level=min(depth, 9))
+    doc.add_heading(f"{s.number}. {s.title}" if s.number else s.title, level=min(depth, 9))
     if s.to_complete:
         run = doc.add_paragraph().add_run(t("to_complete", lang))
         run.font.highlight_color = ctx["yellow"]
