@@ -12,6 +12,7 @@
 #include "rockmasspy/gsi.hpp"
 #include "rockmasspy/hoek_brown.hpp"
 #include "rockmasspy/method_info.hpp"
+#include "rockmasspy/q_support.hpp"
 #include "rockmasspy/q_system.hpp"
 #include "rockmasspy/rmr14.hpp"
 #include "rockmasspy/rmr76.hpp"
@@ -33,6 +34,8 @@ NB_MODULE(_rockmasspy_core, m) {
         .value("UserDefined", Verification::UserDefined, "Calibrated by the user on site data");
 
     nb::class_<MethodInfo>(m, "MethodInfo", "Method id, verification level and source of a result.")
+        .def(nb::init<std::string, Verification, std::string>(), nb::arg("method_id"), nb::arg("verification"),
+             nb::arg("source"))
         .def_ro("method_id", &MethodInfo::method_id)
         .def_ro("verification", &MethodInfo::verification)
         .def_ro("source", &MethodInfo::source);
@@ -189,6 +192,15 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("warnings", &QResult::warnings);
     m.def("q_value", &q_value, nb::arg("input"), nb::arg("edition") = QEdition::NGI2025,
           "Q and Q' with rock class (NGI 2025 by default).");
+    nb::class_<SupportFormulaResult>(m, "SupportFormulaResult", "Classic Q support formula result [V2].")
+        .def_ro("value", &SupportFormulaResult::value).def_ro("unit", &SupportFormulaResult::unit)
+        .def_ro("info", &SupportFormulaResult::info).def_ro("warnings", &SupportFormulaResult::warnings);
+    m.def("max_unsupported_span", &max_unsupported_span, nb::arg("q"), nb::arg("esr"),
+          "Maximum unsupported span 2*ESR*Q^0.4 in m (Barton et al. 1980) [V2].");
+    m.def("bolt_length_barton1980", &bolt_length_barton1980, nb::arg("span_m"), nb::arg("esr"),
+          "Roof bolt length 2 + 0.15*B/ESR in m (Barton et al. 1980) [V2].");
+    m.def("roof_pressure_grimstad_barton", &roof_pressure_grimstad_barton, nb::arg("q"), nb::arg("jn"),
+          nb::arg("jr"), "Roof support pressure (Grimstad and Barton 1993); unit not stated in the source [V2].");
     nb::class_<WallQResult>(m, "WallQResult", "Wall Q with the factor applied (5, 2.5 or 1).")
         .def_ro("q_wall", &WallQResult::q_wall).def_ro("factor", &WallQResult::factor)
         .def_ro("info", &WallQResult::info);

@@ -89,6 +89,7 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_rmr76.cpp
         tests/cpp/test_rmr14.cpp
         tests/cpp/test_q_system.cpp
+        tests/cpp/test_q_support.cpp
         tests/cpp/test_gsi.cpp
         tests/cpp/test_correlations.cpp
         tests/cpp/test_hoek_brown.cpp
