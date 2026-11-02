@@ -394,4 +394,11 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("project", &project, nb::arg("line"), nb::arg("projection"));
     m.def("unproject", &unproject, nb::arg("point"), nb::arg("projection"));
     m.def("great_circle", &great_circle, nb::arg("plane"), nb::arg("projection"), nb::arg("n") = 181);
+    nb::class_<FisherStats>(m, "FisherStats", "Axial Fisher statistics of a set of poles.")
+        .def_ro("mean", &FisherStats::mean).def_ro("n", &FisherStats::n)
+        .def_ro("resultant_length", &FisherStats::resultant_length).def_ro("kappa", &FisherStats::kappa)
+        .def_ro("alpha95_deg", &FisherStats::alpha95_deg).def_ro("info", &FisherStats::info)
+        .def_ro("warnings", &FisherStats::warnings);
+    m.def("fisher_stats", &fisher_stats, nb::arg("poles"));
+    m.def("pole_density", &pole_density, nb::arg("poles"), nb::arg("at"), nb::arg("area_fraction") = 0.01);
 }

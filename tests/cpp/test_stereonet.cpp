@@ -111,3 +111,47 @@ TEST(Stereonet, Validation) {
     EXPECT_NE(error_of([] { project({361, 10}, Projection::EqualArea); }).find("trend_deg"), std::string::npos);
     EXPECT_NE(error_of([&] { unproject({nan, 0}, Projection::EqualArea); }).find("x"), std::string::npos);
 }
+
+TEST(StereonetFisher, FourSymmetricPoles) {
+    const auto s = fisher_stats({{0, 80}, {90, 80}, {180, 80}, {270, 80}});
+    EXPECT_NEAR(s.mean.plunge_deg, 90, 1e-9);
+    EXPECT_NEAR(s.resultant_length, 4 * std::sin(80 * 3.14159265358979323846 / 180), 1e-9);
+    ASSERT_TRUE(s.kappa && s.alpha95_deg);
+    EXPECT_NEAR(*s.kappa, 49.3673, 1e-4);
+    EXPECT_NEAR(*s.alpha95_deg, 13.2067, 1e-4);
+    EXPECT_EQ(s.info.verification, Verification::Secondary);
+    EXPECT_NE(s.info.source.find("Tauxe"), std::string::npos);
+}
+
+TEST(StereonetFisher, SingleAndIdentical) {
+    const auto one = fisher_stats({{120, 40}});
+    EXPECT_NEAR(one.mean.trend_deg, 120, 1e-9);
+    EXPECT_NEAR(one.mean.plunge_deg, 40, 1e-9);
+    EXPECT_FALSE(one.kappa || one.alpha95_deg);
+    const auto three = fisher_stats({{120, 40}, {120, 40}, {120, 40}});
+    EXPECT_TRUE(std::isinf(*three.kappa));
+    EXPECT_EQ(*three.alpha95_deg, 0.0);
+}
+
+TEST(StereonetFisher, AxialNearVertical) {
+    const auto s = fisher_stats({{90, 2}, {270, 2}, {88, 1}, {272, 3}});
+    EXPECT_LT(s.mean.plunge_deg, 3.0);
+}
+
+TEST(StereonetFisher, DispersedWarnsAndErrors) {
+    const auto s = fisher_stats({{0, 0}, {90, 0}, {180, 45}, {270, 30}, {0, 89}});
+    if (!s.alpha95_deg) EXPECT_FALSE(s.warnings.empty());
+    EXPECT_THROW(fisher_stats({}), std::invalid_argument);
+    EXPECT_THROW(fisher_stats({{std::nan(""), 10}}), std::invalid_argument);
+}
+
+TEST(StereonetDensity, CountingCircle) {
+    const std::vector<LineOrientation> poles(50, LineOrientation{120, 40});
+    auto d = pole_density(poles, {{120, 40}, {150, 40}});
+    EXPECT_NEAR(d[0], 100.0, 1e-9);
+    EXPECT_EQ(d[1], 0.0);
+    EXPECT_NEAR(pole_density({{90, 0}}, {{270, 0}})[0], 100.0, 1e-9);
+    EXPECT_THROW(pole_density(poles, {{0, 0}}, 0.0), std::invalid_argument);
+    EXPECT_THROW(pole_density(poles, {{0, 0}}, 0.6), std::invalid_argument);
+    EXPECT_THROW(pole_density({}, {{0, 0}}), std::invalid_argument);
+}

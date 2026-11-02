@@ -13,10 +13,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "rockmasspy/method_info.hpp"
 #include "rockmasspy/validation.hpp"
 
 namespace rockmasspy {
@@ -142,6 +144,92 @@ inline std::vector<Point2> great_circle(PlaneOrientation plane, Projection p, in
     for (int i = 0; i < n; ++i) {
         const double f = pi * i / (n - 1), c = std::cos(f), s = std::sin(f);
         out.push_back(project(line_of({c * u[0] + s * v[0], c * u[1] + s * v[1], c * u[2] + s * v[2]}), p));
+    }
+    return out;
+}
+
+struct FisherStats {
+    LineOrientation mean;
+    int n;
+    double resultant_length;
+    std::optional<double> kappa;
+    std::optional<double> alpha95_deg;
+    MethodInfo info;
+    std::vector<std::string> warnings;
+};
+
+/// Estadística de Fisher de polos tratados como ejes (Tauxe et al., ec. 11.14-11.17).
+inline FisherStats fisher_stats(const std::vector<LineOrientation>& poles) {
+    using namespace stereonet_detail;
+    validation::require(!poles.empty(), "poles", "must not be empty", 0.0);
+    std::vector<Vec> v;
+    v.reserve(poles.size());
+    for (const auto& p : poles) {
+        check(p);
+        v.push_back(vec(p));
+    }
+    const auto dot = [](const Vec& a, const Vec& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    const auto sum = [&](const Vec& ref) {  // suma con cada polo en el hemisferio de ref
+        Vec s{0, 0, 0};
+        for (const auto& u : v) {
+            const double sg = dot(u, ref) < 0.0 ? -1.0 : 1.0;
+            for (int i = 0; i < 3; ++i) s[i] += sg * u[i];
+        }
+        return s;
+    };
+    const auto norm = [](const Vec& a) { return std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); };
+    Vec s = sum(v[0]);
+    validation::require(norm(s) > 1e-9, "poles", "resultant vector vanishes (poles cancel out)", norm(s));
+    s = sum(s);  // realinea a la media y recalcula
+    const double r = norm(s);
+    validation::require(r > 1e-9, "poles", "resultant vector vanishes (poles cancel out)", r);
+    Vec m{s[0] / r, s[1] / r, s[2] / r};
+    if (m[2] < 0.0) m = {-m[0], -m[1], -m[2]};
+    const int n = static_cast<int>(poles.size());
+    FisherStats out{line_of(m), n, r, std::nullopt, std::nullopt,
+                    {"Fisher1953-set-statistics", Verification::Secondary,
+                     "Tauxe et al., Essentials of Paleomagnetism (web edition, CC BY 4.0), section 11.2.1, eqs. "
+                     "11.14-11.17: mean of unit vectors, k = (N-1)/(N-R), alpha95 with p = 0.05; Fisher (1953) not "
+                     "read; poles treated as axes"},
+                    {}};
+    if (n == 1) return out;
+    if (n - r <= 1e-12) {
+        out.kappa = std::numeric_limits<double>::infinity();
+        out.alpha95_deg = 0.0;
+        return out;
+    }
+    out.kappa = (n - 1) / (n - r);
+    const double arg = 1.0 - ((n - r) / r) * (std::pow(1.0 / 0.05, 1.0 / (n - 1)) - 1.0);
+    if (arg < -1.0)
+        out.warnings.push_back("alpha95 undefined: poles too dispersed for their number");
+    else
+        out.alpha95_deg = deg(std::acos(std::min(1.0, arg)));
+    return out;
+}
+
+/// Densidad de polos por círculo de conteo de Schmidt: % de polos por 1 % del área del hemisferio.
+inline std::vector<double> pole_density(const std::vector<LineOrientation>& poles,
+                                        const std::vector<LineOrientation>& at, double area_fraction = 0.01) {
+    using namespace stereonet_detail;
+    validation::require(!poles.empty(), "poles", "must not be empty", 0.0);
+    validation::require(area_fraction > 0.0 && area_fraction <= 0.5, "area_fraction", "must be in (0, 0.5]",
+                        area_fraction);
+    std::vector<Vec> v;
+    v.reserve(poles.size());
+    for (const auto& p : poles) {
+        check(p);
+        v.push_back(vec(p));
+    }
+    const double cos_theta = 1.0 - area_fraction;  // theta = acos(1 - area_fraction)
+    std::vector<double> out;
+    out.reserve(at.size());
+    for (const auto& a : at) {
+        check(a);
+        const Vec c = vec(a);
+        int count = 0;
+        for (const auto& u : v)
+            if (std::fabs(u[0] * c[0] + u[1] * c[1] + u[2] * c[2]) >= cos_theta) ++count;
+        out.push_back(100.0 * count / static_cast<double>(v.size()) * (0.01 / area_fraction));
     }
     return out;
 }

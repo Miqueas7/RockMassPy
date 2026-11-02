@@ -115,3 +115,92 @@ def test_bordes():
 def test_validacion(make, field):
     with pytest.raises(ValueError, match=field):
         make()
+
+
+def test_fisher_cuatro_polos():
+    s = rm.fisher_stats([rm.LineOrientation(t, 80) for t in (0, 90, 180, 270)])
+    assert s.mean.plunge_deg == pytest.approx(90, abs=1e-9)
+    assert s.resultant_length == pytest.approx(4 * math.sin(math.radians(80)), abs=1e-9)
+    assert s.kappa == pytest.approx(49.3673, abs=1e-4)
+    assert s.alpha95_deg == pytest.approx(13.2067, abs=1e-4)
+    assert s.info.verification == rm.Verification.Secondary and "Tauxe" in s.info.source
+
+
+def test_fisher_uno_e_identicos():
+    s = rm.fisher_stats([rm.LineOrientation(120, 40)])
+    assert s.kappa is None and s.alpha95_deg is None
+    s = rm.fisher_stats([rm.LineOrientation(120, 40)] * 3)
+    assert math.isinf(s.kappa) and s.alpha95_deg == 0
+
+
+def test_fisher_axial_casi_vertical():
+    s = rm.fisher_stats([rm.LineOrientation(t, p) for t, p in ((90, 2), (270, 2), (88, 1), (272, 3))])
+    assert s.mean.plunge_deg < 3
+
+
+def test_fisher_dispersos_no_lanza():
+    s = rm.fisher_stats([rm.LineOrientation(t, p) for t, p in ((0, 0), (90, 0), (180, 45), (270, 30), (0, 89))])
+    if s.alpha95_deg is None:
+        assert any("alpha95 undefined" in w for w in s.warnings)
+
+
+def test_fisher_errores():
+    with pytest.raises(ValueError):
+        rm.fisher_stats([])
+    with pytest.raises(ValueError):
+        rm.fisher_stats([rm.LineOrientation(float("nan"), 10)])
+
+
+_line = st.builds(rm.LineOrientation, st.floats(0, 359.9), st.floats(0, 90))
+
+
+@given(st.lists(_line, min_size=2, max_size=8), st.lists(st.floats(0, 359.9), min_size=1, max_size=4))
+def test_fisher_invertir_polo_horizontal_no_cambia(poles, trends):
+    # un polo horizontal en t y en t + 180 es el mismo eje: media y kappa no cambian
+    flat = [rm.LineOrientation(t, 0) for t in trends]
+    flipped = [rm.LineOrientation((t + 180) % 360, 0) for t in trends]
+    a, b = rm.fisher_stats(poles + flat), rm.fisher_stats(poles + flipped)
+    assert a.resultant_length == pytest.approx(b.resultant_length, abs=1e-9)
+    assert rm.angle_between(a.mean, b.mean) < 1e-4 or a.resultant_length < 1e-3
+    if a.kappa is not None and math.isfinite(a.kappa):
+        assert a.kappa == pytest.approx(b.kappa, rel=1e-6)
+
+
+def test_fisher_invertir_eje_horizontal():
+    base = [rm.LineOrientation(t, p) for t, p in ((10, 0), (20, 5), (355, 3), (15, 0))]
+    flip = [rm.LineOrientation(190, 0)] + base[1:]  # 10/0 y 190/0 son el mismo eje
+    a, b = rm.fisher_stats(base), rm.fisher_stats(flip)
+    assert rm.angle_between(a.mean, b.mean) < 1e-6
+    assert a.kappa == pytest.approx(b.kappa, rel=1e-9)
+    assert a.resultant_length == pytest.approx(b.resultant_length, abs=1e-9)
+
+
+def test_densidad_circulo_de_conteo():
+    poles = [rm.LineOrientation(120, 40)] * 50
+    d = rm.pole_density(poles, [rm.LineOrientation(120, 40), rm.LineOrientation(150, 40)])
+    assert d[0] == pytest.approx(100) and d[1] == 0
+    assert rm.pole_density([rm.LineOrientation(90, 0)], [rm.LineOrientation(270, 0)])[0] == pytest.approx(100)
+    for bad in (0.0, 0.6):
+        with pytest.raises(ValueError):
+            rm.pole_density(poles, [rm.LineOrientation(0, 0)], bad)
+    with pytest.raises(ValueError):
+        rm.pole_density([], [rm.LineOrientation(0, 0)])
+
+
+@given(st.lists(_line, min_size=1, max_size=6), _line, st.floats(0.005, 0.5))
+def test_densidad_acotada(poles, at, frac):
+    d = rm.pole_density(poles, [at], frac)[0]
+    assert 0 <= d <= 100 * 0.01 / frac + 1e-9
+
+
+def test_densidad_media_uniforme():
+    import random
+
+    rng = random.Random(7)
+
+    def uniform():  # uniforme en el hemisferio inferior
+        return rm.LineOrientation(rng.uniform(0, 360), math.degrees(math.asin(rng.random())))
+
+    poles = [uniform() for _ in range(300)]
+    d = rm.pole_density(poles, [uniform() for _ in range(2000)])
+    assert sum(d) / len(d) == pytest.approx(1.0, abs=0.15)
