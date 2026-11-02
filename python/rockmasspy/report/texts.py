@@ -211,6 +211,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_page": {"es": "Página", "en": "Page"},
     "h_mark": {"es": "Marca", "en": "Mark"},
     "h_requirement": {"es": "Requisito", "en": "Requirement"},
+    "h_requirements": {"es": "Requisitos", "en": "Requirements"},
+    "none_items": {"es": "Ninguno.", "en": "None."},
     "h_detail": {"es": "Detalle", "en": "Detail"},
     "h_missing": {"es": "Dato que falta", "en": "Missing data"},
 }

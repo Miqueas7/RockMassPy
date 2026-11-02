@@ -520,28 +520,32 @@ def build_verification_report(verification: "VerificationResult", *, title: str,
     if esr:
         s2.append(Table(t("cap_esr_profile", lang),
                         (t("h_labor", lang), "ESR", t("h_force", lang), t("h_source", lang)), esr))
+    def orNone(table):  # una tabla vacía se reemplaza por un párrafo
+        return (table,) if table.rows else (Paragraph(t("none_items", lang)),)
+
     judged = [f for s in ("complies", "does_not_comply", "attention", "note") for f in by[s]]
     counts = verification.counts()
     sections = (
         Section("1", t("vr_s1", lang), (Paragraph(t("vr_scope", lang)),)),
         Section("2", t("vr_s2", lang), tuple(s2)),
         Section("3", t("vr_s3", lang), (
-            Table(t("cap_status_counts", lang), (t("h_status", lang), t("h_count", lang)),
+            Table(t("cap_status_counts", lang), (t("h_status", lang), t("h_requirements", lang)),
                   tuple((t(f"st_{s}", lang), str(n)) for s, n in counts.items())),
-            Table(t("cap_findings", lang),
+            *orNone(Table(t("cap_findings", lang),
                   (t("h_status", lang), t("h_article", lang), t("h_page", lang), t("h_force", lang),
                    t("h_mark", lang), t("h_requirement", lang), t("h_detail", lang)),
                   tuple((t(f"st_{f.status}", lang), f.item.article, f.item.page, force(f.item), f.item.verification,
-                         f.item.summary[lang], f.message) for f in judged)))),
-        Section("4", t("vr_s4", lang), (Table(
+                         f.item.summary[lang], f.message) for f in judged))))),
+        Section("4", t("vr_s4", lang), orNone(Table(
             t("cap_not_checked", lang),
             (t("h_article", lang), t("h_force", lang), t("h_requirement", lang), t("h_missing", lang)),
-            tuple((f.item.article, force(f.item), f.item.summary[lang], f.message) for f in by["not_checked"])),)),
-        Section("5", t("vr_s5", lang), (Table(
+            tuple((f.item.article, force(f.item), f.item.summary[lang], f.message) for f in by["not_checked"])))),
+        Section("5", t("vr_s5", lang), orNone(Table(
             t("cap_not_verifiable", lang),
-            (t("h_article", lang), t("h_page", lang), t("h_force", lang), t("h_requirement", lang)),
-            tuple((f.item.article, f.item.page, force(f.item), f.item.summary[lang])
-                  for f in by["not_verifiable"])),)),
+            (t("h_article", lang), t("h_page", lang), t("h_force", lang), t("h_requirement", lang),
+             t("h_detail", lang)),
+            tuple((f.item.article, f.item.page, force(f.item), f.item.summary[lang], f.message)
+                  for f in by["not_verifiable"])))),
         Section("6", t("vr_s6", lang), (Paragraph(DISCLAIMER[lang]),)),
     )
     return Report(title, _subtitle(t("verif_title", lang), author, lang), lang, sections, (), DISCLAIMER[lang],

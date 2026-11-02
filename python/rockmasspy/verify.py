@@ -251,12 +251,14 @@ def verify(profile: NormativeProfile, *, as_of: str | None = None, tables: Seque
         item = profile.version(iid, as_of)
         if item is None:
             vs = profile.versions(iid)
-            first, last = vs[0], max(vs, key=lambda i: i.effective_from)
-            if last.effective_to is not None and as_of > last.effective_to:
+            last = max(vs, key=lambda i: i.effective_from)
+            nxt = min((i for i in vs if i.effective_from > as_of), key=lambda i: i.effective_from, default=None)
+            if nxt is None:
                 tail = f"the loaded text ended on {last.effective_to}"
+                nxt = last
             else:
-                tail = f"the loaded text applies from {first.effective_from}"
-            findings.append(Finding(first, "not_verifiable",
+                tail = f"the loaded text applies from {nxt.effective_from}"
+            findings.append(Finding(nxt, "not_verifiable",
                                     f"no text of this item in force on {as_of} is loaded; {tail}"))
             continue
         status, msg = _RULES[item.check](item, ctx)

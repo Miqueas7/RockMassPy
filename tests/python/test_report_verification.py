@@ -166,3 +166,28 @@ def test_anexo39b_with_stopes():
     s41 = next(b for b in sec(r, "4").blocks if getattr(b, "number", "") == "4.1")
     methods_tb = next(b for b in s41.blocks if isinstance(b, rp.Table) and b.caption == "Métodos usados y su verificación")
     assert len(methods_tb.rows) == len(r.methods)
+
+
+def test_section5_says_why_not_in_force():
+    r = rp.build_verification_report(verify(PE, as_of="2020-06-01"), title="v")
+    t5 = tables(sec(r, "5"))[0]
+    assert t5.header[-1] == "Detalle"
+    row = next(x for x in t5.rows if "214" in x[0] and "b)" in x[0])
+    assert "2023-12-31" in row[-1]
+
+
+def test_count_header_says_requirements():
+    for lang, word in (("es", "Requisitos"), ("en", "Requirements")):
+        r = rp.build_verification_report(full_verification(), title="v", lang=lang)
+        assert tables(sec(r, "3"))[0].header == (tables(sec(r, "3"))[0].header[0], word)
+
+
+def test_empty_sections_show_none_paragraph():
+    import dataclasses
+    v = verify(PE, as_of=AS_OF)  # sin entradas: nada juzgado en la sección 3
+    r = rp.build_verification_report(v, title="v")
+    assert sec(r, "3").blocks[-1].text == "Ninguno." and len(tables(sec(r, "3"))) == 1
+    v2 = dataclasses.replace(v, findings=tuple(f for f in v.findings if f.status == "complies"))
+    r = rp.build_verification_report(v2, title="v", lang="en")
+    for n in ("4", "5"):
+        assert sec(r, n).blocks[-1].text == "None." and not tables(sec(r, n))

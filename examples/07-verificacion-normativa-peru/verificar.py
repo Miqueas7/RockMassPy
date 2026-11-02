@@ -11,7 +11,7 @@ import rockmasspy as rm
 import rockmasspy.report as rp
 from rockmasspy.cli import main as cli
 from rockmasspy.design_inputs import load_design_inputs
-from rockmasspy.normative import get_profile
+from rockmasspy.normative import get_profile, profile_esr_specs
 from rockmasspy.verify import verify
 
 PERFIL, FECHA = "PE-DS024-2016", "2026-11-02"
@@ -98,7 +98,7 @@ def main(out_dir: Path) -> dict:
     # 1. Entradas sintéticas: dos tablas, 8 tramos, 3 caras y los cinco CSV de diseño.
     tablas = [rm.load_table(p) for p in escribir_entradas(out_dir)["tables"]]
     tramos = rm.load_tramos(out_dir / "Tramos.csv")
-    resultados = rm.add_q_chart_reference(rm.classify_tramos(tramos, tablas), {"*": "C"})
+    resultados = rm.add_q_chart_reference(rm.classify_tramos(tramos, tablas), profile_esr_specs(get_profile(PERFIL), FECHA))
     caras = rm.assess_stope_surfaces(rm.load_stope_surfaces(out_dir / "Superficies.csv"))
     diseno = load_design_inputs([out_dir / f"{h}.csv" for h in _DISENO])
     # 2. Verificación con el perfil Perú y su informe.

@@ -463,7 +463,7 @@ def test_verify_reports(tmp_path, tabla, capsys):
 
 
 @pytest.mark.parametrize("extra", [
-    ["--profile", "ZZ"], ["--tramos", "t.xlsx"], ["--as-of", "2026-02-30"], ["--report", "x.pdf"],
+    ["--profile", "ZZ"], ["--tramos", "t.xlsx"], ["--as-of", "2026-02-30"], ["--as-of", "2026-W01-1"], ["--report", "x.pdf"],
 ])
 def test_verify_input_errors(tmp_path, capsys, extra):
     base = ["verify", "--profile", "PE-DS024-2016"]

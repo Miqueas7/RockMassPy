@@ -55,7 +55,8 @@ def test_as_of():
     v = V.verify(PE, as_of="2020-01-01")
     assert one(v, "PE-214b-qc").status == "not_verifiable" and "applies from" in one(v, "PE-214b-qc").message
     assert one(v, "PE-33-actualizacion").item.verification == "V2"
-    for bad in ("2026-02-30", "nan"):
+    assert "2016-07-29" in one(V.verify(PE, as_of="2010-01-01"), "PE-33-actualizacion").message
+    for bad in ("2026-02-30", "nan", "2026-W01-1"):
         with pytest.raises(ValueError):
             V.verify(PE, as_of=bad)
     assert V.verify(PE).as_of  # por defecto hoy

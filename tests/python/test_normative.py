@@ -87,6 +87,8 @@ BAD = [
     ("resumen sin en", mutate(lambda d: item(d).update(summary={"es": "x"})), "T-qc", "summary"),
     ("fecha 30 de febrero", mutate(lambda d: item(d).update(effective_from="2023-02-30")), "T-qc",
      "effective_from"),
+    ("fecha ISO de semana", mutate(lambda d: item(d).update(effective_from="2026-W01-1")), "T-qc",
+     "effective_from"),
     ("value true", mutate(lambda d: item(d).update(value=True)), "T-qc", "value"),
     ("umbral sin value", mutate(lambda d: item(d).pop("value")), "T-qc", "value"),
     ("umbral sin unit", mutate(lambda d: item(d).update(unit="")), "T-qc", "unit"),

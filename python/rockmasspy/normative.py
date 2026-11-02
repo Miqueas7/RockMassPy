@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import json
 import math
+import re
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -34,7 +35,7 @@ RULES: dict[str, bool] = {
 
 def _check_date(text, label: str) -> str:
     """Devuelve la fecha ISO (AAAA-MM-DD) o lanza ValueError sin el prefijo del archivo."""
-    if not isinstance(text, str) or len(text) != 10:
+    if not isinstance(text, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", text):
         raise ValueError(f"{label}: not an ISO date (YYYY-MM-DD)")
     try:
         datetime.date.fromisoformat(text)
