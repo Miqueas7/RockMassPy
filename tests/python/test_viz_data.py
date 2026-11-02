@@ -119,7 +119,14 @@ def test_histograma_40_exacto_va_a_la_clase_iv():
 def test_histograma_cantidad_y_rango_sobre_la_barra():
     fig = plot_class_histogram([10, 50, 55], RMR, catalog=CATALOG)
     txt = _texts(fig)
-    assert "III (40–60): 2" in txt and "V (0–20): 1" in txt and "I (80–100): 0" in txt
+    assert "III (40–60) · S2: 2" in txt and "V (0–20) · S3: 1" in txt and "I (80–100) · S0: 0" in txt
+
+
+def test_histograma_codigo_igual_a_etiqueta_no_se_repite():
+    tabla = RangeTable("RMR", "RMR89", [RangeClass(0, 50, "S1", "S1"), RangeClass(50, 100, "S0", "S0")])
+    cat = SupportCatalog([SupportType("S0", 1), SupportType("S1", 2)])
+    txt = _texts(plot_class_histogram([10], tabla, catalog=cat))
+    assert "S1 (0–50): 1" in txt and "S1 (0–50) · S1" not in txt
 
 
 def test_curva_recortada_se_corta_donde_empieza_el_recorte():

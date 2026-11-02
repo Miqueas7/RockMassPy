@@ -136,8 +136,8 @@ def support_color(order: int, n_types: int, style: Style) -> str:
         raise ValueError(f"order must be in 1..{n_types}, got {order!r}")
     colors = style.support_colors
     if n_types > len(colors):  # repetir colores confundiría dos tipos distintos
-        raise ValueError(f"{n_types} support types but only {len(colors)} support_colors; "
-                         f"pass a longer support_colors in Style")
+        raise ValueError(f"{n_types} support types but only {len(colors)} colours; "
+                         f"pass Style(support_colors=(...)) with at least {n_types} colours")
     if n_types == 1:
         return colors[0]
     return colors[round((order - 1) * (len(colors) - 1) / (n_types - 1))]

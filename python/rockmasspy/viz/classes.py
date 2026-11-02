@@ -38,7 +38,8 @@ def plot_class_histogram(values: Sequence[float], table: RangeTable, *, catalog:
     ax = fig.add_axes([0.1, 0.14, 0.85, 0.76])
     bars = ax.bar([c.label for c in classes], [counts[c.label] for c in classes], color=colors, edgecolor="0.3")
     for b, c in zip(bars, classes):  # sobre la barra: el rango de la clase y cuántos valores cayeron en ella
-        ax.annotate(f"{c.label} ({c.lo:g}–{c.hi:g}): {counts[c.label]}", (b.get_x() + b.get_width() / 2, b.get_height()),
+        code = f" · {c.support}" if c.support and c.support != c.label else ""  # sin repetir si el código es la etiqueta
+        ax.annotate(f"{c.label} ({c.lo:g}–{c.hi:g}){code}: {counts[c.label]}", (b.get_x() + b.get_width() / 2, b.get_height()),
                     ha="center", va="bottom", xytext=(0, 3), textcoords="offset points", fontsize=style.font_size - 1)
     ax.set_ylabel(text("count_axis", style.lang), fontsize=style.font_size)
     ax.set_title(text("class_hist_title", style.lang), fontsize=style.font_size + 3, fontweight="bold")

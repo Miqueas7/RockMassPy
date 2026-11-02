@@ -95,7 +95,7 @@ def test_support_colors_vacio_lanza():
 def test_mas_tipos_que_colores_lanza():
     s = Style(support_colors=("#ffffff", "#000000"))
     assert viz.support_color(2, 2, s) == "#000000"
-    with pytest.raises(ValueError, match="3 support types but only 2 support_colors.*longer support_colors"):
+    with pytest.raises(ValueError, match=r"3 support types but only 2 colours; pass Style\(support_colors=\(\.\.\.\)\) with at least 3 colours"):
         viz.support_color(1, 3, s)
 
 
