@@ -50,14 +50,48 @@ def test_proyecciones():
 @given(t=st.floats(0, 360), pl=st.floats(0, 89.9), proj=st.sampled_from([EA, EQ]))
 def test_proyeccion_ida_y_vuelta(t, pl, proj):
     pt = rm.project(rm.LineOrientation(t, pl), proj)
-    if proj == EQ:
-        assert math.hypot(pt.x, pt.y) <= 1 + 1e-12
-    if proj == EA:  # equiangular: r puede pasar de 1 solo con inmersión negativa; aquí r <= 1
-        assert math.hypot(pt.x, pt.y) <= 1 + 1e-12
+    assert math.hypot(pt.x, pt.y) <= 1 + 1e-12  # inmersión >= 0: dentro del disco en ambas proyecciones
     back = rm.unproject(pt, proj)
     assert back.plunge_deg == pytest.approx(pl, abs=1e-6)
     if pl < 89:
         assert adiff(back.trend_deg, t) < 1e-6
+
+
+@given(t=st.floats(0, 360), proj=st.sampled_from([EA, EQ]))
+def test_proyeccion_inmersion_90(t, proj):  # la tendencia es indiferente en el centro
+    pt = rm.project(rm.LineOrientation(t, 90), proj)
+    assert (pt.x, pt.y) == pytest.approx((0, 0), abs=1e-12)
+    assert rm.unproject(pt, proj).plunge_deg == pytest.approx(90, abs=1e-9)
+
+
+def test_cerca_de_vertical_ida_y_vuelta():
+    q = rm.plane_of(rm.pole_of(rm.PlaneOrientation(123, 89.999999)))
+    assert abs(q.dip_deg - 89.999999) < 1e-9
+
+
+def test_unproject_fuera_nombra_point():
+    with pytest.raises(ValueError, match="'point'") as e:
+        rm.unproject(rm.Point2(1.0, 0.1), EQ)
+    assert "1.00498" in str(e.value)
+
+
+def test_interseccion_horizontal_canonica():
+    P = rm.PlaneOrientation
+    for a, b in [(P(90, 45), P(270, 45)), (P(10, 90), P(100, 90)), (P(280, 90), P(10, 90))]:
+        ab, ba = rm.plane_intersection(a, b), rm.plane_intersection(b, a)
+        assert (ab.trend_deg, ab.plunge_deg) == pytest.approx((ba.trend_deg, ba.plunge_deg), abs=1e-9)
+        if ab.plunge_deg == 0:
+            assert 0 <= ab.trend_deg < 180
+
+
+def test_gran_circulo_oblicuo():
+    pl = rm.PlaneOrientation(130, 55)
+    pole = rm.pole_of(pl)
+    for proj in (EA, EQ):
+        g = rm.great_circle(pl, proj)
+        assert all(rm.angle_between(rm.unproject(p, proj), pole) == pytest.approx(90, abs=1e-6) for p in g)
+        mid = rm.project(rm.LineOrientation(130, 55), proj)
+        assert (g[90].x, g[90].y) == pytest.approx((mid.x, mid.y), abs=1e-9)
 
 
 def test_caso_publicado_riquelme_tabla4():
@@ -83,7 +117,8 @@ def test_interseccion_propiedades(d1, p1, d2, p2):
     if ab is not None:
         assert rm.angle_between(rm.pole_of(a), ab) == pytest.approx(90, abs=1e-6)
         assert rm.angle_between(rm.pole_of(b), ab) == pytest.approx(90, abs=1e-6)
-        assert rm.angle_between(ab, ba) < 1e-6
+        assert adiff(ab.trend_deg, ba.trend_deg) < 1e-6 or ab.plunge_deg > 89.999
+        assert ab.plunge_deg == pytest.approx(ba.plunge_deg, abs=1e-6)
 
 
 def test_paralelos():

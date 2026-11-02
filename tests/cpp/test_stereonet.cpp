@@ -155,3 +155,46 @@ TEST(StereonetDensity, CountingCircle) {
     EXPECT_THROW(pole_density(poles, {{0, 0}}, 0.6), std::invalid_argument);
     EXPECT_THROW(pole_density({}, {{0, 0}}), std::invalid_argument);
 }
+
+TEST(Stereonet, UnprojectOutsideNamesPoint) {
+    const auto msg = error_of([] { unproject({1.0, 0.1}, Projection::EqualArea); });
+    EXPECT_NE(msg.find("'point'"), std::string::npos);
+    EXPECT_NE(msg.find("1.00498"), std::string::npos);  // radio
+}
+
+TEST(Stereonet, NearVerticalRoundTrip) {
+    const auto q = plane_of(pole_of({123, 89.999999}));
+    EXPECT_NEAR(q.dip_deg, 89.999999, 1e-9);
+    const auto l = unproject(project({50, 89.999999}, Projection::EqualArea), Projection::EqualArea);
+    EXPECT_NEAR(l.plunge_deg, 89.999999, 1e-7);
+}
+
+TEST(Stereonet, HorizontalIntersectionCanonical) {
+    const PlaneOrientation a{10, 90}, b{100, 90}, c{280, 90};
+    for (auto [p, q] : {std::pair{a, b}, std::pair{b, a}, std::pair{a, c}, std::pair{c, a}}) {
+        const auto l = plane_intersection(p, q);
+        ASSERT_TRUE(l.has_value());
+        EXPECT_NEAR(l->plunge_deg, 90, 1e-9);  // dos verticales se cortan en vertical
+    }
+    // dos planos que cortan en horizontal: buzamientos opuestos con el mismo rumbo no, así que usamos rumbo
+    // distinto con ambos verticales y una línea de rumbo: planos verticales de igual rumbo son paralelos (None).
+    // Horizontal real: planos de buzamiento 45 en direcciones 90 y 270 se cortan en una línea N-S horizontal.
+    const auto l1 = plane_intersection({90, 45}, {270, 45});
+    const auto l2 = plane_intersection({270, 45}, {90, 45});
+    ASSERT_TRUE(l1 && l2);
+    EXPECT_NEAR(l1->plunge_deg, 0, 1e-9);
+    EXPECT_NEAR(l1->trend_deg, l2->trend_deg, 1e-9);
+    EXPECT_LT(l1->trend_deg, 180.0);
+}
+
+TEST(Stereonet, ObliqueGreatCircle) {
+    const PlaneOrientation pl{130, 55};
+    const auto pole = pole_of(pl);
+    for (auto proj : {Projection::EqualAngle, Projection::EqualArea}) {
+        const auto g = great_circle(pl, proj, 181);
+        for (const auto& pt : g) EXPECT_NEAR(angle_between(unproject(pt, proj), pole), 90, 1e-6);
+        const auto mid = project({130, 55}, proj);
+        EXPECT_NEAR(g[90].x, mid.x, 1e-9);
+        EXPECT_NEAR(g[90].y, mid.y, 1e-9);
+    }
+}

@@ -63,9 +63,18 @@ inline Vec vec(const LineOrientation& l) {
     const double t = rad(l.trend_deg), p = rad(l.plunge_deg);
     return {std::cos(p) * std::cos(t), std::cos(p) * std::sin(t), std::sin(p)};
 }
-inline LineOrientation line_of(Vec v) {  // v unitario con z >= 0
-    const double z = std::clamp(v[2], 0.0, 1.0);
-    return {wrap(deg(std::atan2(v[1], v[0]))), deg(std::asin(z))};
+/// canonical_axis: una línea horizontal es un eje, así que su tendencia se lleva a [0, 180) (misma regla para
+/// (a, b) y (b, a)); great_circle la deja en falso porque ahí los extremos del rumbo son puntos distintos del disco.
+inline LineOrientation line_of(Vec v, bool canonical_axis = false) {  // v unitario con z >= 0
+    const double z = std::max(v[2], 0.0);
+    if (canonical_axis && z < 1e-12) {
+        const double t = wrap(deg(std::atan2(v[1], v[0])));
+        const double h = t >= 180.0 ? t - 180.0 : t;
+        return {h > 180.0 - 1e-9 ? 0.0 : h, 0.0};  // 179.999999999 es 0 con ruido
+    }
+    const double h = std::hypot(v[0], v[1]);
+    if (canonical_axis && h < 1e-12) return {0.0, 90.0};  // vertical: tendencia indiferente, se fija en 0
+    return {wrap(deg(std::atan2(v[1], v[0]))), deg(std::atan2(z, h))};
 }
 }  // namespace stereonet_detail
 
@@ -101,7 +110,7 @@ inline std::optional<LineOrientation> plane_intersection(PlaneOrientation a, Pla
     const double norm = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
     if (norm < 1e-9) return std::nullopt;
     const double s = (c[2] < 0.0 ? -1.0 : 1.0) / norm;
-    return line_of({c[0] * s, c[1] * s, c[2] * s});
+    return line_of({c[0] * s, c[1] * s, c[2] * s}, true);
 }
 
 /// Radio en el disco unitario para una inmersión dada.
@@ -123,8 +132,8 @@ inline LineOrientation unproject(Point2 point, Projection p) {
     validation::require_finite(point.x, "x");
     validation::require_finite(point.y, "y");
     const double r2 = point.x * point.x + point.y * point.y;
-    validation::require(r2 <= 1.0 + 1e-12, "x", "point must lie inside the unit disk (x^2 + y^2 <= 1)", point.x);
     const double r = std::sqrt(r2);
+    validation::require(r2 <= 1.0 + 1e-12, "point", "must lie inside the unit disk (radius <= 1)", r);
     const double colat = p == Projection::EqualAngle ? 2.0 * std::atan(r) : 2.0 * std::asin(std::min(1.0, r / std::sqrt(2.0)));
     const double plunge = std::clamp(90.0 - deg(colat), 0.0, 90.0);
     return {r < 1e-15 ? 0.0 : wrap(deg(std::atan2(point.x, point.y))), plunge};
