@@ -11,15 +11,16 @@ from __future__ import annotations
 import datetime
 import io
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from .. import __version__
 from .. import _rockmasspy_core as rm
-from ..batch import _COLUMNS, _fila, summarize
+from ..batch import _COLUMNS, _columns, _fila, q_chart_crosstab, summarize
 from ..cell_table import CellTable
 from ..gsi_charts import GSI_CHARTS
 from ..labor_table import LaborTable, _key
+from ..q_chart_data import Q_CHARTS
 from ..range_table import RangeTable
 from .texts import DISCLAIMER, t
 
@@ -127,10 +128,53 @@ def _methods(results, tables, lang) -> tuple[MethodRef, ...]:
         if r.method == "Q" and tramo.q_valor is None and r.input_value is not None:
             eds[tramo.q_edicion if tramo.q_edicion in _Q_EDITIONS
                 else r.base_edition if r.base_edition in _Q_EDITIONS else "Q-NGI-2025"] = None
+    if _q_chart_edition(results):  # la carta digitalizada trae su método; las fórmulas [V2] no van en el lote
+        i = next(r.q_chart.roof.info for r in results if r.q_chart)
+        refs.append(MethodRef(i.method_id, i.verification.name, i.source))
     out: dict[str, MethodRef] = {}
     for m in [_method_ref(e, lang) for e in eds] + refs:
         out.setdefault(m.method_id, m)
     return tuple(out.values())
+
+
+# --- Carta Q (referencia) ---
+
+def _q_chart_edition(results) -> str | None:
+    """Edición de la carta usada por el lote (una sola, R13); None si ningún tramo trae referencia."""
+    eds = sorted({r.q_chart.edition for r in results if r.q_chart})
+    if len(eds) > 1:
+        raise ValueError(f"the report supports one Q edition per run, got {eds}")
+    return eds[0] if eds else None
+
+
+def _range(v) -> str:
+    return "-" if v is None else f"{v[0]:g}-{v[1]:g}" if v[1] is not None else f">{v[0]:g}"
+
+
+def _q_chart_blocks(results, lang: str, figures: bool) -> tuple:
+    from ..viz import plot_q_chart
+    from ..viz.style import Style, text
+
+    edition = _q_chart_edition(results)
+    refs = [r for r in results if r.q_chart]
+    labors: dict[str, tuple] = {}  # _key -> (rótulo como lo escribió el usuario, categoría ESR, ESR usado)
+    for r in refs:
+        labors.setdefault(_key(r.tramo.tipo_labor), (r.tramo.tipo_labor, r.q_chart.esr_category, r.q_chart.esr_used))
+    ct = q_chart_crosstab(results)
+    cats = sorted({c for _, c in ct})
+    rows = tuple((s, *(str(ct.get((s, c), 0)) for c in cats))
+                 for s in sorted({s for s, _ in ct}, key=lambda s: (s == "unclassified", s)))
+    legend = tuple((str(k), text(f"q_cat_{k}", lang), _range(c.shotcrete_mm), _str(c.sfr_energy_j), c.rrs or "-")
+                   for k, c in sorted(Q_CHARTS[edition].categories.items()))
+    return (
+        Paragraph(t("qchart_text", lang).format(edition=edition)),
+        Table(t("cap_esr", lang), (t("h_labor", lang), t("h_esr_cat", lang), t("h_esr", lang)),
+              tuple((a, b, _str(c)) for a, b, c in labors.values())),
+        Table(t("cap_crosstab", lang), (t("h_support", lang), *(f"Q {c}" for c in cats)), rows),
+        _fig(t("fig_qchart", lang), lambda: plot_q_chart(edition, results=refs, style=Style(lang=lang)), lang, figures),
+        Table(t("cap_qlegend", lang), (t("h_qcat", lang), t("h_label", lang), t("h_shotcrete", lang),
+                                       t("h_energy", lang), t("h_rrs", lang)), legend),
+    )
 
 
 # --- Figuras ---
@@ -260,8 +304,10 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
     s2 = Section("2", t("s2", lang), (Table(
         t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
         tuple((m.method_id, m.verification, m.source) for m in methods)),))
+    cols = _columns(results)
     s4 = Section("4", t("s4", lang), (Table(
-        t("cap_results", lang), _COLUMNS, tuple(tuple(_str(v) for v in _fila(r)) for r in results)),))
+        t("cap_results", lang), cols,
+        tuple(tuple(_str(v) for v in _fila(r, len(cols) > len(_COLUMNS))) for r in results)),))
     # avisos únicos con la cantidad de tramos que los tienen; nunca qué id_tramo
     counts = Counter(w for r in results for w in set(r.warnings))
     if counts:
@@ -269,12 +315,20 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
                            tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),)
     else:
         s7_blocks = (Paragraph(t("no_warnings", lang)),)
+    qw = Counter(w for r in results for w in set(r.q_chart_warnings)) if _q_chart_edition(results) else None
+    if qw:
+        s7_blocks += (Table(t("cap_qwarnings", lang), (t("h_warning", lang), t("h_count", lang)),
+                            tuple((w, str(n)) for w, n in sorted(qw.items(), key=lambda kv: (-kv[1], kv[0])))),)
+    s5 = _summary_section(results, tables, lang, figures)
+    if _q_chart_edition(results):
+        s5 = replace(s5, blocks=s5.blocks + (Section("5.1", t("s5_qchart", lang),
+                                                     _q_chart_blocks(results, lang, figures)),))
     sections = (
         Section("1", t("s1", lang), (Paragraph(t("s1_text", lang)),)),
         s2,
         _tables_section(tables, lang, figures),
         s4,
-        _summary_section(results, tables, lang, figures),
+        s5,
         _maps_section(results, tables, lang, figures),
         Section("7", t("s7", lang), s7_blocks),
         Section("8", t("s8", lang), (Paragraph(t("s8_text", lang)),)),
@@ -349,10 +403,14 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
     s3 = Section("3", t("a_s3", lang), (
         Table(t("cap_tramos", lang), cols3, tuple(_cols(r, cols3) for r in results)),
         *_profile_figs(results, tables, lang, figures)))
+    cols = _columns(results)
+    q_blocks = _q_chart_blocks(results, lang, figures) if _q_chart_edition(results) else ()
     s41 = Section("4.1", t("a_s41", lang), (
-        Table(t("cap_results", lang), _COLUMNS, tuple(tuple(_str(v) for v in _fila(r)) for r in results)),
+        Table(t("cap_results", lang), cols,
+              tuple(tuple(_str(v) for v in _fila(r, len(cols) > len(_COLUMNS))) for r in results)),
         Table(t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
-              tuple((m.method_id, m.verification, m.source) for m in methods))))
+              tuple((m.method_id, m.verification, m.source) for m in methods)),
+        *q_blocks))
     s4 = Section("4", t("a_s4", lang), (
         s41, todo("4.2", "a_s42", "g42"),
         todo("4.3", "a_s43", "g43", todo("4.3.1", "a_s431", "g431"), todo("4.3.2", "a_s432", "g432"))))
