@@ -56,4 +56,6 @@ from .csv_io import load_csv_dir, load_support_catalog_csv, save_csv_dir  # noqa
 from .tramos import TRAMO_COLUMNS, Tramo, load_tramos  # noqa: E402,F401
 from .batch import (BatchSummary, EsrSpec, TramoResult, add_q_chart_reference, classify_tramos,  # noqa: E402,F401
                     q_chart_crosstab, save_results, summarize)  # noqa: E402,F401
+from .stope_surfaces import (SURFACE_COLUMNS, StopeSurface, StopeSurfaceResult, assess_stope_surfaces,  # noqa: E402,F401
+                             load_stope_surfaces, save_stope_results, stope_zone_counts)
 from .table_files import load_table  # noqa: E402,F401

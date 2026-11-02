@@ -6,7 +6,7 @@ no llevan valores de columnas de identificación (solo códigos de sostenimiento
 
 from collections import Counter
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Union
@@ -233,23 +233,20 @@ def q_chart_crosstab(results: Iterable[TramoResult]) -> dict[tuple[str, int], in
                         for r in results if r.q_chart))
 
 
-def save_results(results: Iterable[TramoResult], path) -> Path:
-    """Escribe .xlsx (con [io]) o .csv (en el formato numérico de este computador). Solo lleva id_tramo como identificador."""
+def write_table(path, columns: Sequence[str], rows: Sequence[Sequence], *, sheet: str = "Resultados") -> Path:
+    """Escribe una tabla en .xlsx (con [io]) o .csv (en el formato numérico de este computador)."""
     p = Path(path)
-    results = list(results)
-    cols = _columns(results)
-    filas = [_fila(r, len(cols) > len(_COLUMNS)) for r in results]
     ext = p.suffix.lower()
     if ext == ".xlsx":
         openpyxl = _optional("openpyxl")
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = "Resultados"
-        ws.append(list(cols))
+        ws.title = sheet
+        ws.append(list(columns))
         for c in ws[1]:
             c.font = _optional("openpyxl.styles").Font(bold=True)
-        for f in filas:
-            ws.append(f)
+        for f in rows:
+            ws.append(list(f))
         wb.save(p)
     elif ext == ".csv":
         import csv
@@ -257,9 +254,16 @@ def save_results(results: Iterable[TramoResult], path) -> Path:
         sep, dec = _system_csv_format()
         with open(p, "w", encoding="utf-8-sig", newline="") as fh:
             w = csv.writer(fh, delimiter=sep)
-            w.writerow(cols)
-            for f in filas:
+            w.writerow(columns)
+            for f in rows:
                 w.writerow([_celda(v, dec) for v in f])
     else:
         raise ValueError(f"path: expected a .xlsx or .csv file, got {p.suffix!r}")
     return p
+
+
+def save_results(results: Iterable[TramoResult], path) -> Path:
+    """Escribe .xlsx (con [io]) o .csv (en el formato numérico de este computador). Solo lleva id_tramo como identificador."""
+    results = list(results)
+    cols = _columns(results)
+    return write_table(path, cols, [_fila(r, len(cols) > len(_COLUMNS)) for r in results])

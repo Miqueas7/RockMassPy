@@ -57,12 +57,12 @@ def _norm(h):
     return "" if h is None else _text(h).casefold()
 
 
-def _columnas(header, sheet, column_map):
+def _columnas(header, sheet, column_map, columns, required):
     """{columna nuestra: posición en el archivo}; el mapeo va de la columna del usuario a la nuestra."""
     cmap, orig = {}, {}
     for k, v in (column_map or {}).items():
-        if v not in TRAMO_COLUMNS:
-            raise ValueError(f"column_map maps '{k}' to unknown name '{v}'; valid names: {', '.join(TRAMO_COLUMNS)}")
+        if v not in columns:
+            raise ValueError(f"column_map maps '{k}' to unknown name '{v}'; valid names: {', '.join(columns)}")
         cmap[_norm(k)] = v
         orig[_norm(k)] = k
     heads = [_norm(h) for h in header]
@@ -71,56 +71,68 @@ def _columnas(header, sheet, column_map):
             raise ValueError(f"column '{orig[k]}' in column_map not found in sheet '{sheet}'")
     pos = {}
     for i, h in enumerate(heads):
-        c = cmap.get(h, h if h in TRAMO_COLUMNS else None)
+        c = cmap.get(h, h if h in columns else None)
         if c is None:
             continue
         if c in pos:
             raise ValueError(f"sheet '{sheet}': two columns map to '{c}'")
         pos[c] = i
-    for c in _OBLIGATORIAS:
+    for c in required:
         if c not in pos:
             extra = f" (column_map maps: {dict(column_map)})" if column_map else ""
             raise ValueError(f"sheet '{sheet}': required column '{c}' not found{extra}")
     return pos
 
 
-def _leer(src, sheet, column_map):
+def read_records(src, sheet, column_map, *, columns, text, required, ident, id_column, dates=()):
+    """Lee una hoja y devuelve [(fila, {columna: valor})]. Texto como texto, el resto como número con ubicación.
+
+    `required` se exige como columna y como valor; `ident` nunca aparece en un mensaje; `id_column` no se repite.
+    """
     if sheet not in src.sheetnames:
         raise ValueError(src.missing(sheet))
     rows = iter(src.rows(sheet))
-    pos = _columnas(next(rows, ()), sheet, column_map)
+    pos = _columnas(next(rows, ()), sheet, column_map, columns, required)
     dec = src.decimal_comma(sheet)
     out, vistos = [], {}
     for n, raw in enumerate(rows, start=2):
         vals = {}
-        for c in TRAMO_COLUMNS:
+        for c in columns:
             v = raw[pos[c]] if c in pos and pos[c] < len(raw) else None
             vals[c] = None if v is None or (isinstance(v, str) and not v.strip()) else v
         if all(v is None for v in vals.values()):
             continue
         for c, v in vals.items():
             if v is None:
-                if c in _OBLIGATORIAS:
+                if c in required:
                     raise ValueError(f"{_where(sheet, n, c)}: required value is empty")
-            elif c == "fecha_evaluacion":
+            elif c in dates:
                 vals[c] = _text(src.date(v))
-            elif c in _TEXTO:
+            elif c in text:
                 vals[c] = _text(v)
             else:
                 try:
                     vals[c] = _num(v, sheet, n, c, dec)
                 except ValueError:
-                    if c in _IDENT:
+                    if c in ident:
                         raise ValueError(f"{_where(sheet, n, c)}: invalid value") from None
                     raise
+        if vals[id_column] in vistos:
+            raise ValueError(f"sheet '{sheet}': duplicate {id_column} in rows {vistos[vals[id_column]]} and {n}")
+        vistos[vals[id_column]] = n
+        out.append((n, vals))
+    return out
+
+
+def _leer(src, sheet, column_map):
+    out = []
+    for n, vals in read_records(src, sheet, column_map, columns=TRAMO_COLUMNS, text=_TEXTO, required=_OBLIGATORIAS,
+                                ident=_IDENT, id_column="id_tramo", dates=("fecha_evaluacion",)):
         if vals["gsi_celda"] is not None:
             try:
                 vals["gsi_celda"] = normalize_cell(vals["gsi_celda"])
             except ValueError as e:
                 raise ValueError(f"{_where(sheet, n, 'gsi_celda')}: {e}") from None
-        if vals["id_tramo"] in vistos:
-            raise ValueError(f"sheet '{sheet}': duplicate id_tramo in rows {vistos[vals['id_tramo']]} and {n}")
-        vistos[vals["id_tramo"]] = n
         out.append(Tramo(**vals, fila=n))
     return out
 
