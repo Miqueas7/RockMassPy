@@ -44,7 +44,8 @@ En total: 225 planos, 5625 intersecciones, 0 avisos y 0 notas. `TL3` es la cara 
   cuya dirección de buzamiento está a ±L de la de la cara. Un plano casi perpendicular a la cara no la libera. La
   cuña no usa límite lateral. Un límite menor deja menos polos críticos.
 - **SMR discreto y continuo.** Las clases de Romana saltan por tramos; las funciones continuas de Tomás dan un valor
-  suave y casi igual (diferencia máxima menor a 7 puntos). Por eso `TL1` da 4.0 y 4.5 y la clase no cambia. Pueden
+  suave. En este ejemplo quedan cerca: en `resultados.csv`, `TL1` da 4.0 y 4.5, `TL2` 50.0 y 50.1 y `TL3` 90.0 y
+  89.7, y ninguna clase cambia. Pueden
   caer a lados distintos de un límite de clase: la hoja trae las dos lecturas y cada una con su propio caso que
   gobierna (`smr_caso` y `smr_caso_continuo`). Un valor justo en el límite toma la clase menos favorable.
 - **Una cara más empinada que β.** β = 20·log10(Q-slope) + 65° es el ángulo más empinado que no pide refuerzo ni
