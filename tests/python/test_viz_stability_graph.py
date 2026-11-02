@@ -1,3 +1,4 @@
+import math
 import os
 import subprocess
 import sys
@@ -127,3 +128,37 @@ def test_muestras():
         pytest.skip("RMP_SAMPLES_DIR no definido")
     for gid, tag in (("Mathews-Potvin1988", "mathews"), (LAUB, "laubscher")):
         save_figure(plot_stability_graph(gid, cases=CASOS[gid], points=[ESTRELLA[gid]]), Path(d) / f"t6_estabilidad_{tag}_es.png")
+
+
+@pytest.mark.parametrize("gid,fuera", [("Mathews-Potvin1988", [(10.0, 0.05), (30.0, 5.0), (30.0, 5000.0)]),
+                                       (LAUB, [(100.0, 50.0), (10.0, 150.0)])])
+def test_casos_fuera_del_marco_se_dibujan_en_el_borde(gid, fuera):  # I1
+    cases = [CASOS[gid][0], *fuera]
+    ax = plot_stability_graph(gid, cases=cases).axes[0]
+    assert len(ax.collections) == len(cases)
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    for c in ax.collections:
+        x, y = c.get_offsets()[0]
+        assert x0 <= x <= x1 and y0 <= y <= y1
+        assert tuple(c.get_facecolor()[0]) == (1.0, 1.0, 1.0, 1.0)
+
+
+@pytest.mark.parametrize("gid", sorted(STABILITY_GRAPHS))
+def test_rotulo_de_transicion_dentro_de_su_banda(gid):  # M2
+    g = STABILITY_GRAPHS[gid]
+    zona2 = next(r for r in g.regions if r.key == 2)
+    fig = plot_stability_graph(gid)
+    fig.canvas.draw()
+    ax = fig.axes[0]
+    t = next(t for t in ax.texts if t.get_text() == "Transición")
+    bb = t.get_window_extent().transformed(ax.transData.inverted())
+    cx, cy = (bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2
+    assert _classify(cx, math.log10(cy) if g.y_log else cy, zona2.polygon) > 0
+    assert t.get_fontsize() == Style().font_size - 2
+
+
+def test_rotulos_de_zona_iguales_a_la_lectura_en_ingles():  # M7
+    for gid, g in STABILITY_GRAPHS.items():
+        t = _textos(plot_stability_graph(gid, style=Style(lang="en")))
+        for k in (1, 2, 3):
+            assert g.zone_labels[k].capitalize() in t, (gid, k)

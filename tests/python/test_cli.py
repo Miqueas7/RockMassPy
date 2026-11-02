@@ -323,6 +323,7 @@ def test_mathews_summary_files_and_no_leak(tmp_path, capsys):
     assert cap.out.rstrip().endswith("the library recommends, the engineer decides")
     assert "SECRETO-123" not in cap.out and not re.search(r"S[1-6]", cap.out + cap.err)
     assert "SECRETO-123" not in cap.err and "SECRETO-123" not in out.read_text(encoding="utf-8")
+    assert "L-" not in cap.out + cap.err and "L-" not in out.read_text(encoding="utf-8")  # labor_codigo
     assert len(out.read_text(encoding="utf-8").splitlines()[0].split(",")) == 13
     assert (tmp_path / "x.html").stat().st_size > 0
 
@@ -367,3 +368,26 @@ def test_help_lists_new_commands(capsys):
         main(["--help"])
     out = capsys.readouterr().out
     assert "mathews" in out and "mrmr" in out
+
+
+def test_mathews_archivo_sin_caras(tmp_path, capsys):  # M4
+    p = stope_csv(tmp_path, [], nombre="vacio.csv")
+    assert main(["mathews", str(p), "--report", str(tmp_path / "x.html")]) == 1
+    assert capsys.readouterr().err == "error: no surfaces in vacio.csv\n"
+
+
+def test_mrmr_chart_sin_hr(tmp_path, capsys):  # M3
+    assert main(MR + ["--chart", str(tmp_path / "g.png")]) == 1
+    assert capsys.readouterr().err == "error: --chart needs --hr\n"
+
+
+@pytest.mark.parametrize("col", ["q_prima", "q_edicion"])
+def test_mathews_celda_mala_un_solo_error_sin_el_valor(tmp_path, capsys, col):  # I2 / Foco 5
+    cab = SCAB + ",q_edicion"
+    fila = ("S1,SECRETO-123,,,,,100,20,45,,90,,100,40,,,L-1,1,x,"
+            if col == "q_prima" else "S2,,80,9,1.5,1,100,20,45,gravedad,0,,,,10,20,L-2,1,x,SECRETO-123")
+    p = stope_csv(tmp_path, [fila], cab, nombre="m.csv")
+    assert main(["mathews", str(p)]) == 1
+    cap = capsys.readouterr()
+    assert cap.err.startswith("error: ") and cap.err.count("error:") == 1 and cap.err.count("\n") == 1
+    assert "SECRETO" not in cap.out + cap.err

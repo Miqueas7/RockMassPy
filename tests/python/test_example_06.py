@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("matplotlib")
-pytest.importorskip("docx")
 pytest.importorskip("openpyxl")
 
 RUTA = Path(__file__).resolve().parents[2] / "examples" / "06-tajeos-mathews-mrmr" / "tajeos.py"
@@ -21,5 +20,6 @@ def test_tajeos(tmp_path):
     assert r["exit_codes"]["mrmr"] == 0 and r["exit_codes"]["mathews"] == 2
     for nombre in r["files"]:
         assert (tmp_path / nombre).stat().st_size > 0, nombre
-    html = (tmp_path / "informe.html").read_text(encoding="utf-8")
-    assert "SECRETO" not in html
+    assert "SECRETO-123" in (tmp_path / "Superficies.csv").read_text(encoding="utf-8")  # la columna ajena existe
+    for nombre in ("informe.html", "resultados.csv"):
+        assert "SECRETO" not in (tmp_path / nombre).read_text(encoding="utf-8"), nombre

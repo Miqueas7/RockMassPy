@@ -33,9 +33,9 @@ def escribir_caras(out_dir: Path) -> Path:
     ruta = out_dir / "Superficies.csv"
     with open(ruta, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
-        w.writerow(rm.SURFACE_COLUMNS)
+        w.writerow([*rm.SURFACE_COLUMNS, "observaciones"])  # una columna ajena: la librería no la lee
         for c in _CARAS:
-            w.writerow(["" if c.get(k) is None else c[k] for k in rm.SURFACE_COLUMNS])
+            w.writerow([*("" if c.get(k) is None else c[k] for k in rm.SURFACE_COLUMNS), "SECRETO-123"])
     return ruta
 
 

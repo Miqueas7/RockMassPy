@@ -23,6 +23,26 @@ def _check(name, pairs, y_log):
             raise ValueError(f"{name} must be finite with x > 0 and y {'> 0' if y_log else '>= 0'}, got ({x}, {y})")
 
 
+def _fit_band(ax, label, g, poly):
+    """Si el rótulo, ya dibujado, no cabe en su banda, lo gira a la pendiente local de la frontera."""
+    from ..chart_regions import _classify
+
+    def plano(x, y):  # píxeles -> plano del gráfico (log10 N′ en el de Potvin)
+        x, y = ax.transData.inverted().transform((x, y))
+        return x, (math.log10(y) if g.y_log else y)
+
+    ax.figure.canvas.draw()
+    bb = label.get_window_extent()
+    if all(_classify(*plano(x, y), poly) > 0 for x in (bb.x0, bb.x1) for y in (bb.y0, bb.y1)):
+        return
+    x = label.get_position()[0]
+    line = g.boundaries[0]
+    a, b = next(((a, b) for a, b in zip(line, line[1:]) if a[0] <= x <= b[0]), line[-2:])
+    (x0, y0), (x1, y1) = (ax.transData.transform((p[0], 10 ** p[1] if g.y_log else p[1])) for p in (a, b))
+    label.set_rotation_mode("anchor")
+    label.set_rotation(math.degrees(math.atan2(y1 - y0, x1 - x0)))
+
+
 def plot_stability_graph(graph_id: str = "Mathews-Potvin1988", *, cases: Sequence[tuple[float, float]] = (),
                          points: Sequence[tuple[float, float]] = (), style: Style = Style()):
     """Gráfico de estabilidad con sus tres zonas, los casos (x = HR, y = N′ o MRMR) y puntos de diseño sueltos."""
@@ -43,15 +63,22 @@ def plot_stability_graph(graph_id: str = "Mathews-Potvin1988", *, cases: Sequenc
     def poly(p):
         return [(x, yv(y)) for x, y in p]
 
+    def zona(k):  # en inglés, la palabra de la lectura de ese gráfico
+        return text(f"stab_zone_{k}", lang) if lang == "es" else g.zone_labels[k].capitalize()
+
     ax = fig.add_axes([0.09, 0.12, 0.62, 0.78])
+    medio = None
     for reg in g.regions:
         color = support_color(reg.key, 3, style)
         ax.add_patch(Polygon(poly(reg.polygon), closed=True, facecolor=color, edgecolor="none", zorder=1))
         x, y = _label_point(reg.polygon)
         ink = _ink(color)
         halo = [withStroke(linewidth=2, foreground="white" if ink == "black" else "#222222")]
-        ax.text(x, yv(y), text(f"stab_zone_{reg.key}", lang), ha="center", va="center", color=ink,
-                fontsize=style.font_size + 2, fontweight="bold", zorder=2, path_effects=halo)
+        t = ax.text(x, yv(y), zona(reg.key), ha="center", va="center", color=ink,
+                    fontsize=style.font_size + (2 if reg.key != 2 else -2), fontweight="bold", zorder=2,
+                    path_effects=halo)
+        if reg.key == 2:
+            medio = (t, reg.polygon)
     for reg in g.no_data:
         ax.add_patch(Polygon(poly(reg.polygon), closed=True, fill=False, hatch="//", edgecolor="0.3", linewidth=0,
                              zorder=1.5))
@@ -70,12 +97,15 @@ def plot_stability_graph(graph_id: str = "Mathews-Potvin1988", *, cases: Sequenc
     ax.set_ylabel(text(_Y_AXIS[graph_id], lang), fontsize=style.font_size)
     ax.set_title(text(_TITULO[graph_id], lang), fontsize=style.font_size + 2)
 
+    if medio:
+        _fit_band(ax, medio[0], g, medio[1])
     for x, y in cases:  # sin rótulo: círculo blanco con borde negro, legible sobre cualquier relleno y en B/N
+        x, y = min(x, x1), min(max(y, y0), y1)  # fuera del marco: en el borde (solo al dibujar)
         ax.scatter([x], [y], marker="o", c="white", edgecolors="black", linewidths=0.9, s=55, zorder=4)
     for x, y in points:
         ax.scatter([x], [y], marker="*", c="black", edgecolors="white", linewidths=0.6, s=170, zorder=5)
 
-    zonas = [Patch(facecolor=support_color(k, 3, style), edgecolor="black", label=text(f"stab_zone_{k}", lang))
+    zonas = [Patch(facecolor=support_color(k, 3, style), edgecolor="black", label=zona(k))
              for k in (1, 2, 3)]
     if g.no_data:
         zonas.append(Patch(fill=False, hatch="//", edgecolor="0.3", label=text("stab_dashed", lang)))

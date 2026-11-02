@@ -95,6 +95,8 @@ def mathews_stability(q_prime: float, hr_m: float, *, ucs_mpa: float, sigma1_mpa
                       joint_dip_deg: float | None = None, q_info: rm.MethodInfo | None = None,
                       graph: str = "Mathews-Potvin1988") -> MathewsResult:
     """N′ = Q′·A·B·C y su lectura en el gráfico de estabilidad. `q_info` es el `info` del `q_value` que dio Q′."""
+    if graph != "Mathews-Potvin1988":  # el eje y de los demás gráficos no es N′
+        raise ValueError(f"{graph} is not a Mathews stability graph")
     for name, v in (("q_prime", q_prime), ("hr_m", hr_m)):
         if not math.isfinite(v) or v <= 0:
             raise ValueError(f"{name} must be finite and > 0, got {v}")

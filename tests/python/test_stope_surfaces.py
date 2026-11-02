@@ -127,3 +127,41 @@ def test_columnas_extra_no_se_leen(tmp_path):
     assert "SECRETO-123" not in str(e.value)
     out = rm.save_stope_results(evaluar(p), tmp_path / "r.csv")
     assert "SECRETO-123" not in out.read_text(encoding="utf-8-sig")
+
+
+CAB_Q = CAB + ",q_edicion"
+
+
+@pytest.mark.parametrize("fila", ["S1,SECRETO-123,,,,,100,20,45,,90,,100,40,,,,,,",
+                                  "S1,,80,9,1.5,1,100,20,45,,90,,100,40,,,,,,SECRETO-123"])
+def test_celda_mala_no_repite_su_valor(tmp_path, fila):  # I2
+    with pytest.raises(ValueError) as e:
+        evaluar(una(tmp_path, fila, CAB_Q))
+    m = str(e.value)
+    assert "SECRETO" not in m and "row 2" in m
+    assert "invalid value" in m or "q_edicion" in m
+
+
+def test_nombre_real_de_la_hoja_en_errores_de_evaluacion(tmp_path):  # M1
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Otra"
+    ws.append(CAB.split(","))
+    ws.append([None if c == "" else (float(c) if c.replace(".", "").isdigit() else c)
+               for c in "S1,10,,,,,100,20,45,,90,,130,40,,,,,".split(",")])
+    wb.save(tmp_path / "s.xlsx")
+    with pytest.raises(ValueError, match="sheet 'Otra', row 2"):
+        rm.assess_stope_surfaces(rm.load_stope_surfaces(tmp_path / "s.xlsx", sheet="Otra"))
+    p = csv(tmp_path, ["S1,10,,,,,100,20,45,,90,,130,40,,,,,"], nombre="caras.csv")
+    with pytest.raises(ValueError, match="sheet 'caras', row 2"):
+        evaluar(p)
+    assert "hoja" not in repr(rm.load_stope_surfaces(p)[0])
+
+
+def test_grafico_que_no_es_de_n_prima(tmp_path):  # M5
+    with pytest.raises(ValueError, match="is not a Mathews stability graph"):
+        rm.assess_stope_surfaces(rm.load_stope_surfaces(csv(tmp_path)), graph="Laubscher1994-stability")
+    with pytest.raises(ValueError, match="is not a Mathews stability graph"):
+        rm.mathews_stability(10, 5, ucs_mpa=100, sigma1_mpa=20, dip_difference_deg=45, surface_inclination_deg=90,
+                             graph="Laubscher1994-stability")

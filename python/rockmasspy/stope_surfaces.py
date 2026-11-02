@@ -5,7 +5,7 @@ Reutiliza el lector de `tramos` y el escritor de `batch`. Solo se leen las colum
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from . import _rockmasspy_core as rm
@@ -43,16 +43,17 @@ class StopeSurface:
     ancho_m: float | None
     largo_m: float | None
     fila: int  # fila de origen (la cabecera es la 1)
+    hoja: str = field(default=SHEET, repr=False, compare=False)  # hoja de origen, para los errores
 
 
-SURFACE_COLUMNS = tuple(f.name for f in fields(StopeSurface) if f.name != "fila")
+SURFACE_COLUMNS = tuple(f.name for f in fields(StopeSurface) if f.name not in ("fila", "hoja"))
 _TEXTO = {"id_superficie", "q_edicion", "modo_falla"}
 
 
-def _fila(vals, n):
+def _fila(vals, n, sheet):
     """Valida una fila ya leída (obligatorias y combinaciones) y pone los valores por defecto."""
     def falta(c, motivo="required value is empty"):
-        raise ValueError(f"{_where(SHEET, n, c)}: {motivo}")
+        raise ValueError(f"{_where(sheet, n, c)}: {motivo}")
 
     def hay(c):
         return vals[c] is not None
@@ -88,13 +89,13 @@ def _fila(vals, n):
     vals = {**vals, "modo_falla": modo, "q_edicion": vals["q_edicion"] or "Q-NGI-2025"}
     if vals["dif_rumbo_junta_deg"] is None:
         vals["dif_rumbo_junta_deg"] = 0.0
-    return StopeSurface(**vals, fila=n)
+    return StopeSurface(**vals, fila=n, hoja=sheet)
 
 
 def _leer(src, sheet, column_map):
     recs = read_records(src, sheet, column_map, columns=SURFACE_COLUMNS, text=_TEXTO, required=("id_superficie",),
-                        ident=set(), id_column="id_superficie")
-    return [_fila(v, n) for n, v in recs]
+                        ident=set(SURFACE_COLUMNS) - {"modo_falla", "q_edicion"}, id_column="id_superficie")
+    return [_fila(v, n, sheet) for n, v in recs]
 
 
 def load_stope_surfaces(path, *, sheet: str = SHEET, column_map: Mapping[str, str] | None = None) -> list[StopeSurface]:
@@ -122,7 +123,7 @@ def _evaluar(s: StopeSurface, graph: str) -> MathewsResult:
         q, info = s.q_prima, None
     else:
         if s.q_edicion not in _Q_EDITIONS:
-            raise ValueError(f"q_edicion must be one of {sorted(_Q_EDITIONS)}, got {s.q_edicion!r}")
+            raise ValueError(f"q_edicion must be one of {sorted(_Q_EDITIONS)}")
         r = rm.q_value(rm.QInput(s.rqd_pct, s.jn, s.jr, s.ja, 1.0, 1.0), _Q_EDITIONS[s.q_edicion])
         q, info = r.q_base, r.info
     hr = (rm.hydraulic_radius(s.area_m2, s.perimetro_m) if s.area_m2 is not None
@@ -140,7 +141,7 @@ def assess_stope_surfaces(surfaces: Iterable[StopeSurface], *, graph: str = "Mat
         try:
             out.append(StopeSurfaceResult(s.id_superficie, _evaluar(s, graph)))
         except ValueError as e:
-            raise ValueError(f"sheet '{SHEET}', row {s.fila}: {e}") from None
+            raise ValueError(f"sheet '{s.hoja}', row {s.fila}: {e}") from None
     return out
 
 

@@ -179,10 +179,12 @@ def _mathews(a) -> int:
     if a.report and ext not in (".docx", ".html"):
         raise ValueError("report must end in .docx or .html")
     rs = assess_stope_surfaces(load_stope_surfaces(a.surfaces, sheet=a.sheet, column_map=_column_map(a.column_map)))
+    if not rs:
+        raise ValueError(f"no surfaces in {Path(a.surfaces).name}")
     counts = stope_zone_counts(rs)
     ws = Counter(w for r in rs for w in set(r.mathews.warnings))
-    info = rs[0].mathews.reading.info if rs else None
-    print(f"graph: {rs[0].mathews.graph} [{info.verification.name}]" if rs else "graph: none")
+    info = rs[0].mathews.reading.info
+    print(f"graph: {rs[0].mathews.graph} [{info.verification.name}]")
     print(f"surfaces: {len(rs)}")
     for z, name in ((1, "stable"), (2, "transition"), (3, "caved")):
         print(f"{name}: {counts[z]}")
@@ -191,13 +193,13 @@ def _mathews(a) -> int:
         print(f"warning: {w} ({n})")
     if a.output:
         print(f"results: {save_stope_results(rs, a.output)}")
-    if a.chart and rs:
+    if a.chart:
         from .viz import Style, plot_stability_graph, save_figure
 
         fig = plot_stability_graph(rs[0].mathews.graph, cases=[(r.mathews.reading.x, r.mathews.reading.y) for r in rs],
                                    style=Style(lang=a.lang))
         print(f"chart: {save_figure(fig, a.chart)}")
-    if a.report and rs:
+    if a.report:
         rep = rp.build_stope_report(rs, title=a.title or t("stope_title", a.lang), lang=a.lang, author=a.author or "",
                                     figures=not a.no_figures)
         out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
@@ -221,6 +223,8 @@ def _mrmr(a) -> int:
     from . import _rockmasspy_core as rm
     from .stability_graphs import read_stability_graph
 
+    if a.chart and a.hr is None:
+        raise ValueError("--chart needs --hr")
     rqd_path, ff_path = a.rqd is not None or a.spacing is not None, a.ff is not None or a.sets is not None
     if rqd_path == ff_path or (rqd_path and (a.rqd is None or a.spacing is None)) or (ff_path and (a.ff is None or a.sets is None)):
         raise ValueError("give exactly one path: --rqd and --spacing, or --ff and --sets")
@@ -273,7 +277,7 @@ def _mrmr(a) -> int:
     for w in warnings:
         print(f"warning: {w}")
     print("the library recommends, the engineer decides")
-    if a.chart and point:
+    if a.chart:
         from .viz import Style, plot_stability_graph, save_figure
 
         print(f"chart: {save_figure(plot_stability_graph('Laubscher1994-stability', points=[point], style=Style(lang=a.lang)), a.chart)}")

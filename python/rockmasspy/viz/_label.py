@@ -18,7 +18,7 @@ def _centroid(poly):
 
 
 def _label_point(poly):
-    """Centroide en log; si cae fuera del polígono, el punto medio de la cuerda horizontal más larga por su De."""
+    """Centroide en log; si cae fuera del polígono, el punto medio de la cuerda horizontal más larga a esa altura."""
     cx, cy = _centroid(poly)
     if _classify(cx, cy, poly) > 0:
         return cx, cy
