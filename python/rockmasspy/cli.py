@@ -15,7 +15,7 @@ from .batch import classify_tramos, save_results, summarize
 from .table_files import load_table
 from .tramos import load_tramos
 
-_INPUT_ERRORS = (ValueError, ImportError, FileNotFoundError)
+_INPUT_ERRORS = (ValueError, ImportError, OSError)
 
 
 def _column_map(path):
@@ -89,10 +89,18 @@ def _report(a) -> int:
     return code
 
 
+class _Parser(argparse.ArgumentParser):
+    """Los errores de uso salen con 1 (2 queda para «terminó pero hay avisos»)."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(1, f"error: {message}\n")
+
+
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="rockmass", description="RockMassPy command line.")
+    p = _Parser(prog="rockmass", description="RockMassPy command line.")
     p.add_argument("--debug", action="store_true", help="show the traceback on errors")
-    sub = p.add_subparsers(dest="cmd")
+    sub = p.add_subparsers(dest="cmd", parser_class=_Parser)
 
     c = sub.add_parser("check", help="validate tables and print their issues")
     c.add_argument("tables", nargs="+", metavar="TABLE")

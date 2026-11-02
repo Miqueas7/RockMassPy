@@ -2,6 +2,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -152,6 +153,25 @@ def test_no_subcommand_prints_help(capsys):
 def test_entry_points():
     r = subprocess.run([sys.executable, "-m", "rockmasspy.cli", "--help"], capture_output=True, text=True)
     assert r.returncode == 0 and "rockmass" in r.stdout
-    exe = shutil.which("rockmass", path=str(__import__("pathlib").Path(sys.executable).parent))
+    exe = shutil.which("rockmass", path=str(Path(sys.executable).parent))
     if exe:
         assert subprocess.run([exe, "--help"], capture_output=True).returncode == 0
+
+
+def test_usage_errors_exit_one(capsys):
+    for argv in (["classify"], ["bogus"]):
+        with pytest.raises(SystemExit) as e:
+            main(argv)
+        assert e.value.code == 1
+    assert "error:" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as e:
+        main(["--help"])
+    assert e.value.code == 0
+
+
+def test_output_is_directory_exit_one(tmp_path, tabla, capsys):
+    out = tmp_path / "out.xlsx"
+    out.mkdir()
+    assert main(["classify", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(out)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and err.count("\n") == 1
