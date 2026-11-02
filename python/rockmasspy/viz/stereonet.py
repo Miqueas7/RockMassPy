@@ -15,7 +15,7 @@ from .style import Style, footer, new_figure, support_color, text
 MODES = ("planar", "wedge", "flexural_toppling", "direct_toppling")
 _PROJ = {"equal_area": rm.Projection.EqualArea, "equal_angle": rm.Projection.EqualAngle}
 _DENSITY_GRID = 61
-_ZONE_GRID = 161
+_ZONE_GRID = 321
 _LINE = "#08306B"  # azul oscuro: fronteras y borde de la zona, distinto de la paleta de la densidad
 _FILL = "#9ECAE1"
 
@@ -97,17 +97,18 @@ def _counts(mode, planes, lines, ki):
 
 
 def _label(ax, code, plane, proj, taken, style):
-    """Código de la familia junto a un extremo de su círculo máximo, fuera del primitivo y sin pisar otros."""
+    """Código de la familia sobre el punto medio de su círculo máximo (el de mayor buzamiento); si choca, en sus extremos."""
     a = plane.dip_direction_deg
+    q = rm.project(_line(a, plane.dip_deg), proj)
+    cands = [(q.x, q.y)]
     for r in (1.07, 1.15, 1.23):
         for t in (a + 270.0, a + 90.0):
-            q = rm.project(_line(t, 0.0), proj)
-            x, y = q.x * r, q.y * r
-            if all(math.hypot(x - u, y - v) > 0.11 for u, v in taken):
-                taken.append((x, y))
-                ax.text(x, y, code, ha="center", va="center", fontsize=style.font_size, zorder=8,
-                        bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none"))
-                return
+            e = rm.project(_line(t, 0.0), proj)
+            cands.append((e.x * r, e.y * r))
+    x, y = next(((x, y) for x, y in cands if all(math.hypot(x - u, y - v) > 0.11 for u, v in taken)), cands[-1])
+    taken.append((x, y))  # si todo choca, se dibuja igual en el último: nunca se omite
+    ax.text(x, y, code, ha="center", va="center", fontsize=style.font_size, zorder=8,
+            bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none"))
 
 
 def plot_stereonet(planes: Sequence[rm.PlaneOrientation] = (), *,
@@ -172,7 +173,7 @@ def plot_stereonet(planes: Sequence[rm.PlaneOrientation] = (), *,
         X, Y, at = _grid(_ZONE_GRID, proj)
         Z = np.array([float(_critical(mode, ln, ki)) for ln in at]).reshape(X.shape)
         if Z.max() > 0:
-            for cs in (ax.contourf(X, Y, Z, levels=[0.5, 1.5], colors=[_FILL], alpha=0.5, zorder=2),
+            for cs in (ax.contourf(X, Y, Z, levels=[0.5, 1.5], colors=[_FILL], alpha=0.35, zorder=2),
                        ax.contour(X, Y, Z, levels=[0.5], colors=[_LINE], linewidths=1.0, zorder=2)):
                 cs.set_clip_path(clip)
         handles.append(Patch(facecolor=_FILL, edgecolor=_LINE, alpha=0.8, label=text("stereo_critical_zone", lang)))
@@ -209,6 +210,6 @@ def plot_stereonet(planes: Sequence[rm.PlaneOrientation] = (), *,
     if mode:
         k, n = _counts(mode, list(planes), list(intersections), ki)
         if n:
-            lines.insert(0, f"{k} of {n} ({100 * k / n:.0f} %) | {text('stereo_feasibility', lang)}")
+            lines.insert(0, text("stereo_count", lang).format(k=k, n=n, pct=f"{100 * k / n:.0f}") + " | " + text("stereo_feasibility", lang))
     footer(fig, "\n".join(lines), style)
     return fig

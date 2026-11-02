@@ -1,3 +1,4 @@
+import math
 import random
 import subprocess
 import sys
@@ -51,12 +52,45 @@ def _textos(fig):
 def test_una_figura_por_modo(mode, proj):
     fig = _fig(mode, projection=proj)
     txt = "\n".join(_textos(fig))
-    assert mode == "wedge" or "of" in txt
+    assert " de " in txt
     assert "F1" in txt and "N" in _textos(fig)
 
 
+def _esperado(mode):
+    planes = _conjunto()
+    ki = rm.KinematicInput(FACE, 30, 30)
+    if mode in ("planar", "flexural_toppling"):
+        return sum(getattr(rm.check_plane(p, ki), mode) for p in planes), len(planes)
+    ch = [rm.check_intersection(x, ki) for x in _lineas(planes)]
+    return sum((c.wedge_primary or c.wedge_secondary) if mode == "wedge" else c.direct_toppling for c in ch), len(ch)
+
+
+METODO = {"planar": "Kinematic-PlanarSliding", "wedge": "Kinematic-WedgeSliding",
+          "flexural_toppling": "Kinematic-FlexuralToppling-Goodman1980",
+          "direct_toppling": "Kinematic-DirectToppling-HudsonHarrison1997"}
+
+
+@pytest.mark.parametrize("lang, de", [("es", "de"), ("en", "of")])
+@pytest.mark.parametrize("mode", MODES)
+def test_linea_de_conteo_y_metodo(mode, lang, de):
+    k, n = _esperado(mode)
+    textos = _textos(_fig(mode, lang=lang))
+    assert any(t.startswith(f"{k} {de} {n} ({100 * k / n:.0f} %) | ") for t in textos)
+    assert any(METODO[mode] in t for t in textos)
+
+
 def test_conteo_planar():
-    assert any("40 of 100" in t for t in _textos(_fig("planar")))
+    assert any("40 de 100 (40 %)" in t for t in _textos(_fig("planar")))
+
+
+def test_rotulos_de_familias_del_mismo_rumbo():
+    fig = plot_stereonet([], families=[("F1", P(180, 45)), ("F2", P(0, 72))])
+    ax = fig.axes[0]
+    pos = {t.get_text(): t.get_position() for t in ax.texts if t.get_text() in ("F1", "F2")}
+    assert pos["F1"][1] < 0 < pos["F2"][1]  # lados opuestos de la red
+    for code, plane in (("F1", P(180, 45)), ("F2", P(0, 72))):
+        pts = [(q.x, q.y) for q in rm.great_circle(plane, rm.Projection.EqualArea, 181)]
+        assert min(math.hypot(pos[code][0] - x, pos[code][1] - y) for x, y in pts) < 0.05
 
 
 def _colecciones(fig):

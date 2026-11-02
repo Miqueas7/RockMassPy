@@ -150,6 +150,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "stereo_mode_wedge": {"es": "deslizamiento en cuña", "en": "wedge sliding"},
     "stereo_mode_flexural_toppling": {"es": "volteo flexural", "en": "flexural toppling"},
     "stereo_mode_direct_toppling": {"es": "volteo directo", "en": "direct toppling"},
+    "stereo_count": {"es": "{k} de {n} ({pct} %)", "en": "{k} of {n} ({pct} %)"},
     "stereo_feasibility": {"es": "factibilidad, no probabilidad", "en": "feasibility, not probability"},
     "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
 }
