@@ -45,3 +45,22 @@ def test_readme_charts_example(archivo, previo, titulo, tmp_path, monkeypatch):
             exec(compile(bloque, archivo, "exec"), espacio)
     assert salida.getvalue().splitlines()[-len(esperado):] == esperado
     assert (tmp_path / "figs" / "cartilla.png").stat().st_size > 0
+
+
+TRAMOS = [("README.md", "## Per-labor support tables", "## Tramos, batch, report and CLI"),
+          ("README.es.md", "## Tablas de sostenimiento por labor", "## Tramos, lote, informe y CLI")]
+
+
+@pytest.mark.parametrize("archivo,previo,titulo", TRAMOS)
+def test_readme_tramos_example(archivo, previo, titulo, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # el bloque escribe tramos.csv y el informe
+    monkeypatch.setenv("MPLBACKEND", "Agg")
+    codigo = bloques(archivo, previo) + bloques(archivo, titulo)  # el bloque usa `labor` del primero
+    assert len(codigo) == 2, f"{archivo}: expected one block per section"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[1].splitlines() if ln.startswith("print(") and "#" in ln]
+    espacio, salida = {}, io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        for bloque in codigo:
+            exec(compile(bloque, archivo, "exec"), espacio)
+    assert salida.getvalue().splitlines()[-len(esperado):] == esperado
+    assert any(tmp_path.glob("informe.html")) or any(tmp_path.glob("report.html"))

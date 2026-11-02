@@ -82,6 +82,46 @@ env = viz.plot_hb_envelopes(50.0, p, sigma3max_mpa=1.35, gsi=45, mi=10, d=0)  # 
 El mismo módulo dibuja la carta GSI cuantificada, las envolventes Hoek-Brown, la dispersión Q–RMR y los histogramas por
 clase; cada figura dice su fuente en el pie. La librería recomienda, el ingeniero decide. Ver `examples/03-cartillas/`.
 
+## Tramos, lote, informe y CLI
+
+Necesita los extras `pip install "rockmasspy[io,viz,report]"` (el informe HTML solo pide el paquete base; el Word pide
+`[report]` y las figuras `[viz]`). `load_tramos` lee una hoja `Tramos` (Excel o CSV) y acepta un `column_map` de tus
+nombres de columna a los de la plantilla. La clasificación nunca se detiene por una fila: un tramo sin tabla para su
+labor o su luz, o sin el valor del método, queda sin clasificar (`label=None`) con un aviso, y el resumen lo cuenta
+aparte. Ni la librería ni la CLI imprimen filas de tramos.
+
+```python
+from pathlib import Path
+
+import rockmasspy as rm
+import rockmasspy.report as rp
+
+Path("tramos.csv").write_text("id_tramo,Labor,luz_m,RMR\nT01,galería,3.5,53\n", encoding="utf-8")   # una hoja de una fila
+tramos = rm.load_tramos("tramos.csv", column_map={"RMR": "rmr_valor", "Labor": "tipo_labor"})   # CSV: la hoja es el nombre del archivo
+resultados = rm.classify_tramos(tramos, [labor])                   # `labor` viene de la sección de tablas
+resumen = rm.summarize(resultados)
+rm.save_results(resultados, "resultados.csv")                      # o .xlsx (pide [io])
+informe = rp.build_memoria(resultados, [labor], title="Memoria de cálculo", lang="es")
+rp.write_html(informe, "informe.html")                             # rp.write_docx(informe, "informe.docx") pide [report]
+print(resumen.total, resumen.classified)                           # 1 1
+```
+
+Todo informe dice lo que es: «La librería recomienda, el ingeniero decide. Este documento no reemplaza el estudio
+geomecánico firmado.» en la portada y en el pie de cada página, más la edición y la marca de verificación de cada
+método y la versión de RockMassPy. `rp.build_anexo39b` da la estructura del Anexo 39 B del DS 024.
+
+El mismo flujo desde la línea de comandos (código de salida 0 bien, 1 error de entrada o de uso, 2 terminó pero hay
+algo que revisar):
+
+```bash
+rockmass check galeria.json
+rockmass cartilla galeria.json -o cartilla.png
+rockmass classify tramos.xlsx --tables galeria.json -o resultados.csv
+rockmass report tramos.xlsx --tables galeria.json -o informe.docx --template anexo39b --labor galería
+```
+
+Ver `examples/04-informe/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
