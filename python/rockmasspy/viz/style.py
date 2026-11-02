@@ -122,6 +122,18 @@ TEXTS: dict[str, dict[str, str]] = {
     "q_cat_7": {"es": "refuerzo pesado con costillas (referencial)", "en": "heavy ribbed reinforcement (indicative)"},
     "q_cat_8": {"es": "refuerzo máximo con costillas (referencial)", "en": "maximum ribbed reinforcement (indicative)"},
     "q_cat_9": {"es": "evaluación especial (referencial)", "en": "special evaluation (indicative)"},
+    "stab_title_mathews": {"es": "Gráfico de estabilidad de Mathews (Potvin)", "en": "Mathews stability graph (Potvin)"},
+    "stab_title_laubscher": {"es": "Gráfico de estabilidad de Laubscher", "en": "Laubscher stability graph"},
+    "hr_axis": {"es": "Radio hidráulico HR (m)", "en": "Hydraulic radius HR (m)"},
+    "nprime_axis": {"es": "Número de estabilidad N′", "en": "Stability number N′"},
+    "mrmr_axis": {"es": "MRMR (puntos)", "en": "MRMR (points)"},
+    "stab_zone_1": {"es": "Estable", "en": "Stable"},
+    "stab_zone_2": {"es": "Transición", "en": "Transition"},
+    "stab_zone_3": {"es": "Hundimiento", "en": "Caving"},
+    "stab_dashed": {"es": "frontera a trazos (extrapolada)", "en": "dashed boundary (extrapolated)"},
+    "stab_digitized_mathews": {"es": "digitalizado de Potvin (1988), Fig. 7.22", "en": "digitized from Potvin (1988), Fig. 7.22"},
+    "stab_digitized_laubscher": {"es": "digitalizado de Laubscher (1994), Fig. 1", "en": "digitized from Laubscher (1994), Fig. 1"},
+    "stab_case": {"es": "caso evaluado", "en": "assessed case"},
     "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
 }
 
