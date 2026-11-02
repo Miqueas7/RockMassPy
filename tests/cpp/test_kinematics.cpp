@@ -84,3 +84,70 @@ TEST(Kinematics, Validation) {
     EXPECT_NE(error_of([] { check_plane({180, 45}, with(30, 20, 0)); }).find("dip_deg"), std::string::npos);
     EXPECT_NE(error_of([] { kinematic_analysis({{0, 10}}, {0, 1}, kIn); }).find("groups"), std::string::npos);
 }
+
+TEST(Kinematics, PlaneEqualToFaceGivesPrimaryWedgeUnderRotation) {
+    for (double face_dip : {45.0, 75.0})
+        for (double t = 0; t < 360; t += 7) {  // 52 azimuts
+            const KinematicInput in{{t, face_dip}, 30, 20};
+            const auto r = kinematic_analysis({{t, face_dip}, {std::fmod(t + 37, 360), 50}}, {-1, -1}, in);
+            ASSERT_EQ(r.n_intersections, 1);
+            EXPECT_TRUE(r.intersections[0].wedge_primary) << "face " << face_dip << " az " << t;
+        }
+}
+
+TEST(Kinematics, VerticalPlaneIsTheSameFromEitherSide) {
+    EXPECT_EQ(check_plane({0, 90}, kIn).flexural_toppling, check_plane({180, 90}, kIn).flexural_toppling);
+    EXPECT_TRUE(check_plane({180, 90}, kIn).flexural_toppling);
+}
+
+TEST(Kinematics, VerticalLineIsInvariantToTrend) {
+    for (const auto& in : {kIn, KinematicInput{{180, 90}, 30, 20}}) {
+        const auto a = check_intersection({0, 90}, in), b = check_intersection({180, 90}, in);
+        EXPECT_EQ(a.wedge_primary, b.wedge_primary);
+        EXPECT_EQ(a.wedge_secondary, b.wedge_secondary);
+        EXPECT_EQ(a.direct_toppling, b.direct_toppling);
+        EXPECT_EQ(a.direct_toppling_oblique, b.direct_toppling_oblique);
+    }
+    EXPECT_TRUE(check_intersection({0, 90}, kIn).direct_toppling);
+    EXPECT_FALSE(check_intersection({0, 90}, kIn).wedge_primary);
+    EXPECT_TRUE(check_intersection({0, 90}, KinematicInput{{180, 90}, 30, 20}).wedge_primary);  // cara vertical
+}
+
+TEST(Kinematics, HorizontalLineWithVerticalFaceChecksBothEnds) {
+    const KinematicInput in{{180, 90}, 30, 20};
+    const auto r = kinematic_analysis({{90, 90}, {30, 90}}, {-1, -1}, in);
+    ASSERT_EQ(r.n_intersections, 1);
+    EXPECT_TRUE(r.intersections[0].direct_toppling);
+    EXPECT_TRUE(check_intersection({180, 0}, in).direct_toppling);
+    EXPECT_TRUE(check_intersection({0, 0}, in).direct_toppling);
+}
+
+TEST(Kinematics, FaceRangeErrorsCarryPrefix) {
+    EXPECT_NE(error_of([] { check_plane({180, 45}, KinematicInput{{400, 60}, 30, 20}); }).find("face.dip_direction_deg"),
+              std::string::npos);
+    EXPECT_NE(error_of([] { check_plane({180, 45}, KinematicInput{{180, 95}, 30, 20}); }).find("face.dip_deg"),
+              std::string::npos);
+}
+
+TEST(Kinematics, Azimuth360EqualsZero) {
+    const KinematicInput a{{0, 60}, 30, 20}, b{{360, 60}, 30, 20};
+    for (double dd : {0.0, 360.0, 10.0, 350.0}) {
+        EXPECT_EQ(check_plane({dd, 45}, a).planar, check_plane({dd, 45}, b).planar);
+        EXPECT_EQ(check_plane({dd, 80}, a).flexural_toppling, check_plane({dd, 80}, b).flexural_toppling);
+    }
+    EXPECT_EQ(check_intersection({360, 40}, a).wedge_primary, check_intersection({0, 40}, a).wedge_primary);
+}
+
+TEST(Kinematics, FaceNotSteeperThanFrictionNothingCritical) {
+    const auto flat = with(30, 20, 30);
+    for (double dd = 0; dd < 360; dd += 30)
+        for (double dip : {10.0, 45.0, 80.0, 90.0}) EXPECT_FALSE(check_plane({dd, dip}, flat).flexural_toppling);
+}
+
+TEST(Kinematics, ObliqueNeedsOutsideLimits) {
+    const auto in = with(60, 20, 30);  // φ > βs: 90 - φ = 30 <= plunge < 90 - βs = 60
+    const auto inside = check_intersection({0, 45}, in);  // dentro de los límites
+    EXPECT_FALSE(inside.direct_toppling);
+    EXPECT_FALSE(inside.direct_toppling_oblique);
+    EXPECT_TRUE(check_intersection({90, 45}, in).direct_toppling_oblique);  // fuera de los límites
+}

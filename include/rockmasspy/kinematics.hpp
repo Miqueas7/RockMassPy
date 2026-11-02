@@ -54,8 +54,12 @@ inline double cosd(double d) { return std::cos(rad(d)); }
 /// cos Δ > 0 con holgura: Δ = 90 exacto no debe pasar por ruido de coma flotante.
 inline bool toward(double delta) { return cosd(delta) > 1e-12; }
 
+/// Holgura numérica del lado crítico: un valor justo en el límite (R5) no puede decidirlo el ruido.
+inline constexpr double eps = 1e-9;
+
 inline void validate(const KinematicInput& in) {
-    check(in.face);
+    validation::require_in_range(in.face.dip_direction_deg, 0.0, 360.0, "face.dip_direction_deg");
+    validation::require_in_range(in.face.dip_deg, 0.0, 90.0, "face.dip_deg");
     validation::require(in.face.dip_deg > 0.0, "face.dip_deg", "must be greater than 0", in.face.dip_deg);
     validation::require_finite(in.friction_deg, "friction_deg");
     validation::require(in.friction_deg > 0.0 && in.friction_deg < 90.0, "friction_deg", "must be within (0, 90)",
@@ -64,6 +68,9 @@ inline void validate(const KinematicInput& in) {
     validation::require(in.lateral_limit_deg > 0.0 && in.lateral_limit_deg < 90.0, "lateral_limit_deg",
                         "must be within (0, 90)", in.lateral_limit_deg);
 }
+inline double dot(const Vec& a, const Vec& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+/// Aflora: el vector no queda del lado del polo de la cara (equivale a tan(inmersión) <= tan(βs)·cos Δ).
+inline bool daylights(const Vec& v, const KinematicInput& in) { return dot(v, vec(pole_of(in.face))) <= eps; }
 }  // namespace kinematics_detail
 
 inline PlaneChecks check_plane(PlaneOrientation plane, const KinematicInput& in) {
@@ -72,32 +79,62 @@ inline PlaneChecks check_plane(PlaneOrientation plane, const KinematicInput& in)
     check(plane);
     const double bs = in.face.dip_deg, bj = plane.dip_deg, phi = in.friction_deg, lim = in.lateral_limit_deg;
     const double delta = sdiff(plane.dip_direction_deg, in.face.dip_direction_deg);
-    const bool daylights = toward(delta) && tand(bj) <= tand(bs) * cosd(delta);
+    const bool day = toward(delta) && daylights(vec({plane.dip_direction_deg, bj}), in);
     PlaneChecks r{};
-    r.planar_no_limits = daylights && bj >= phi;
-    r.planar = r.planar_no_limits && std::fabs(delta) <= lim;
-    const double dp = sdiff(pole_of(plane).trend_deg, in.face.dip_direction_deg);
-    r.flexural_toppling = bs > phi && std::fabs(dp) <= lim && tand(90.0 - bj) <= tand(bs - phi) * cosd(dp);
+    r.planar_no_limits = day && bj >= phi - eps;
+    r.planar = r.planar_no_limits && std::fabs(delta) <= lim + eps;
+    const double pole_trend = pole_of(plane).trend_deg;
+    double dp = sdiff(pole_trend, in.face.dip_direction_deg);
+    // buzamiento 90: polo horizontal, el mismo eje en t y t + 180; se toma el extremo menos favorable
+    if (bj >= 90.0 - eps) dp = std::fmin(std::fabs(dp), std::fabs(sdiff(pole_trend + 180.0, in.face.dip_direction_deg)));
+    r.flexural_toppling = bs > phi && std::fabs(dp) <= lim + eps && tand(90.0 - bj) <= tand(bs - phi) * cosd(dp) + eps;
     if (r.planar)
         r.direct_toppling_base_zone = 1;
     else if (toward(delta) && bj < phi)
-        r.direct_toppling_base_zone = std::fabs(delta) <= lim ? 2 : 3;
+        r.direct_toppling_base_zone = std::fabs(delta) <= lim + eps ? 2 : 3;
     return r;
 }
+
+namespace kinematics_detail {
+inline IntersectionChecks eval_line(LineOrientation line, const KinematicInput& in) {
+    const double bs = in.face.dip_deg, phi = in.friction_deg, lim = in.lateral_limit_deg, pl = line.plunge_deg;
+    const double delta = sdiff(line.trend_deg, in.face.dip_direction_deg);
+    const Vec v = vec(line);
+    IntersectionChecks r{line, false, false, false, false};
+    const bool day = toward(delta) && daylights(v, in);
+    r.wedge_primary = pl >= phi - eps && day;
+    // secundaria: sobre el círculo de buzamiento φ o por encima (tan φ·cos Δ <= tan(inmersión))
+    const double below_phi_circle = dot(v, vec({in.face.dip_direction_deg + 180.0, 90.0 - phi}));
+    r.wedge_secondary = !r.wedge_primary && toward(delta) && pl < phi - eps && below_phi_circle >= -eps && day;
+    const double away = std::fabs(sdiff(line.trend_deg, in.face.dip_direction_deg + 180.0));
+    r.direct_toppling = away <= lim + eps && pl >= 90.0 - bs - eps;
+    // oblicua (zona 3): fuera de los límites laterales y dentro del cono de fricción de los planos base
+    r.direct_toppling_oblique = !r.direct_toppling && pl >= 90.0 - phi - eps && away > lim;
+    return r;
+}
+inline IntersectionChecks merge(IntersectionChecks a, const IntersectionChecks& b) {
+    a.wedge_primary |= b.wedge_primary;
+    a.wedge_secondary |= b.wedge_secondary;
+    a.direct_toppling |= b.direct_toppling;
+    a.direct_toppling_oblique |= b.direct_toppling_oblique;
+    return a;
+}
+}  // namespace kinematics_detail
 
 inline IntersectionChecks check_intersection(LineOrientation line, const KinematicInput& in) {
     using namespace kinematics_detail;
     validate(in);
     check(line);
-    const double bs = in.face.dip_deg, phi = in.friction_deg, lim = in.lateral_limit_deg, pl = line.plunge_deg;
-    const double delta = sdiff(line.trend_deg, in.face.dip_direction_deg);
-    IntersectionChecks r{line, false, false, false, false};
-    const bool daylights = toward(delta) && tand(pl) <= tand(bs) * cosd(delta);
-    r.wedge_primary = pl >= phi && daylights;
-    r.wedge_secondary = !r.wedge_primary && toward(delta) && pl < phi && tand(phi) * cosd(delta) <= tand(pl) &&
-                        daylights;
-    r.direct_toppling = std::fabs(sdiff(line.trend_deg, in.face.dip_direction_deg + 180.0)) <= lim && pl >= 90.0 - bs;
-    r.direct_toppling_oblique = !r.direct_toppling && pl >= 90.0 - phi;
+    const double as = in.face.dip_direction_deg;
+    if (line.plunge_deg > 90.0 - eps) {  // vertical: tendencia indiferente
+        auto r = eval_line({wrap(as + 180.0), 90.0}, in);
+        if (in.face.dip_deg > 90.0 - eps) r = merge(r, eval_line({wrap(as), 90.0}, in));  // cara vertical: también cuña
+        r.line = line;
+        return r;
+    }
+    auto r = eval_line(line, in);
+    // horizontal: eje, sin lado; se evalúan t y t + 180 y se unen las banderas
+    if (line.plunge_deg < eps) r = merge(r, eval_line({wrap(line.trend_deg + 180.0), 0.0}, in));
     return r;
 }
 
@@ -144,13 +181,6 @@ inline KinematicResult kinematic_analysis(const std::vector<PlaneOrientation>& p
                 ++r.n_parallel_pairs;
                 continue;
             }
-            if (line->plunge_deg < 1e-9) {  // horizontal: de t y t + 180 se toma la más cercana a la dirección de la cara
-                const double t2 = wrap(line->trend_deg + 180.0);
-                if (std::fabs(sdiff(t2, in.face.dip_direction_deg)) < std::fabs(sdiff(line->trend_deg, in.face.dip_direction_deg)))
-                    line->trend_deg = t2;
-            }
-            // vertical: la tendencia es indiferente (plane_intersection la fija en 0); se toma la de volteo directo, sin cuña
-            if (line->plunge_deg > 90.0 - 1e-9) line->trend_deg = wrap(in.face.dip_direction_deg + 180.0);
             const auto c = check_intersection(*line, in);
             r.intersections.push_back(c);
             r.pair_a.push_back(static_cast<int>(i));

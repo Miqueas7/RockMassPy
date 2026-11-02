@@ -1,7 +1,7 @@
 import random
 
 import pytest
-from hypothesis import assume, given, strategies as st
+from hypothesis import given, strategies as st
 
 import rockmasspy as rm
 
@@ -45,7 +45,6 @@ def counts(r):
 
 @given(pl=planes_st, face=face_st, phi=st.integers(1, 89), lim=st.integers(1, 89), rot=st.integers(0, 360))
 def test_giro_no_cambia_conteos(pl, face, phi, lim, rot):
-    assume(face not in pl)  # un plano igual a la cara cae justo en su círculo: el límite queda al ruido de coma flotante
     a = rm.kinematic_analysis([P(d, b) for d, b in pl], [-1] * len(pl), kin(phi, lim, face))
     rotated = [P((d + rot) % 360, b) for d, b in pl]
     b = rm.kinematic_analysis(rotated, [-1] * len(pl), kin(phi, lim, ((face[0] + rot) % 360, face[1])))
