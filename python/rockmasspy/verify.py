@@ -30,7 +30,7 @@ class Finding:
 
 
 @dataclass(frozen=True)
-class Verification:
+class VerificationResult:
     profile: NormativeProfile
     as_of: str
     findings: tuple[Finding, ...]
@@ -203,7 +203,7 @@ def _qc(item, ctx):
     rows = [q for q in rows if q.instalados > 0]
     if not rows:
         return "note", "no month and support type has installed units; nothing to compare"
-    bad = sum(Fraction(q.ensayados * 100, q.instalados) < Fraction(str(item.value)) for q in rows)
+    bad = sum(not _meets(Fraction(q.ensayados * 100, q.instalados), item.comparison, item.value) for q in rows)
     if bad:
         return _fail(item), f"{bad} of {len(rows)} month and support pairs are below the tested share ({_limit(item)})"
     return "complies", f"all {len(rows)} month and support pairs meet the tested share ({_limit(item)})"
@@ -239,7 +239,7 @@ _RULES = {
 
 def verify(profile: NormativeProfile, *, as_of: str | None = None, tables: Sequence[LaborTable] = (),
            results: Sequence[TramoResult] = (), stopes: Sequence[StopeSurfaceResult] = (),
-           design: DesignInputs | None = None, report=None) -> Verification:
+           design: DesignInputs | None = None, report=None) -> VerificationResult:
     """Un hallazgo por requisito, en el orden del perfil. Un incumplimiento nunca lanza; solo los datos imposibles."""
     as_of = datetime.date.today().isoformat() if as_of is None else _check_date(as_of, "as_of")
     ctx = SimpleNamespace(tables=tuple(tables), results=tuple(results), stopes=tuple(stopes), design=design,
@@ -250,11 +250,15 @@ def verify(profile: NormativeProfile, *, as_of: str | None = None, tables: Seque
             continue
         item = profile.version(iid, as_of)
         if item is None:
-            first = profile.versions(iid)[0]
+            vs = profile.versions(iid)
+            first, last = vs[0], max(vs, key=lambda i: i.effective_from)
+            if last.effective_to is not None and as_of > last.effective_to:
+                tail = f"the loaded text ended on {last.effective_to}"
+            else:
+                tail = f"the loaded text applies from {first.effective_from}"
             findings.append(Finding(first, "not_verifiable",
-                                    f"no text of this item in force on {as_of} is loaded; "
-                                    f"the loaded text applies from {first.effective_from}"))
+                                    f"no text of this item in force on {as_of} is loaded; {tail}"))
             continue
         status, msg = _RULES[item.check](item, ctx)
         findings.append(Finding(item, status, msg))
-    return Verification(profile, as_of, tuple(findings))
+    return VerificationResult(profile, as_of, tuple(findings))

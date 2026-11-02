@@ -63,4 +63,4 @@ from .normative import (COMPARISONS, FORCES, RULES, VERIFICATIONS, NormativeProf
                         available_profiles, get_profile, load_profile)
 from .design_inputs import (DesignInputs, PedestrianRefugeSpacing, QcMonth, RefugeStation,  # noqa: E402,F401
                             SafetyFactor, StandupTime)
-from .verify import STATUSES, Finding  # noqa: E402,F401  (`Verification` choca con el enum del núcleo y `verify` con el módulo: se usan desde rockmasspy.verify)
+from .verify import STATUSES, Finding, VerificationResult  # noqa: E402,F401  (la función `verify` taparía el módulo: se usa desde rockmasspy.verify)

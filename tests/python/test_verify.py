@@ -160,11 +160,26 @@ def test_messages_and_sources():
     d = DesignInputs(refuge_stations=(RefugeStation("ID-SECRETO", "roca", 10, 900, 1, 10),),
                      pedestrian_refuges=(PedestrianRefugeSpacing("VIA-SECRETA", "galeria", 99),),
                      safety_factors=(SafetyFactor("AN-SECRETO", "corto", 0.5),))
-    v = run(design=d, tables=[LAB[0]], results=[], report=build_anexo39b([], [], title="x"))
+    rs = rm.classify_tramos([tr("ID-SECRETO-T", luz=4, rmr_valor=70, labor_codigo="LAB-SECRETO")], LAB)
+    v = run(design=d, tables=[LAB[0]], results=rs, report=build_anexo39b([], [], title="x"))
     for f in v.findings:
         low = f.message.lower()
         assert not any(w in low for w in ("aprob", "aprueb", "approv", "secreto"))
         assert f.item.url and f.item.page
+
+
+def test_as_of_after_last_version():
+    from dataclasses import replace
+    v2 = next(i for i in PE.versions("PE-33-actualizacion") if i.effective_to)
+    prof = replace(PE, items=(v2,))
+    f = V.verify(prof, as_of="2026-11-02").findings[0]
+    assert f.status == "not_verifiable"
+    assert f"ended on {v2.effective_to}" in f.message and "applies from" not in f.message
+
+
+def test_result_type_name():
+    assert V.VerificationResult is rm.VerificationResult
+    assert hasattr(rm.Verification, "Primary")
 
 
 LAB = [rm.LaborTable("galeria", CAT, rmr_tab(), span_m=(1, 5)), rm.LaborTable("rampa", CAT, q_tab())]
