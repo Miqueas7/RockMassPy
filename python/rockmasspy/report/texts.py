@@ -6,16 +6,18 @@ DISCLAIMER = {
 }
 
 REPORT_TEXTS: dict[str, dict[str, str]] = {
+    "default_title": {"es": "Informe geomecánico", "en": "Geomechanical report"},
+    "prepared_by": {"es": "Elaborado por", "en": "Prepared by"},
     "memoria_title": {"es": "Memoria de cálculo", "en": "Calculation report"},
     "s1": {"es": "Objetivo y alcance", "en": "Purpose and scope"},
     "s1_text": {
         "es": "Este documento clasifica tramos de labores subterráneas con las tablas geomecánicas de cada labor y "
               "recomienda un tipo de sostenimiento por tramo. Trae las ediciones de cada método, los resultados y los avisos.",
-        "en": "This document classifies underground section tramos with the geomechanical table of each labor and "
+        "en": "This document classifies underground section tramos with the geomechanical table of each excavation and "
               "recommends a support type for each tramo. It lists the edition of each method, the results and the warnings.",
     },
     "s2": {"es": "Métodos y ediciones", "en": "Methods and editions"},
-    "s3": {"es": "Tablas geomecánicas por labor", "en": "Geomechanical tables by labor"},
+    "s3": {"es": "Tablas geomecánicas por labor", "en": "Geomechanical tables by excavation"},
     "s4": {"es": "Resultados por tramo", "en": "Results by tramo"},
     "s5": {"es": "Resumen", "en": "Summary"},
     "s6": {"es": "Mapas", "en": "Maps"},
@@ -42,7 +44,7 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "cap_classes": {"es": "Clases y sostenimiento", "en": "Classes and support"},
     "cap_catalog": {"es": "Catálogo de sostenimiento", "en": "Support catalog"},
     "cap_results": {"es": "Resultados de la clasificación", "en": "Classification results"},
-    "cap_by_class": {"es": "Tramos por labor y clase", "en": "Tramos by labor and class"},
+    "cap_by_class": {"es": "Tramos por labor y clase", "en": "Tramos by excavation and class"},
     "cap_by_support": {"es": "Tramos por sostenimiento", "en": "Tramos by support"},
     "cap_totals": {"es": "Totales", "en": "Totals"},
     "total": {"es": "Total de tramos", "en": "Total tramos"},

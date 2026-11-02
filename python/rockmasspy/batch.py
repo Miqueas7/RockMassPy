@@ -80,8 +80,6 @@ def _classify(t: Tramo, lt: LaborTable) -> TramoResult:
     value = cell = structure = condition = None
     if isinstance(tab, CellTable):
         method, cell = "GSI-cells", t.gsi_celda
-        if cell is not None:
-            structure, condition = cell.split("/")  # tramos.py ya la normalizó a S/C
     else:
         method = tab.method
         if method == "RMR":
@@ -99,6 +97,8 @@ def _classify(t: Tramo, lt: LaborTable) -> TramoResult:
     if value is None and cell is None:
         return TramoResult(**base, warnings=tuple(warns + [f"missing input for {method}"]))
     try:
+        if cell is not None:
+            structure, condition = cell.split("/")  # tramos.py ya la normalizó a S/C
         c = lt.classify(value, structure=structure, condition=condition)
     except ValueError as e:
         return TramoResult(**base, warnings=tuple(warns + [str(e)]))

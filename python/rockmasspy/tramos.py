@@ -5,7 +5,7 @@ aquí no hay un segundo parser. Las columnas de identificación nunca aparecen e
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .csv_io import _CsvSource
@@ -17,13 +17,13 @@ from .gsi_charts import normalize_cell
 class Tramo:
     id_tramo: str
     tipo_labor: str
-    labor_codigo: str | None
-    zona_nivel: str | None
+    labor_codigo: str | None = field(repr=False)
+    zona_nivel: str | None = field(repr=False)
     fecha_evaluacion: str | None
     progresiva_inicio_m: float | None
     progresiva_fin_m: float | None
-    este_m: float | None
-    norte_m: float | None
+    este_m: float | None = field(repr=False)
+    norte_m: float | None = field(repr=False)
     cota_m: float | None
     datum: str | None
     luz_m: float | None
@@ -59,15 +59,16 @@ def _norm(h):
 
 def _columnas(header, sheet, column_map):
     """{columna nuestra: posición en el archivo}; el mapeo va de la columna del usuario a la nuestra."""
-    cmap = {}
+    cmap, orig = {}, {}
     for k, v in (column_map or {}).items():
         if v not in TRAMO_COLUMNS:
             raise ValueError(f"column_map maps '{k}' to unknown name '{v}'; valid names: {', '.join(TRAMO_COLUMNS)}")
         cmap[_norm(k)] = v
+        orig[_norm(k)] = k
     heads = [_norm(h) for h in header]
     for k in cmap:
         if k not in heads:
-            raise ValueError(f"column '{k}' in column_map not found in sheet '{sheet}'")
+            raise ValueError(f"column '{orig[k]}' in column_map not found in sheet '{sheet}'")
     pos = {}
     for i, h in enumerate(heads):
         c = cmap.get(h, h if h in TRAMO_COLUMNS else None)
@@ -129,6 +130,8 @@ def load_tramos(path, *, sheet: str = "Tramos", column_map: Mapping[str, str] | 
     p = Path(path)
     if p.suffix.lower() == ".csv":
         return _leer(_CsvSource({p.stem: p}), p.stem, column_map)
+    if p.suffix.lower() != ".xlsx":
+        raise ValueError(f"{p.name}: unsupported file type '{p.suffix}'; save it as .xlsx or .csv")
     wb = _open(p)
     try:
         return _leer(wb, sheet, column_map)

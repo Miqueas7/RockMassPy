@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import io
 from pathlib import Path
 
@@ -88,6 +89,8 @@ def write_docx(report, path, *, author: str = "") -> Path:
     _set_languages(doc, lang)
     cp = doc.core_properties
     cp.title, cp.author, cp.last_modified_by = report.title, author, author
+    cp.comments = ""  # la plantilla de python-docx trae su propio texto
+    cp.created = cp.modified = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     doc.add_paragraph(report.title, style="Title")
     if report.subtitle:
         doc.add_paragraph(report.subtitle, style="Subtitle")

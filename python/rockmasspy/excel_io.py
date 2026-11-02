@@ -7,6 +7,8 @@ lanza ValueError con la hoja, la fila (de Excel, la cabecera es la 1) y la colum
 
 import datetime
 import math
+import zipfile
+from pathlib import Path
 
 from .cell_table import CellClass
 from .labor_table import LaborTable
@@ -148,7 +150,11 @@ def _support_dicts(wb, sheet):
 
 
 def _open(path):
-    return _ExcelSource(_optional("openpyxl").load_workbook(path, read_only=True, data_only=True))
+    openpyxl = _optional("openpyxl")
+    try:
+        return _ExcelSource(openpyxl.load_workbook(path, read_only=True, data_only=True))
+    except (zipfile.BadZipFile, KeyError, openpyxl.utils.exceptions.InvalidFileException):
+        raise ValueError(f"{Path(path).name}: not a valid .xlsx file") from None
 
 
 def _catalog(wb, sheet):

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .batch import classify_tramos, save_results, summarize
+from .report.texts import t
 from .table_files import load_table
 from .tramos import load_tramos
 
@@ -77,7 +78,7 @@ def _report(a) -> int:
     if ext not in (".docx", ".html"):
         raise ValueError("output must end in .docx or .html")
     results, tables = _classify_all(a)
-    title = a.title or "RockMassPy report"
+    title = a.title or t("default_title", a.lang)
     kw = dict(title=title, lang=a.lang, author=a.author or "", figures=not a.no_figures)
     if a.template == "anexo39b":
         rep = rp.build_anexo39b(results, tables, labor_type=a.labor, **kw)
@@ -140,6 +141,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    for s in (sys.stdout, sys.stderr):  # una etiqueta no codificable no debe abortar el resumen
+        if hasattr(s, "reconfigure"):
+            s.reconfigure(errors="replace")
     parser = _parser()
     a = parser.parse_args(argv)
     if a.cmd is None:

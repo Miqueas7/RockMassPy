@@ -47,6 +47,7 @@ def test_readme_charts_example(archivo, previo, titulo, tmp_path, monkeypatch):
     assert (tmp_path / "figs" / "cartilla.png").stat().st_size > 0
 
 
+SALIDA = {"README.md": "report.html", "README.es.md": "informe.html"}
 TRAMOS = [("README.md", "## Per-labor support tables", "## Tramos, batch, report and CLI"),
           ("README.es.md", "## Tablas de sostenimiento por labor", "## Tramos, lote, informe y CLI")]
 
@@ -63,4 +64,4 @@ def test_readme_tramos_example(archivo, previo, titulo, tmp_path, monkeypatch):
         for bloque in codigo:
             exec(compile(bloque, archivo, "exec"), espacio)
     assert salida.getvalue().splitlines()[-len(esperado):] == esperado
-    assert any(tmp_path.glob("informe.html")) or any(tmp_path.glob("report.html"))
+    assert (tmp_path / SALIDA[archivo]).is_file()

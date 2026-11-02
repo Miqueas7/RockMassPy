@@ -222,13 +222,13 @@ def _profile_figs(results, tables, lang, figures) -> list:
     st = Style(lang=lang)
     cat_of = {}
     for lt in tables:
-        cat_of.setdefault(lt.labor_type, lt.catalog)
+        cat_of.setdefault(_key(lt.labor_type), lt.catalog)
     blocks = []
     chained = [r for r in results if r.tramo.progresiva_inicio_m is not None and r.tramo.progresiva_fin_m is not None]
     for labor in sorted({r.tramo.tipo_labor for r in chained}):
         blocks.append(_fig(f"{t('fig_profile', lang)}: {labor}",
                            lambda labor=labor: plot_labor_profile(chained, labor_type=labor,
-                                                                  catalog=cat_of.get(labor), style=st),
+                                                                  catalog=cat_of.get(_key(labor)), style=st),
                            lang, figures))
     return blocks
 
@@ -240,7 +240,7 @@ def _maps_section(results, tables, lang, figures) -> Section:
     st = Style(lang=lang)
     cat_of = {}
     for lt in tables:
-        cat_of.setdefault(lt.labor_type, lt.catalog)
+        cat_of.setdefault(_key(lt.labor_type), lt.catalog)
     blocks = _profile_figs(results, tables, lang, figures)
     if any(r.tramo.este_m is not None and r.tramo.norte_m is not None for r in results):
         cat = next(iter(cat_of.values())) if len(cat_of) == 1 else None  # varios catálogos: color por orden
@@ -279,8 +279,12 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
         Section("7", t("s7", lang), s7_blocks),
         Section("8", t("s8", lang), (Paragraph(t("s8_text", lang)),)),
     )
-    return Report(title, author, lang, sections, methods, DISCLAIMER[lang], __version__,
+    return Report(title, _subtitle(t("memoria_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang], __version__,
                   date or datetime.date.today().isoformat())
+
+
+def _subtitle(base, author, lang) -> str:
+    return f"{base} · {t('prepared_by', lang)} {author}" if author else base
 
 
 def _check_lang(lang) -> None:
@@ -332,7 +336,7 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
                    author: str = "", date: str = "", figures: bool = True) -> Report:
     """Informe con la estructura del Anexo 39 B del DS 024-2016-EM; lo que la librería no calcula queda por completar.
 
-    `author` se acepta por simetría con build_memoria; el autor del Word se pasa a write_docx.
+    `author` va en el subtítulo, igual que en build_memoria; el autor del Word se pasa a write_docx.
     """
     _check_lang(lang)
     results, tables = _filter_labor(list(results), list(tables), labor_type)
@@ -358,7 +362,7 @@ def build_anexo39b(results, tables, *, title: str, labor_type: str | None = None
         s3, s4, todo("5", "a_s5", "g5"), todo("6", "a_s6", "g6"),
         _input_summary(results, tables, lang),
     )
-    return Report(title, t("a_subtitle", lang), lang, sections, methods, DISCLAIMER[lang], __version__,
+    return Report(title, _subtitle(t("a_subtitle", lang), author, lang), lang, sections, methods, DISCLAIMER[lang], __version__,
                   date or datetime.date.today().isoformat())
 
 
