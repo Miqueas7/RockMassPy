@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Sequence
 
 from .batch import add_q_chart_reference, classify_tramos, q_chart_crosstab, save_results, summarize
+from .q_chart_data import ESR_TABLES
 from .report.texts import t
 from .table_files import load_table
 from .tramos import load_tramos
@@ -57,11 +57,18 @@ def _esr_specs(values: Sequence[str]) -> dict:
         cat, colon, num = spec.partition(":")
         if (eq and not labor) or not cat or (colon and not num):
             raise ValueError(f"invalid --esr {v!r}: {syntax}")
+        if not colon and cat.upper() in _ESR_EXAMPLE:  # A y B tienen rango: la CLI pide el valor
+            lo, hi, _ = ESR_TABLES["Q-NGI-2025"][cat.upper()]
+            raise ValueError(f"ESR category {cat.upper()} covers {lo:g}-{hi:g}; use {cat.upper()}:<esr>, "
+                             f"e.g. {cat.upper()}:{_ESR_EXAMPLE[cat.upper()]}")
         try:
             out[labor if eq else "*"] = (cat, float(num)) if colon else cat
         except ValueError:
             raise ValueError(f"invalid --esr {v!r}: {syntax}") from None
     return out
+
+
+_ESR_EXAMPLE = {"A": "4", "B": "2.5"}
 
 
 def _classify_all(a):
@@ -70,12 +77,7 @@ def _classify_all(a):
     esr = _esr_specs(a.esr) if a.esr else None  # antes de clasificar: un --esr malo falla temprano
     results = classify_tramos(tramos, tables)
     if esr:
-        try:
-            results = add_q_chart_reference(results, esr, edition=a.q_edition)
-        except ValueError as e:  # la biblioteca habla de tuplas de Python; la CLI, de A:<esr>
-            raise ValueError(re.sub(r"ESR category (\w) covers ([\d.]+)-([\d.]+); pass \(category, esr\)",
-                                    lambda m: f"ESR category {m[1]} covers {m[2]}-{m[3]}; use {m[1]}:<esr>, "
-                                              f"e.g. {m[1]}:{(float(m[2]) + float(m[3])) / 2:g}", str(e))) from None
+        results = add_q_chart_reference(results, esr, edition=a.q_edition)
     return results, tables
 
 

@@ -281,6 +281,8 @@ def test_classify_esr_sin_numero_dice_a_dos_puntos(tmp_path, tabla, capsys):  # 
     args = ["classify", str(tramos_xlsx(tmp_path)), "--tables", str(tabla), "-o", str(tmp_path / "r.csv")]
     assert main(args + ["--esr", "A"]) == 1
     assert capsys.readouterr().err == "error: ESR category A covers 3-5; use A:<esr>, e.g. A:4\n"
+    assert main(args + ["--esr", "galeria=b"]) == 1
+    assert capsys.readouterr().err == "error: ESR category B covers 2-2.5; use B:<esr>, e.g. B:2.5\n"
 
 
 def test_qsupport_paredes_categoria_7_sale_con_2(capsys):  # M4
