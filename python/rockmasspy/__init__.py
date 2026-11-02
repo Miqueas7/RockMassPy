@@ -61,3 +61,6 @@ from .stope_surfaces import (SURFACE_COLUMNS, StopeSurface, StopeSurfaceResult, 
 from .table_files import load_table  # noqa: E402,F401
 from .normative import (COMPARISONS, FORCES, RULES, VERIFICATIONS, NormativeProfile, NormItem,  # noqa: E402,F401
                         available_profiles, get_profile, load_profile)
+from .design_inputs import (DesignInputs, PedestrianRefugeSpacing, QcMonth, RefugeStation,  # noqa: E402,F401
+                            SafetyFactor, StandupTime)
+from .verify import STATUSES, Finding  # noqa: E402,F401  (`Verification` choca con el enum del núcleo y `verify` con el módulo: se usan desde rockmasspy.verify)
