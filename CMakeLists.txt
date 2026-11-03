@@ -100,6 +100,7 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_smr.cpp
         tests/cpp/test_q_slope.cpp
         tests/cpp/test_planar.cpp
+        tests/cpp/test_wedge.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core

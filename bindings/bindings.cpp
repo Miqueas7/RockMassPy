@@ -25,6 +25,7 @@
 #include "rockmasspy/q_slope.hpp"
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
+#include "rockmasspy/wedge.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -514,4 +515,31 @@ NB_MODULE(_rockmasspy_core, m) {
           nb::arg("plane_dip_deg"));
     m.def("planar_fs", &planar_fs, nb::arg("input"));
     m.def("planar_back_analysis", &planar_back_analysis, nb::arg("input"), nb::arg("friction_deg"));
+
+    // Cuña tetraédrica por resolución vectorial
+    nb::enum_<WedgeMode>(m, "WedgeMode", "Sliding mode of a wedge.")
+        .value("TwoPlanes", WedgeMode::TwoPlanes).value("PlaneOne", WedgeMode::PlaneOne)
+        .value("PlaneTwo", WedgeMode::PlaneTwo).value("Lifting", WedgeMode::Lifting)
+        .value("NotFormed", WedgeMode::NotFormed);
+    nb::class_<WedgeJoint>(m, "WedgeJoint", "Wedge joint: orientation, strength and mean water pressure on it.")
+        .def(nb::init<>())
+        .def_rw("plane", &WedgeJoint::plane).def_rw("cohesion", &WedgeJoint::cohesion)
+        .def_rw("friction_deg", &WedgeJoint::friction_deg).def_rw("water_pressure", &WedgeJoint::water_pressure);
+    nb::class_<WedgeInput>(m, "WedgeInput", "Tetrahedral wedge: two joints, face, upper slope, height, kh and external load.")
+        .def(nb::init<>())
+        .def_rw("joint1", &WedgeInput::joint1).def_rw("joint2", &WedgeInput::joint2)
+        .def_rw("face", &WedgeInput::face).def_rw("upper", &WedgeInput::upper)
+        .def_rw("height_m", &WedgeInput::height_m).def_rw("unit_weight", &WedgeInput::unit_weight)
+        .def_rw("kh", &WedgeInput::kh).def_rw("external_force", &WedgeInput::external_force)
+        .def_rw("external_direction", &WedgeInput::external_direction);
+    nb::class_<WedgeResult>(m, "WedgeResult", "Wedge factor of safety (None if not formed), mode, geometry and forces.")
+        .def_ro("factor_of_safety", &WedgeResult::factor_of_safety).def_ro("mode", &WedgeResult::mode)
+        .def_ro("intersection", &WedgeResult::intersection).def_ro("volume", &WedgeResult::volume)
+        .def_ro("weight", &WedgeResult::weight).def_ro("area1", &WedgeResult::area1)
+        .def_ro("area2", &WedgeResult::area2).def_ro("face_area", &WedgeResult::face_area)
+        .def_ro("upper_area", &WedgeResult::upper_area).def_ro("normal1", &WedgeResult::normal1)
+        .def_ro("normal2", &WedgeResult::normal2).def_ro("driving_force", &WedgeResult::driving_force)
+        .def_ro("resisting_force", &WedgeResult::resisting_force).def_ro("info", &WedgeResult::info)
+        .def_ro("warnings", &WedgeResult::warnings).def_ro("notes", &WedgeResult::notes);
+    m.def("wedge_fs", &wedge_fs, nb::arg("input"));
 }
