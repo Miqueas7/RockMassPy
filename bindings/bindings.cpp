@@ -21,6 +21,7 @@
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 #include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/planar.hpp"
 #include "rockmasspy/q_slope.hpp"
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
@@ -480,4 +481,37 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("notes", &QSlopeResult::notes);
     m.def("q_slope_beta", &q_slope_beta, nb::arg("q_slope"), "beta = 20*log10(Q-slope) + 65, uncapped.");
     m.def("q_slope", &q_slope, nb::arg("input"));
+
+    // Falla planar de Hoek y Bray
+    nb::enum_<BoltMode>(m, "BoltMode", "Bolt behaviour: Active reduces the driving force, Passive adds to the resistance.")
+        .value("Active", BoltMode::Active).value("Passive", BoltMode::Passive);
+    nb::class_<PlanarInput>(m, "PlanarInput", "Planar block: geometry, strength, tension crack, water, kh, bolt and external load.")
+        .def(nb::init<>())
+        .def_rw("height_m", &PlanarInput::height_m).def_rw("face_dip_deg", &PlanarInput::face_dip_deg)
+        .def_rw("plane_dip_deg", &PlanarInput::plane_dip_deg).def_rw("unit_weight", &PlanarInput::unit_weight)
+        .def_rw("cohesion", &PlanarInput::cohesion).def_rw("friction_deg", &PlanarInput::friction_deg)
+        .def_rw("tension_crack_distance_m", &PlanarInput::tension_crack_distance_m)
+        .def_rw("water_fill", &PlanarInput::water_fill).def_rw("water_unit_weight", &PlanarInput::water_unit_weight)
+        .def_rw("kh", &PlanarInput::kh).def_rw("bolt_force", &PlanarInput::bolt_force)
+        .def_rw("bolt_plunge_deg", &PlanarInput::bolt_plunge_deg).def_rw("bolt_mode", &PlanarInput::bolt_mode)
+        .def_rw("external_force", &PlanarInput::external_force)
+        .def_rw("external_angle_deg", &PlanarInput::external_angle_deg);
+    nb::class_<TensionCrack>(m, "TensionCrack", "Critical tension crack depth and distance behind the crest.")
+        .def_ro("depth_m", &TensionCrack::depth_m).def_ro("distance_m", &TensionCrack::distance_m);
+    nb::class_<PlanarResult>(m, "PlanarResult", "Planar factor of safety (None if not formed) and its forces per metre.")
+        .def_ro("factor_of_safety", &PlanarResult::factor_of_safety).def_ro("formed", &PlanarResult::formed)
+        .def_ro("tension_crack_depth_m", &PlanarResult::tension_crack_depth_m).def_ro("weight", &PlanarResult::weight)
+        .def_ro("base_area", &PlanarResult::base_area).def_ro("uplift_force", &PlanarResult::uplift_force)
+        .def_ro("crack_water_force", &PlanarResult::crack_water_force).def_ro("normal_force", &PlanarResult::normal_force)
+        .def_ro("driving_force", &PlanarResult::driving_force).def_ro("resisting_force", &PlanarResult::resisting_force)
+        .def_ro("info", &PlanarResult::info).def_ro("warnings", &PlanarResult::warnings)
+        .def_ro("notes", &PlanarResult::notes);
+    nb::class_<PlanarBackAnalysis>(m, "PlanarBackAnalysis", "Cohesion that gives FS = 1 for each friction angle.")
+        .def_ro("friction_deg", &PlanarBackAnalysis::friction_deg).def_ro("cohesion", &PlanarBackAnalysis::cohesion)
+        .def_ro("friction_at_zero_cohesion_deg", &PlanarBackAnalysis::friction_at_zero_cohesion_deg)
+        .def_ro("info", &PlanarBackAnalysis::info).def_ro("notes", &PlanarBackAnalysis::notes);
+    m.def("critical_tension_crack", &critical_tension_crack, nb::arg("height_m"), nb::arg("face_dip_deg"),
+          nb::arg("plane_dip_deg"));
+    m.def("planar_fs", &planar_fs, nb::arg("input"));
+    m.def("planar_back_analysis", &planar_back_analysis, nb::arg("input"), nb::arg("friction_deg"));
 }
