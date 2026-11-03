@@ -99,7 +99,37 @@ TEST(Planar, Retroanalisis) {
     EXPECT_TRUE(error_of([] { planar_back_analysis(pl1(), {}); }).find("friction_deg") != std::string::npos);
     auto nf = pl1();
     nf.plane_dip_deg = 50;
-    EXPECT_FALSE(error_of([&] { planar_back_analysis(nf, {30}); }).empty());
+    const auto nfb = planar_back_analysis(nf, {30});
+    EXPECT_TRUE(nfb.cohesion.empty());
+    EXPECT_FALSE(nfb.friction_at_zero_cohesion_deg.has_value());
+    ASSERT_EQ(nfb.notes.size(), 1u);
+    EXPECT_NE(nfb.notes[0].find("not formed"), std::string::npos);
+}
+
+TEST(Planar, RetroanalisisConNormalNegativa) {
+    auto in = pl1();
+    in.water_unit_weight = 0.1;
+    const auto b = planar_back_analysis(in, {20, 40});
+    ASSERT_EQ(b.cohesion.size(), 2u);
+    EXPECT_DOUBLE_EQ(b.cohesion[0], b.cohesion[1]);
+    EXPECT_FALSE(b.friction_at_zero_cohesion_deg.has_value());
+    ASSERT_EQ(b.notes.size(), 1u);
+    EXPECT_EQ(b.notes[0], "normal force on the sliding plane is negative; c does not depend on friction");
+}
+
+TEST(Planar, BloqueDegenerado) {
+    auto in = make(30, 90, 60, 0.026, 0.1, 30);
+    in.tension_crack_distance_m = 0;  // cara vertical con la grieta en el pie: sin área ni peso
+    const auto r = planar_fs(in);
+    EXPECT_FALSE(r.formed);
+    EXPECT_FALSE(r.factor_of_safety.has_value());
+    EXPECT_TRUE(r.warnings.empty());
+    ASSERT_EQ(r.notes.size(), 1u);
+    EXPECT_NE(r.notes[0].find("no volume"), std::string::npos);
+    const auto b = planar_back_analysis(in, {30});
+    EXPECT_TRUE(b.cohesion.empty());
+    ASSERT_EQ(b.notes.size(), 1u);
+    EXPECT_NE(b.notes[0].find("no volume"), std::string::npos);
 }
 
 TEST(Planar, NoFormado) {
@@ -173,6 +203,8 @@ TEST(Planar, Rechazos) {
     bad("friction_deg", [](PlanarInput& i) { i.friction_deg = 90; });
     bad("water_fill", [](PlanarInput& i) { i.water_fill = 1.5; });
     bad("water_unit_weight", [](PlanarInput& i) { i.water_fill = 0.5; i.water_unit_weight = kNan; });
+    bad("water_unit_weight", [](PlanarInput& i) { i.water_fill = 0.0; i.water_unit_weight = kNan; });
+    bad("water_unit_weight", [](PlanarInput& i) { i.water_fill = 0.5; i.water_unit_weight.reset(); });
     bad("kh", [](PlanarInput& i) { i.kh = -0.1; });
     bad("bolt_plunge_deg", [](PlanarInput& i) { i.bolt_plunge_deg = 95; });
     bad("external_angle_deg", [](PlanarInput& i) { i.external_angle_deg = 200; });
@@ -182,6 +214,6 @@ TEST(Planar, Rechazos) {
 }
 
 TEST(Planar, SinAguaNoExigePesoDelAgua) {
-    const auto in = make(60, 50, 35, 0.027, 0.1, 35);  // water_unit_weight sin definir con agua 0
+    const auto in = make(60, 50, 35, 0.027, 0.1, 35);  // water_unit_weight vacío con agua 0
     EXPECT_TRUE(planar_fs(in).factor_of_safety.has_value());
 }

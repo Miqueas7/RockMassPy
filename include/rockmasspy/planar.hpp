@@ -30,7 +30,7 @@ struct PlanarInput {
     double unit_weight = validation::unset, cohesion = validation::unset, friction_deg = validation::unset;
     std::optional<double> tension_crack_distance_m;  // distancia horizontal b detrás de la cresta; vacío = sin grieta
     double water_fill = 0.0;                         // [0, 1]: zw/z con grieta; escala de U sin grieta
-    double water_unit_weight = validation::unset;    // obligatoria si water_fill > 0
+    std::optional<double> water_unit_weight;         // obligatorio si water_fill > 0; NaN o infinito siempre lanza
     double kh = 0.0;                                 // [0, 1], horizontal hacia afuera
     double bolt_force = 0.0, bolt_plunge_deg = 0.0;  // inmersión bajo la horizontal, hacia dentro del talud
     BoltMode bolt_mode = BoltMode::Active;
@@ -91,8 +91,9 @@ inline void check(const PlanarInput& in, bool strength) {
     }
     validation::require_in_range(in.water_fill, 0.0, 1.0, "water_fill");
     // NaN es el valor por defecto («sin dato») y solo se exige con agua; el infinito nunca vale
-    if (in.water_fill > 0.0) validation::require_positive(in.water_unit_weight, "water_unit_weight");
-    else if (std::isinf(in.water_unit_weight)) validation::require_finite(in.water_unit_weight, "water_unit_weight");
+    if (in.water_unit_weight) validation::require_positive(*in.water_unit_weight, "water_unit_weight");
+    else if (in.water_fill > 0.0)
+        throw std::invalid_argument("Domain error [RockMassPy]: parameter 'water_unit_weight' is required when water_fill > 0");
     validation::require_in_range(in.kh, 0.0, 1.0, "kh");
     validation::require_non_negative(in.bolt_force, "bolt_force");
     validation::require_in_range(in.bolt_plunge_deg, -90.0, 90.0, "bolt_plunge_deg");
@@ -104,6 +105,9 @@ inline void check(const PlanarInput& in, bool strength) {
 }
 
 inline bool is_formed(const PlanarInput& in) { return in.plane_dip_deg < in.face_dip_deg - kTol; }
+
+inline const char* kNotDaylit = "planar block not formed: the plane does not daylight in the face";
+inline const char* kNoVolume = "planar block not formed: the block has no volume (the tension crack reaches the toe)";
 
 struct Forces {
     double z = 0, W = 0, A = 0, U = 0, V = 0, N = 0, D = 0, passive = 0;  // N incluye perno y externa; D ya descuenta el perno activo
@@ -122,19 +126,19 @@ inline Forces forces(const PlanarInput& in) {
                 "Domain error [RockMassPy]: parameter 'tension_crack_distance_m' the crack must meet the sliding plane "
                 "(distance exceeds the maximum for this geometry)");
         f.z = H - (b + H * cf) * std::tan(pp);
-        if (f.z < 0.0) f.z = 0.0;  // ruido de coma flotante en b = bmax
+        if (f.z < 0.0) f.z = 0.0;  // z en [-1e-9, 0) por ruido en b = bmax se lleva a 0 (b mayor ya lanzó)
         const double r = f.z / H;
         f.A = (H - f.z) / std::sin(pp);
         f.W = 0.5 * g * H * H * ((1.0 - r * r) * cp - cf);
         if (in.water_fill > 0.0) {
             const double zw = in.water_fill * f.z;
-            f.U = 0.5 * in.water_unit_weight * zw * f.A;
-            f.V = 0.5 * in.water_unit_weight * zw * zw;
+            f.U = 0.5 * *in.water_unit_weight * zw * f.A;
+            f.V = 0.5 * *in.water_unit_weight * zw * zw;
         }
     } else {
         f.A = H / std::sin(pp);
         f.W = 0.5 * g * H * H * (cp - cf);
-        if (in.water_fill > 0.0) f.U = in.water_fill * in.water_unit_weight * H * H / (4.0 * std::sin(pp));
+        if (in.water_fill > 0.0) f.U = in.water_fill * *in.water_unit_weight * H * H / (4.0 * std::sin(pp));
     }
     const double th = rad(in.bolt_plunge_deg), be = rad(in.external_angle_deg);
     const double tc = in.bolt_force * std::cos(pp + th), ts = in.bolt_force * std::sin(pp + th);
@@ -144,6 +148,11 @@ inline Forces forces(const PlanarInput& in) {
     if (in.bolt_mode == BoltMode::Active) f.D -= tc;
     else f.passive = tc;
     return f;
+}
+
+/// Cuña sin área o sin peso (p. ej. cara de 90 grados con la grieta en el pie): no hay bloque.
+inline bool degenerate(const PlanarInput& in, const Forces& f) {
+    return f.A <= 1e-9 * in.height_m || f.W <= 1e-9 * in.unit_weight * in.height_m * in.height_m;
 }
 }  // namespace planar_detail
 
@@ -162,11 +171,15 @@ inline PlanarResult planar_fs(const PlanarInput& in) {
     check(in, true);
     PlanarResult r{std::nullopt, false, 0, 0, 0, 0, 0, 0, 0, 0, info(), {}, {}};
     if (!is_formed(in)) {
-        r.notes.push_back("planar block not formed: the plane does not daylight in the face");
+        r.notes.push_back(kNotDaylit);
+        return r;
+    }
+    const Forces f = forces(in);
+    if (degenerate(in, f)) {
+        r.notes.push_back(kNoVolume);
         return r;
     }
     r.formed = true;
-    const Forces f = forces(in);
     r.tension_crack_depth_m = f.z;
     r.weight = f.W;
     r.base_area = f.A;
@@ -199,10 +212,17 @@ inline PlanarBackAnalysis planar_back_analysis(const PlanarInput& in, const std:
         validation::require_finite(p, "friction_deg");
         validation::require(p >= 0.0 && p < 90.0, "friction_deg", "must be within [0, 90)", p);
     }
-    if (!is_formed(in))
-        throw std::invalid_argument("Domain error [RockMassPy]: the planar block is not formed (plane_dip_deg is not below face_dip_deg)");
-    const Forces f = forces(in);
     PlanarBackAnalysis out{{}, {}, std::nullopt, info(), {}};
+    if (!is_formed(in)) {
+        out.notes.push_back(kNotDaylit);
+        return out;
+    }
+    const Forces f = forces(in);
+    if (degenerate(in, f)) {
+        out.notes.push_back(kNoVolume);
+        return out;
+    }
+    if (f.N < 0.0) out.notes.push_back("normal force on the sliding plane is negative; c does not depend on friction");
     const double np = std::fmax(f.N, 0.0);
     bool dropped = false;
     for (double p : friction_deg) {

@@ -88,8 +88,8 @@ def test_back_analysis():
     assert list(none.cohesion) == [] and none.notes
     with pytest.raises(ValueError, match="friction_deg"):
         rm.planar_back_analysis(pl1(), [])
-    with pytest.raises(ValueError):
-        rm.planar_back_analysis(make(60, 50, 50, 0.027, 0, 0), [30])
+    nb = rm.planar_back_analysis(make(60, 50, 50, 0.027, 0, 0), [30])
+    assert list(nb.cohesion) == [] and nb.friction_at_zero_cohesion_deg is None and "not formed" in nb.notes[0]
 
 
 @pytest.mark.parametrize("pp", [50.0, 50.0 - 1e-12])
@@ -142,10 +142,31 @@ def test_rejects(name, value):
         rm.planar_fs(i)
 
 
-def test_water_requires_unit_weight():
-    i = make(60, 50, 35, 0.027, 0.1, 35, water_fill=0.5)
+def test_water_unit_weight_optional():
+    i = make(60, 50, 35, 0.027, 0.1, 35)
+    assert i.water_unit_weight is None and fs(i) is not None  # None con fill 0 se acepta
+    i.water_unit_weight = NAN
+    with pytest.raises(ValueError, match="water_unit_weight"):  # NaN explícito lanza aun con fill 0
+        rm.planar_fs(i)
+    i.water_unit_weight = None
+    i.water_fill = 0.5
     with pytest.raises(ValueError, match="water_unit_weight"):
         rm.planar_fs(i)
+
+
+def test_degenerate_block():
+    i = make(30, 90, 60, 0.026, 0.1, 30, tension_crack_distance_m=0)
+    r = rm.planar_fs(i)
+    assert not r.formed and r.factor_of_safety is None and list(r.warnings) == []
+    assert "no volume" in r.notes[0]
+    b = rm.planar_back_analysis(i, [30])
+    assert list(b.cohesion) == [] and "no volume" in b.notes[0]
+
+
+def test_back_analysis_negative_normal():
+    b = rm.planar_back_analysis(pl1(water_unit_weight=0.1), [20, 40])
+    assert b.cohesion[0] == b.cohesion[1] and b.friction_at_zero_cohesion_deg is None
+    assert list(b.notes) == ["normal force on the sliding plane is negative; c does not depend on friction"]
 
 
 def test_crack_requires_daylight():
@@ -153,43 +174,60 @@ def test_crack_requires_daylight():
         rm.critical_tension_crack(60, 35, 35)
 
 
-def _base(c, phi, f, kh):
-    return make(40, 60, 30, 0.026, c, phi, tension_crack_distance_m=5, water_fill=f, water_unit_weight=0.01, kh=kh)
+@st.composite
+def geom(draw):
+    """Altura, cara y plano válidos (plano bajo la cara) y una grieta b dentro de [0, bmax]."""
+    h = draw(st.floats(5, 200))
+    ff = draw(st.floats(40, 90))
+    pp = draw(st.floats(20, 85).filter(lambda x: x < ff - 5))
+    cot = lambda d: 1 / math.tan(math.radians(d))
+    bmax = h * (cot(pp) - cot(ff))
+    b = draw(st.one_of(st.none(), st.floats(0.05, 0.95).map(lambda t: t * bmax)))
+    return h, ff, pp, b
 
 
-@settings(max_examples=60, deadline=None)
-@given(c=st.floats(0, 0.2), phi=st.floats(10, 45), f=st.floats(0, 1), kh=st.floats(0, 0.2),
+def _base(g, c, phi, f, kh):
+    h, ff, pp, b = g
+    return make(h, ff, pp, 0.026, c, phi, tension_crack_distance_m=b, water_fill=f, water_unit_weight=0.01, kh=kh)
+
+
+@settings(max_examples=80, deadline=None)
+@given(g=geom(), c=st.floats(0, 0.2), phi=st.floats(10, 45), f=st.floats(0, 1), kh=st.floats(0, 0.2),
        dc=st.floats(0.001, 0.1), dp=st.floats(0.5, 10), df=st.floats(0.01, 0.5), dk=st.floats(0.001, 0.1))
-def test_monotonic(c, phi, f, kh, dc, dp, df, dk):
-    base = rm.planar_fs(_base(c, phi, f, kh))
-    assume_ok = base.normal_force > 0
-    assert fs(_base(c + dc, phi, f, kh)) >= fs(_base(c, phi, f, kh)) - 1e-12
-    if assume_ok:
-        assert fs(_base(c, phi + dp, f, kh)) >= fs(_base(c, phi, f, kh)) - 1e-12
-    assert fs(_base(c, phi, min(f + df, 1), kh)) <= fs(_base(c, phi, f, kh)) + 1e-12
-    assert fs(_base(c, phi, f, kh + dk)) <= fs(_base(c, phi, f, kh)) + 1e-12
+def test_monotonic(g, c, phi, f, kh, dc, dp, df, dk):
+    base = rm.planar_fs(_base(g, c, phi, f, kh))
+    assert base.formed
+    v = base.factor_of_safety
+    assert fs(_base(g, c + dc, phi, f, kh)) >= v - 1e-9
+    if base.normal_force > 0:
+        assert fs(_base(g, c, phi + dp, f, kh)) >= v - 1e-9
+    assert fs(_base(g, c, phi, min(f + df, 1), kh)) <= v + 1e-9
+    assert fs(_base(g, c, phi, f, kh + dk)) <= v + 1e-9
 
 
-@settings(max_examples=60, deadline=None)
-@given(k=st.floats(0.01, 100), t=st.floats(0, 0.5), e=st.floats(0, 0.5))
-def test_scale_invariance(k, t, e):
+@settings(max_examples=80, deadline=None)
+@given(g=geom(), k=st.floats(0.01, 100), t=st.floats(0, 0.5), e=st.floats(0, 0.5))
+def test_scale_invariance(g, k, t, e):
+    h, ff, pp, b = g
+
     def build(s):
-        return make(40, 60, 30, 0.026 * s, 0.02 * s, 30, tension_crack_distance_m=5, water_fill=0.5,
+        return make(h, ff, pp, 0.026 * s, 0.02 * s, 30, tension_crack_distance_m=b, water_fill=0.5,
                     water_unit_weight=0.01 * s, kh=0.05, bolt_force=t * s, bolt_plunge_deg=20,
                     external_force=e * s, external_angle_deg=60)
     assert fs(build(k)) == pytest.approx(fs(build(1)), rel=1e-9)
 
 
-@settings(max_examples=80, deadline=None)
-@given(t=st.floats(0.001, 0.05), plunge=st.floats(-20, 30), phi=st.floats(20, 40))
-def test_active_ge_passive_iff_passive_ge_one(t, plunge, phi):
+@settings(max_examples=100, deadline=None)
+@given(g=geom(), t=st.floats(0.001, 0.05), plunge=st.floats(-20, 30), phi=st.floats(20, 40))
+def test_active_ge_passive_iff_passive_ge_one(g, t, plunge, phi):
+    h, ff, pp, b = g
+
     def build(mode):
-        return make(40, 60, 35, 0.026, 0.01, phi, bolt_force=t, bolt_plunge_deg=plunge, bolt_mode=mode)
+        return make(h, ff, pp, 0.026, 0.01, phi, tension_crack_distance_m=b, bolt_force=t, bolt_plunge_deg=plunge,
+                    bolt_mode=mode)
     act, pas = rm.planar_fs(build(rm.BoltMode.Active)), rm.planar_fs(build(rm.BoltMode.Passive))
-    if act.factor_of_safety == INF or act.factor_of_safety is None:
-        return
-    # solo con la componente del perno a lo largo del plano a favor (cos(psi_p + theta) > 0) y D - Tc > 0
-    if math.cos(math.radians(35 + plunge)) <= 0 or act.driving_force <= 1e-9:
+    # la identidad vale con cos(psi_p + theta) > 0, D - Tc > 0 y la misma normal en los dos modos
+    if math.cos(math.radians(pp + plunge)) <= 1e-9 or act.driving_force <= 1e-9 or act.factor_of_safety == INF:
         return
     margin = pas.factor_of_safety - 1
     if abs(margin) < 1e-9:
