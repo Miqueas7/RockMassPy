@@ -518,7 +518,7 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("planar_fs", &planar_fs, nb::arg("input"));
     m.def("planar_back_analysis", &planar_back_analysis, nb::arg("input"), nb::arg("friction_deg"));
 
-    // Cuña tetraédrica por resolución vectorial
+    // CuÃ±a tetraÃ©drica por resoluciÃ³n vectorial
     nb::enum_<WedgeMode>(m, "WedgeMode", "Sliding mode of a wedge.")
         .value("TwoPlanes", WedgeMode::TwoPlanes).value("PlaneOne", WedgeMode::PlaneOne)
         .value("PlaneTwo", WedgeMode::PlaneTwo).value("Lifting", WedgeMode::Lifting)

@@ -50,9 +50,10 @@ enum class WedgeMode { TwoPlanes, PlaneOne, PlaneTwo, Lifting, NotFormed };
 
 struct WedgeResult {
     std::optional<double> factor_of_safety;
-    WedgeMode mode;
+    WedgeMode mode = WedgeMode::NotFormed;
     std::optional<LineOrientation> intersection;
-    double volume, weight, area1, area2, face_area, upper_area, normal1, normal2, driving_force, resisting_force;
+    double volume = 0, weight = 0, area1 = 0, area2 = 0, face_area = 0, upper_area = 0, normal1 = 0, normal2 = 0,
+           driving_force = 0, resisting_force = 0;
     MethodInfo info;
     std::vector<std::string> warnings, notes;
 };
@@ -155,16 +156,16 @@ inline WedgeResult wedge_fs(const WedgeInput& in) {
     const Vec nf = normal_of(in.face), nu = normal_of(in.upper);
     const auto vertex = [&](const Vec& d) -> std::optional<Vec> {
         const double c = dot(nu, d);
-        if (std::fabs(c) < 1e-12 * norm(d)) return std::nullopt;
+        if (std::fabs(c) <= 1e-12 * norm(d)) return std::nullopt;
         return scale(d, 1.0 / c);
     };
     const auto v1 = vertex(cross(n1, n2)), v2 = vertex(cross(n1, nf)), v3 = vertex(cross(n2, nf));
     if (!v1 || !v2 || !v3) return not_formed(axis, "the intersection does not outcrop on the upper slope");
-    double rise = std::max(-(*v2)[2], -(*v3)[2]);
-    double sg = 1.0;
-    if (rise < 0.0) { sg = -1.0; rise = std::max((*v2)[2], (*v3)[2]); }
+    // el plano superior n_u·p = 1 queda bajo O: la cuña real está reflejada (k < 0) y el vértice de cresta más alto
+    // es el de mayor z en esta configuración
+    const double rise = std::max((*v2)[2], (*v3)[2]);
     if (rise <= 1e-12) return not_formed(axis, "the intersection does not outcrop on the upper slope");
-    const double k = sg * in.height_m / rise;
+    const double k = -in.height_m / rise;
     const Vec V1 = scale(*v1, k), V2 = scale(*v2, k), V3 = scale(*v3, k);
     const double volume = std::fabs(dot(V1, cross(V2, V3))) / 6.0;
     if (volume <= kTol * in.height_m * in.height_m * in.height_m)
@@ -218,10 +219,18 @@ inline WedgeResult wedge_fs(const WedgeInput& in) {
 
     // estado de cada junta: en contacto, despegada o en el límite (se evalúan los dos lados)
     const auto states = [&](double N) { return N > kTol * Rn ? std::vector<int>{1} : (N < -kTol * Rn ? std::vector<int>{0} : std::vector<int>{1, 0}); };
+    // un solo plano: a lo sumo uno tiene reacción positiva; despegue solo si ninguno la tiene
+    const auto single_any = [&]() -> Cand {
+        const Cand c1 = one(1), c2 = one(2);
+        if (c1.mode == WedgeMode::Lifting) return c2;
+        if (c2.mode == WedgeMode::Lifting) return c1;
+        return c1.fs <= c2.fs ? c1 : c2;
+    };
     std::optional<Cand> best;
     for (int a : states(N1))
         for (int b : states(N2)) {
-            const Cand c = a && b ? two() : (a ? one(1) : (b ? one(2) : Cand{0.0, 0.0, 0.0, Rn, 0.0, WedgeMode::Lifting, false}));
+            Cand c = a && b ? two() : (a ? one(1) : (b ? one(2) : single_any()));
+            if (c.mode == WedgeMode::Lifting && (a || b)) c = single_any();
             if (!best || c.fs < best->fs) best = c;
         }
     r.factor_of_safety = best->fs;

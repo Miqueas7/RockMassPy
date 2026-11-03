@@ -231,3 +231,130 @@ def test_validation_names_the_field(path, value, name):
 def test_unset_fields_raise_by_name():
     with pytest.raises(ValueError, match="joint1.plane.dip_direction_deg"):
         rm.wedge_fs(rm.WedgeInput())
+
+
+# --- ronda 1 de correcciones -------------------------------------------------------------------------------------
+
+def test_oblique_upper_slope_is_not_reflected():
+    r = rm.wedge_fs(dry((240, 30), (175, 35), 35, 35, (180, 80), (165, 20)))
+    assert r.mode == rm.WedgeMode.PlaneTwo
+    assert r.factor_of_safety == pytest.approx(1.0000, abs=1e-4)
+    r = rm.wedge_fs(dry((15, 30), (185, 45), 35, 35, (180, 85), (195, 20)))
+    assert r.factor_of_safety == pytest.approx(0.7002, abs=1e-4)
+
+
+def test_false_lift_off_is_a_one_plane_slide():
+    i = make(joint(90, 13.5, 0, 17.4), joint(75, 38.8, 0, 36.7, 0.0715), (71, 74), (75, 18.5), 14.8, 0.026)
+    r = rm.wedge_fs(i)
+    assert r.mode == rm.WedgeMode.PlaneOne
+    assert r.factor_of_safety == pytest.approx(0.520, abs=1e-3)
+    assert r.warnings == []
+
+
+def test_vertical_intersection_not_formed():
+    r = rm.wedge_fs(make(joint(100, 90, 0, 30), joint(200, 90, 0, 30), (150, 70), (150, 0), 10, 0.026))
+    assert r.mode == rm.WedgeMode.NotFormed and r.factor_of_safety is None
+    assert r.notes == ["wedge not formed: the intersection does not daylight in the face"]
+    r = rm.wedge_fs(make(joint(100, 89.9999999, 0, 30), joint(200, 90, 0, 30), (150, 70), (150, 0), 10, 0.026))
+    assert r.notes == ["wedge not formed: the intersection does not daylight in the face"]
+
+
+def test_limit_mode_is_plane_two_at_both_sides():
+    base = cu2()
+    base.joint1.water_pressure = base.joint2.water_pressure = 0.0
+    d0 = rm.wedge_fs(base)
+    u = d0.normal1 / d0.area1
+    for f in (1 - 1e-12, 1 + 1e-12):
+        i = cu2()
+        i.joint1.water_pressure, i.joint2.water_pressure = u * f, 0.0
+        assert rm.wedge_fs(i).mode == rm.WedgeMode.PlaneTwo
+
+
+def _indep(j1, j2, face, upper, H, g):
+    """Solución independiente (revisión de la Tarea 2): plano superior siempre sobre O, normales hacia el vértice
+    opuesto y modo como problema de complementariedad."""
+    np = pytest.importorskip("numpy")
+
+    def lv(tr, pl):
+        t, p = math.radians(tr), math.radians(pl)
+        return np.array([math.cos(p) * math.cos(t), math.cos(p) * math.sin(t), math.sin(p)])
+
+    def nrm(dd, dip):
+        return lv(dd + 180.0, 90.0 - dip)
+
+    n1, n2, nf, nu = nrm(*j1[:2]), nrm(*j2[:2]), nrm(*face), nrm(*upper)
+    sol = []
+    for a, b in ((n1, n2), (n1, nf), (n2, nf)):
+        M = np.array([a, b, nu])
+        if abs(np.linalg.det(M)) < 1e-14:
+            return None
+        sol.append(np.linalg.solve(M, np.array([0.0, 0.0, -1.0])))
+    V1, V2, V3 = sol
+    if nf @ V1 <= 1e-12 * np.linalg.norm(V1) or V1[2] >= 0:
+        return None
+    rise = max(-V2[2], -V3[2])
+    if rise <= 0:
+        return None
+    V1, V2, V3 = (v * H / rise for v in (V1, V2, V3))
+    vol = abs(np.dot(V1, np.cross(V2, V3))) / 6.0
+    A1, A2 = 0.5 * np.linalg.norm(np.cross(V1, V2)), 0.5 * np.linalg.norm(np.cross(V1, V3))
+    m1 = n1 if n1 @ V3 > 0 else -n1
+    m2 = n2 if n2 @ V2 > 0 else -n2
+    i = -V1 / np.linalg.norm(V1)
+    W = g * vol
+    R = np.array([0, 0, W]) + j1[4] * A1 * m1 + j2[4] * A2 * m2
+    q1, q2, c = -R @ m1, -R @ m2, m1 @ m2
+    N1, N2 = (q1 - c * q2) / (1 - c * c), (q2 - c * q1) / (1 - c * c)
+    t1, t2 = math.tan(math.radians(j1[3])), math.tan(math.radians(j2[3]))
+    if R @ i <= 1e-6 * np.linalg.norm(R):
+        return "skip"
+    if N1 > 0 and N2 > 0:
+        return "TwoPlanes", (j1[2] * A1 + j2[2] * A2 + N1 * t1 + N2 * t2) / np.linalg.norm(R + N1 * m1 + N2 * m2), vol
+    if q1 > 0 and N2 <= 0:
+        return "PlaneOne", (j1[2] * A1 + q1 * t1) / np.linalg.norm(R + q1 * m1), vol
+    if q2 > 0 and N1 <= 0:
+        return "PlaneTwo", (j2[2] * A2 + q2 * t2) / np.linalg.norm(R + q2 * m2), vol
+    return "Lifting", 0.0, vol
+
+
+def test_sweep_agrees_with_independent_solver():
+    import random
+    rnd = random.Random(7)
+    formed = 0
+    for _ in range(1500):
+        face = (rnd.uniform(0, 360), rnd.uniform(45, 85))
+        off = rnd.choice([0, 15, -15, 30, -30, 60, -60]) + rnd.uniform(-5, 5)
+        upper = ((face[0] + off) % 360, rnd.uniform(0, 30))
+        j1 = ((face[0] + rnd.uniform(-150, 150)) % 360, rnd.uniform(10, 85), rnd.uniform(0, 0.02), rnd.uniform(10, 45),
+              rnd.choice([0, rnd.uniform(0, 0.08)]))
+        j2 = ((face[0] + rnd.uniform(-150, 150)) % 360, rnd.uniform(10, 85), rnd.uniform(0, 0.02), rnd.uniform(10, 45),
+              rnd.choice([0, rnd.uniform(0, 0.08)]))
+        H = rnd.uniform(5, 20)
+        ind = _indep(j1, j2, face, upper, H, 0.026)
+        r = rm.wedge_fs(make(joint(*j1), joint(*j2), face, upper, H, 0.026))
+        if ind == "skip":
+            continue
+        assert (ind is None) == (r.mode == rm.WedgeMode.NotFormed), (j1, j2, face, upper)
+        if ind is None:
+            continue
+        formed += 1
+        assert r.mode.name == ind[0], (j1, j2, face, upper, H)
+        assert r.factor_of_safety == pytest.approx(ind[1], rel=1e-6, abs=1e-9)
+        assert r.volume == pytest.approx(ind[2], rel=1e-9)
+    assert formed > 300
+
+
+@pytest.mark.parametrize("off", [15, -15, 30, -30, 60, -60])
+def test_upper_slope_never_gives_the_reflected_wedge(off):
+    np = pytest.importorskip("numpy")
+    import random
+    rnd = random.Random(off + 100)
+    for _ in range(200):
+        face = (rnd.uniform(0, 360), rnd.uniform(60, 85))
+        upper = ((face[0] + off) % 360, rnd.uniform(5, 30))
+        j1 = (rnd.uniform(0, 360), rnd.uniform(20, 60), 0, 35, 0)
+        j2 = (rnd.uniform(0, 360), rnd.uniform(20, 60), 0, 35, 0)
+        ind = _indep(j1, j2, face, upper, 10, 0.026)
+        r = rm.wedge_fs(make(joint(*j1), joint(*j2), face, upper, 10, 0.026))
+        if ind is not None and ind != "skip":
+            assert r.volume == pytest.approx(ind[2], rel=1e-9)

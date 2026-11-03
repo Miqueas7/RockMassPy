@@ -108,7 +108,7 @@ TEST(Wedge, SimetricaSecaSinCohesion) {
     for (double dip : {35.0, 50.0, 70.0})
         for (double delta : {20.0, 45.0, 70.0}) {
             const PlaneOrientation a{180 - delta, dip}, b{180 + delta, dip};
-            // ·ngulo entre las normales que miran hacia dentro de la cuÒa (hacia arriba); puede ser obtuso
+            // √°ngulo entre las normales que miran hacia dentro de la cu√±a (hacia arriba); puede ser obtuso
             const auto up = [](PlaneOrientation p) {
                 const double t = (p.dip_direction_deg + 180) * kPi / 180, d = p.dip_deg * kPi / 180;
                 return std::array<double, 3>{std::sin(d) * std::cos(t), std::sin(d) * std::sin(t), -std::cos(d)};
@@ -178,6 +178,8 @@ TEST(Wedge, LimiteNormalCeroDeUnaJunta) {
     const double f_lo = fs(lo), f_hi = fs(hi);
     EXPECT_NEAR(f_lo, f_hi, 1e-9);
     // y es el menor de los dos modos vecinos, lejos del l√≠mite
+    EXPECT_EQ(wedge_fs(lo).mode, WedgeMode::PlaneTwo);
+    EXPECT_EQ(wedge_fs(hi).mode, WedgeMode::PlaneTwo);
     auto two = base, one = base;
     two.joint1.water_pressure = u * (1.0 - 1e-4);
     one.joint1.water_pressure = u * (1.0 + 1e-4);
@@ -275,4 +277,29 @@ TEST(Wedge, Validacion) {
     bad([](WedgeInput& i) { i.joint1.cohesion = -1; }, "joint1.cohesion");
     bad([](WedgeInput& i) { i.external_force = -1; }, "external_force");
     bad([](WedgeInput& i) { i.joint1.plane.dip_direction_deg = 361; }, "joint1.plane.dip_direction_deg");
+}
+
+TEST(Wedge, TaludSuperiorOblicuoNoEsLaCunaReflejada) {
+    auto a = wedge_fs(dry({240, 30}, {175, 35}, 35, 35, {180, 80}, {165, 20}));
+    EXPECT_EQ(a.mode, WedgeMode::PlaneTwo);
+    EXPECT_NEAR(*a.factor_of_safety, 1.0000, 1e-4);
+    a = wedge_fs(dry({15, 30}, {185, 45}, 35, 35, {180, 85}, {195, 20}));
+    EXPECT_NEAR(*a.factor_of_safety, 0.7002, 1e-4);
+    EXPECT_GT(wedge_fs(dry({240, 30}, {175, 35}, 35, 35, {180, 80}, {165, 20})).volume, 1e4);  // no el reflejado (1003)
+}
+
+TEST(Wedge, FalsoDespegueEsDeslizamientoPorUnPlano) {
+    auto in = mk(jt(90, 13.5, 0, 17.4), jt(75, 38.8, 0, 36.7, 0.0715), {71, 74}, {75, 18.5}, 14.8, 0.026);
+    const auto r = wedge_fs(in);
+    EXPECT_EQ(r.mode, WedgeMode::PlaneOne);
+    EXPECT_NEAR(*r.factor_of_safety, 0.520, 1e-3);
+    EXPECT_TRUE(r.warnings.empty());
+}
+
+TEST(Wedge, InterseccionVerticalNoFormada) {
+    for (double dip : {90.0, 89.9999999}) {
+        const auto r = wedge_fs(mk(jt(100, dip, 0, 30), jt(200, 90, 0, 30), {150, 70}, {150, 0}, 10, 0.026));
+        EXPECT_EQ(r.mode, WedgeMode::NotFormed);
+        EXPECT_TRUE(has(r, "wedge not formed: the intersection does not daylight in the face"));
+    }
 }
