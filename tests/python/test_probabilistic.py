@@ -132,7 +132,7 @@ def test_infinite_fs_and_n1():
     r = run_probabilistic("planar", smp_base(), {"cohesion": uniform(5, 15)}, n=1)
     assert r.fs_sd is None and r.reliability_index is None and r.n_valid == 1
     r = summarize_fs([None, None], model="planar", sampling="lhs", n=2, seed=1, variables=())
-    assert r.pof is None and "no valid samples" in r.warnings
+    assert r.pof is None and "no valid samples" in r.notes and "no valid samples" not in r.warnings
 
 
 def test_toppling_runs():
@@ -183,7 +183,7 @@ def test_core_warnings_aggregated():
 def test_toppling_notes_and_grouped_counts():
     from test_toppling_core import ex1
     r = run_probabilistic("toppling", ex1(60, 0.0), {"support_force": uniform(0, 1e9)}, n=100)
-    assert any(n.startswith("toppling FS above N (") and n.endswith(" of 100 samples)") for n in r.notes)
+    assert any(n.startswith("toppling FS above 100 (") and n.endswith(" of 100 samples)") for n in r.notes)
     i = ex1(20, 0.0)
     i.base_dip_deg = 60
     r = run_probabilistic("toppling", i, {"friction_deg": uniform(15, 25)}, n=60)
@@ -191,6 +191,11 @@ def test_toppling_notes_and_grouped_counts():
     assert len(set(r.warnings)) == len(r.warnings)
     from rockmasspy.probabilistic import _norm
     assert _norm("fail in 12 blocks") == _norm("fail in 5 blocks") == "fail in N blocks"
+    assert _norm("Goodman-Bray conditions (8)-(9) fail in 3 blocks") == "Goodman-Bray conditions (8)-(9) fail in N blocks"
+    assert _norm("toppling FS above 100") == "toppling FS above 100"
+    t = "toppling: support is insufficient for any friction coefficient below 1; FS is an upper bound"
+    assert _norm(t) == t
+    assert all("(N)" not in w for w in r.warnings)
 
 
 def test_sampling_an_unset_optional_field():

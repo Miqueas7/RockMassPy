@@ -203,6 +203,28 @@ def test_conteos_y_archivo_de_resultados(tmp_path):
     assert sum(f["fs_menor_o_igual_1"] == "si" for f in filas) == c["fs_below_1"]
 
 
+def test_berma_reproducible_desde_el_archivo(tmp_path):
+    (r,), _ = correr(tmp_path, J35, [talud(buz="65")], [B(**BERMA)],
+                     [D("M1", "buz_cara_grados", "normal", 65, 10, 39, 81)], iterations=300, seed=7,
+                     sampling="monte_carlo")
+    assert (r.berm.sampling, r.berm.seed, r.berm.reliability.n) == ("monte_carlo", 7, 300)
+    _, (f,) = leer(bk.save_block_results([r], tmp_path / "res.csv"))
+    assert (f["muestreo"], f["iteraciones"], f["semilla"], f["iteraciones_validas"]) == ("monte_carlo", "300", "7", "")
+
+
+def test_fs_infinito_en_csv_y_xlsx(tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    (r,), _ = correr(tmp_path, J35, [talud()], [B(**{**PL1, "perno_kn_m": 1e6, "perno_inclinacion_grados": 0,
+                                                       "perno_tipo": "activo"})])
+    assert r.fs == math.inf and not r.needs_attention
+    _, (f,) = leer(bk.save_block_results([r], tmp_path / "res.csv"))
+    assert f["fs"] == "inf" and f["fs_menor_o_igual_1"] == "no" and f["formado"] == "si"
+    ws = openpyxl.load_workbook(bk.save_block_results([r], tmp_path / "res.xlsx"))["Bloques_resultados"]
+    cab = [c.value for c in ws[1]]
+    fila = dict(zip(cab, [c.value for c in ws[2]]))
+    assert fila["fs"] == "inf" and fila["fs_menor_o_igual_1"] == "no" and fila["formado"] == "si"
+
+
 # ---------------------------------------------------------------- foco 1: límites
 
 
@@ -219,10 +241,34 @@ def test_berma_igual_al_requerido_es_mas_angosta(tmp_path):
     assert not r.needs_attention  # la comparación con Ritchie se informa (R14)
 
 
-@pytest.mark.parametrize("dip", ["0", "90"])
-def test_familia_horizontal_o_vertical_no_forma_planar(tmp_path, dip):
-    (r,), _ = correr(tmp_path, [f"R1,J1,{dip},180"], [talud()], [B(**PL1)])
+def test_familia_vertical_no_forma_planar(tmp_path):
+    (r,), _ = correr(tmp_path, ["R1,J1,90,180"], [talud()], [B(**PL1)])
     assert r.fs is None and any("not formed" in n for n in r.notes) and r.warnings == ()
+
+
+@pytest.mark.parametrize("jf", [["R1,J1,0.5,0", "R1,J1,0.5,180"],  # media de Fisher con buzamiento 0 exacto
+                                ["R1,J1,0.0001,180"], ["R1,J1,0,0"]])
+def test_familia_horizontal_toma_el_limite_0_mas(tmp_path, jf):
+    # con grieta llena y sismo un plano casi horizontal falla: el corte en 0 no puede dar el lado favorable
+    fila = {**PL1, "dist_grieta_m": 10, "kh": 0.3}
+    (r,), slopes = correr(tmp_path, jf, [talud()], [B(**fila)])
+    assert r.fs == pytest.approx(0.9476, abs=1e-3) and r.needs_attention
+    assert bk.block_attention(r) == ["att_fs_below_1"]  # sin dirección: no hay aviso lateral
+
+
+def test_bloque_no_formado_con_distribuciones_no_pide_atencion(tmp_path):
+    fila = {**CU2, "buz_sup_grados": 80, "dir_sup_grados": 230}
+    (r,), _ = correr(tmp_path, CU2_J, [talud(buz="60", dir_="230")], [B(**fila)],
+                     [D("C1", "friccion_1_grados", "uniforme", "", "", 30, 45)], iterations=50)
+    assert r.fs is None and r.probabilistic.n_valid == 0
+    assert "probabilistic: no valid samples" in r.notes and r.warnings == () and not r.needs_attention
+
+
+def test_berma_con_anchos_negativos_deja_nota(tmp_path):
+    (r,), _ = correr(tmp_path, J35, [talud(buz="65")], [B(**BERMA)],
+                     [D("M1", "buz_cara_grados", "uniforme", "", "", 20, 30)], iterations=100)
+    assert r.berm.reliability.reliability == 0 and r.berm.reliability.width_max < 0
+    assert bk._NEGATIVE_WIDTH_NOTE in r.notes and not r.needs_attention
 
 
 # ---------------------------------------------------------------- foco 2: ejes
@@ -332,11 +378,78 @@ def test_error_del_nucleo_con_hoja_y_fila_sin_valor(tmp_path):
     m = _err(tmp_path, [B(**{**PL1, "dist_grieta_m": 77.125})])
     assert m.startswith("sheet 'Bloques', row 2:") and "Received" not in m and "77.125" not in m
     assert "dist_grieta_m" in m  # el campo del núcleo se nombra con su columna
+    assert "Domain error" not in m and "parameter" not in m and "tension_crack" not in m
 
 
-def test_muestra_fuera_de_dominio_nombra_la_columna(tmp_path):
-    m = _err(tmp_path, [B(**PL1)], [D("B1", "friccion_1_grados", "uniforme", "", "", 80, 95)])
-    assert m.startswith("sheet 'Bloques', row 2:") and "friccion_1_grados" in m and "95" not in m
+@pytest.mark.parametrize("var,mn,mx,col", [("friccion_1_grados", 80, 95, "maximo"), ("kh", -0.5, 0.1, "minimo"),
+                                           ("buz_plano_grados", 20, 90, "maximo"),
+                                           ("buz_cara_grados", 0, 60, "minimo")])
+def test_distribucion_fuera_del_dominio_de_la_variable(tmp_path, var, mn, mx, col):
+    m = _err(tmp_path, [B(**PL1)], [D("B1", var, "uniforme", "", "", mn, mx)])
+    assert m.startswith(f"sheet 'Distribuciones', row 2, column '{col}':") and "95" not in m, m
+
+
+@pytest.mark.parametrize("mn,mx,col", [(-5, 2, "minimo"), (0, math.inf, "maximo")])
+def test_retroquiebre_acotado(tmp_path, mn, mx, col):
+    m = _err(tmp_path, [B(**BERMA)], [D("M1", "retroquiebre_m", "uniforme", "", "", mn, mx)])
+    assert m.startswith(f"sheet 'Distribuciones', row 2, column '{col}':"), m
+
+
+def test_error_de_una_combinacion_muestreada_lo_dice(tmp_path):
+    # el determinístico (ψp 35, bmax 35.3) es válido; con ψp muestreado hasta 45, bmax baja de 15 m
+    m = _err(tmp_path, [B(**{**PL1, "dist_grieta_m": 15})], [D("B1", "buz_plano_grados", "uniforme", "", "", 20, 45)])
+    assert m.startswith("sheet 'Bloques', row 2: during sampling: 'dist_grieta_m'"), m
+    assert "Received" not in m and "Domain error" not in m
+
+
+@pytest.mark.parametrize("fila,var,col", [
+    (dict(PL1), "carga_kn", "carga_angulo_grados"),
+    (dict(PL1), "perno_kn_m", "perno_inclinacion_grados"),
+    (dict(CU2, carga_kn="", carga_tendencia_grados="", carga_inmersion_grados=""), "carga_kn",
+     "carga_tendencia_grados"),
+    (dict(VO1), "soporte_kn_m", "soporte_inclinacion_grados"),
+])
+def test_magnitud_muestreada_exige_su_direccion(tmp_path, fila, var, col):
+    m = _err(tmp_path, [B(**fila)], [D(fila["id_bloque"], var, "uniforme", "", "", 0, 100)], jf=J35 + CU2_J[1:]
+             if fila["modelo"] != "cuña" else CU2_J)
+    assert m.startswith(f"sheet 'Bloques', row 2, column '{col}': required when {var} is sampled"), m
+
+
+@pytest.mark.parametrize("fila,col", [(dict(b_m=50), "b_m"), (dict(a1_m=1, a2_m=0.1, b_m=0.6, n_bloques=12), "a1_m"),
+                                      (dict(soporte_inclinacion_grados=89.5), "soporte_inclinacion_grados"),
+                                      (dict(soporte_altura_m=5), "soporte_altura_m")])
+def test_geometria_del_volteo_en_la_carga(tmp_path, fila, col):
+    p = blq(tmp_path, [B(**{**VO1, **fila})])
+    with pytest.raises(ValueError) as e:
+        rm.load_blocks(p)  # en la carga, no al evaluar
+    m = str(e.value)
+    assert m.startswith(f"sheet 'Bloques', row 2, column '{col}':"), m
+    for core in ("heights_m", "base_dip_deg", "support_angle_deg", "Domain error", "89.5", "50"):
+        assert core not in m, m
+
+
+def test_cruces_revisados_antes_de_evaluar(tmp_path, monkeypatch):
+    def nunca(*a, **k):
+        raise AssertionError("evaluated a row before validating every cross-reference")
+
+    monkeypatch.setattr(bk, "_assess_one", nunca)
+    for mala, col in ((dict(id_talud="T9"), "id_talud"), (dict(familia_1="J9"), "familia_1")):
+        m = _err(tmp_path, [B(**PL1), B(**{**PL1, "id_bloque": "B2", **mala})])
+        assert m.startswith(f"sheet 'Bloques', row 3, column '{col}':"), m
+
+
+def test_filas_a_mano_con_el_mismo_validador(tmp_path):
+    (fila,) = rm.load_blocks(blq(tmp_path, [B(**PL1)]))
+    slopes = rm.assess_slopes(rm.load_slope_faces(tal(tmp_path, [talud()])), rm.load_families(fam(tmp_path, J35)))
+    from dataclasses import replace
+    for cambio, col in ((dict(llenado_agua=1.5), "llenado_agua"), (dict(altura_m="abc-ZZSENT"), "altura_m"),
+                        (dict(kh=math.nan), "kh"), (dict(modelo="ZZSENT"), "modelo"), (dict(perno_kn_m=5.0),
+                                                                                         "perno_inclinacion_grados")):
+        with pytest.raises(ValueError) as e:
+            rm.assess_blocks([replace(fila, **cambio)], slopes)
+        assert str(e.value).startswith(f"sheet 'Bloques', row 2, column '{col}':") and "ZZSENT" not in str(e.value)
+    (r,) = rm.assess_blocks([replace(fila, modelo="PLANAR ")], slopes)  # se normaliza igual que al cargar
+    assert r.fs == pytest.approx(0.818425, abs=1e-6)
 
 
 @pytest.mark.parametrize("kw", [dict(iterations=0), dict(iterations=2.5), dict(iterations=True),
@@ -366,6 +479,46 @@ def test_privacidad(tmp_path):
     assert not any("ZZSENT" in s for r in rs for s in (*r.warnings, *r.notes))
     txt = bk.save_block_results(rs, tmp_path / "res.csv").read_text(encoding="utf-8-sig")
     assert "B-ZZSENT" in txt and "T-ZZSENT" in txt and txt.count("ZZSENT") == 2
+
+
+def test_privacidad_xlsx(tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    from test_slopes import EXTRA_F, EXTRA_T, FAM_CAB, TAL_CAB
+    jf = ["R-ZZSENT,F-ZZSENT,35,140", "R-ZZSENT,F-ZZSENT,36,141"]
+    tf = [talud("T-ZZSENT", "R-ZZSENT")]
+    bf = [B(**{**PL1, "id_bloque": "B-ZZSENT", "id_talud": "T-ZZSENT", "familia_1": "F-ZZSENT",
+               "retroanalisis": "si"}),
+          B(**{**BERMA, "id_bloque": "M-ZZSENT", "id_talud": "T-ZZSENT"})]
+    df = [D("B-ZZSENT", "friccion_1_grados", "normal", 35, 5, 15, 70),
+          D("M-ZZSENT", "retroquiebre_m", "uniforme", "", "", 2, 9)]
+    wb = openpyxl.Workbook()
+    for nombre, cab, filas in (("Familias", FAM_CAB, [f + EXTRA_F for f in jf]),
+                               ("Taludes", TAL_CAB, [t + EXTRA_T for t in tf]),
+                               ("Bloques", ",".join(bk.BLOCK_COLUMNS) + EXTRA_CAB, bf),
+                               ("Distribuciones", DIS_CAB + EXTRA_CAB, df)):
+        ws = wb.create_sheet(nombre)
+        for linea in [cab, *filas]:
+            fila = []
+            for c in linea.split(","):
+                try:
+                    fila.append(None if c == "" else float(c))
+                except ValueError:
+                    fila.append(c)
+            ws.append(fila)
+    del wb["Sheet"]
+    x = tmp_path / "x.xlsx"
+    wb.save(x)
+    rows, dists = rm.load_blocks(x), rm.load_distributions(x)
+    rs = rm.assess_blocks(rows, rm.assess_slopes(rm.load_slope_faces(x), rm.load_families(x)), dists, iterations=100)
+    for o in (*rows, *dists, *rs):
+        assert "ZZSENT" not in repr(o)
+    assert not any("ZZSENT" in s for r in rs for s in (*r.warnings, *r.notes))
+    ws = openpyxl.load_workbook(bk.save_block_results(rs, tmp_path / "res.xlsx"))["Bloques_resultados"]
+    celdas = [str(c.value) for fila in ws.iter_rows() for c in fila if c.value is not None]
+    assert sorted(c for c in celdas if "ZZSENT" in c) == ["B-ZZSENT", "M-ZZSENT", "T-ZZSENT", "T-ZZSENT"]
+    with pytest.raises(ValueError) as e:
+        rm.assess_blocks(rows, [], dists)
+    assert "ZZSENT" not in str(e.value)
 
 
 # ---------------------------------------------------------------- paridad de la regla de atención
@@ -398,6 +551,18 @@ def test_avisos_de_muestras_piden_atencion(tmp_path):
                      [D("B1", "peso_agua_kn_m3", "uniforme", "", "", 10, 60)], iterations=100)
     assert r.fs > 1 and r.deterministic.warnings == []
     assert any("samples)" in w for w in r.warnings) and r.needs_attention
+    (w,) = r.warnings
+    assert re.fullmatch(r"probabilistic: effective normal force on the plane is negative: friction taken as zero "
+                        r"\(\d+ of 100 samples\)", w), w
+
+
+def test_textos_agregados_del_volteo_se_leen(tmp_path):
+    fila = {**VO1, "soporte_kn_m": "", "friccion_1_grados": 20, "buz_base_grados": 60}
+    (r,), _ = correr(tmp_path, J35, [talud()], [B(**fila)],
+                     [D("V1", "friccion_1_grados", "uniforme", "", "", 15, 25)], iterations=60)
+    textos = (*r.warnings, *r.notes)
+    assert textos and not any("(N)" in t or "above N" in t or "below N" in t for t in textos), textos
+    assert any(re.search(r"\(8\)-\(9\) fail in N blocks \(\d+ of 60 samples\)", t) for t in textos), textos
 
 
 def test_methods(tmp_path):

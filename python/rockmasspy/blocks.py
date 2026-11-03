@@ -4,9 +4,11 @@ Cada fila de `Bloques` es un análisis (planar, cuña, volteo o berma) ligado a 
 cara del talud y la orientación media (Fisher) de sus familias; `Taludes` no gana columnas (R15). `Distribuciones` da
 las variables aleatorias de cada bloque. Una sola regla de atención (R14): FS determinístico < 1 + 1e-9 o algún aviso.
 `id_bloque` e `id_talud` van al archivo de resultados, nunca a un mensaje ni a un repr; los nombres de familia tampoco.
+El volteo no toma nada de la cara del talud (su geometría sale de a1, a2 y b) y por eso no lleva aviso lateral.
 """
 
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -154,24 +156,92 @@ _VARS = {
                  "soporte_altura_m": "support_height_m"},
     "berm": {"buz_cara_grados": "face_angle_deg", "retroquiebre_m": "retroquiebre_m"},
 }
+_ALL_VARS = {v for m in _VARS.values() for v in m}
+# dominio de cada variable: el de su columna; las tres sin columna, el de la geometría
+_DIST_RANGES = {**_RANGES, "buz_cara_grados": (0, 90, True, False), "buz_plano_grados": (0, 90, True, True),
+                "retroquiebre_m": (0, _INF, False, False)}
+# una magnitud muestreada exige en la fila su dirección o su tipo (si no, tomaría el valor por defecto del núcleo)
+_SAMPLED_NEEDS = {
+    "planar": {"perno_kn_m": ("perno_inclinacion_grados", "perno_tipo"), "carga_kn": ("carga_angulo_grados",)},
+    "wedge": {"carga_kn": ("carga_tendencia_grados", "carga_inmersion_grados")},
+    "toppling": {"soporte_kn_m": ("soporte_inclinacion_grados",)}, "berm": {},
+}
+# nombres del núcleo que pueden salir en un error -> columna de la hoja
+_ERR_NAMES = {
+    "planar": _VARS["planar"],
+    "wedge": {**_VARS["wedge"], "carga_tendencia_grados": "external_direction.trend_deg",
+              "carga_inmersion_grados": "external_direction.plunge_deg"},
+    "toppling": {**_VARS["toppling"], "n_bloques": "n_blocks", "bloque_cresta": "crest_block"},
+    "berm": {**_VARS["berm"], "altura_banco_m": "bench_height_m", "ancho_berma_m": "berm_width_m",
+             "ancho_requerido_m": "required_width_m"},
+}
+_FAMILY_COLUMNS = {"planar": ("familia_1",), "wedge": ("familia_1", "familia_2"), "toppling": (), "berm": ()}
+
+
+def _clean(msg: str, model: str) -> str:
+    """Mensaje del núcleo para el usuario: sin «Received:», sin el prefijo del núcleo y con las columnas de la hoja."""
+    msg = msg.split("Received:")[0].strip()
+    msg = re.sub(r"Domain error \[RockMassPy\]:\s*(parameter\s+)?", "", msg)
+    names = {core: col for col, core in _ERR_NAMES[model].items() if core != col}
+    if names:
+        pat = "|".join(re.escape(k) for k in sorted(names, key=len, reverse=True))
+        msg = re.sub(rf"(?<![\w.])({pat})(?!\w)", lambda m: names[m.group(1)], msg)
+    return msg
 
 
 def _word(v):
     return _strip(v).strip().casefold()
 
 
-def _floats(vals, text):
-    """Excel devuelve 10 como int y el CSV como float: todo número queda float para que las dos vías den lo mismo."""
+def _floats(vals, text, sheet, n):
+    """Excel devuelve 10 como int y el CSV como float: todo número queda float para que las dos vías den lo mismo.
+
+    Una fila armada a mano pasa por aquí también: un texto, NaN o infinito en un número es «invalid value», sin eco.
+    """
     for c, v in vals.items():
-        if c not in text and v is not None:
-            vals[c] = float(v)
+        if v is None:
+            continue
+        if c in text:
+            if not isinstance(v, str):
+                raise ValueError(f"{_where(sheet, n, c)}: invalid value")
+            continue
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            x = math.nan
+        if isinstance(v, bool) or not math.isfinite(x):
+            raise ValueError(f"{_where(sheet, n, c)}: invalid value")
+        vals[c] = x
+
+
+def _toppling_geometry(vals, bad):
+    """Alturas de la ec. 3 y las combinaciones que el núcleo rechazaría, ubicadas en su columna (validadas al cargar)."""
+    n, crest, a1 = int(vals["n_bloques"]), int(vals["bloque_cresta"]), vals["a1_m"]
+    try:
+        y = rm.goodman_bray_heights(n, crest, a1, vals["a2_m"], vals["b_m"])
+    except ValueError:
+        y = None
+    if y is None:
+        bad("b_m", "a1_m, a2_m, b_m, n_bloques and bloque_cresta give a block height <= 0 (eq. 3)")
+    if any((y[k - 1] - a1 if k <= crest else y[k - 1]) <= 0 for k in range(2, n + 1)):
+        bad("a1_m", "must be below the height of every block up to the crest (L_n must be positive)")
+    tilt = vals["buz_base_grados"] + (vals["soporte_inclinacion_grados"] or 0.0)
+    if (vals["soporte_kn_m"] or 0.0) > 0 and not -45 < tilt < 90:
+        bad("soporte_inclinacion_grados", "buz_base_grados + soporte_inclinacion_grados must be within (-45, 90) "
+                                          "for the support to act")
+    if vals["soporte_altura_m"] is not None and vals["soporte_altura_m"] > y[0]:
+        bad("soporte_altura_m", "must not exceed the height of block 1")
 
 
 def _block(vals, n, sheet):
+    """Único validador de una fila de `Bloques`: lo usan la carga y `assess_blocks` (filas armadas a mano)."""
     def bad(c, motivo):
         raise ValueError(f"{_where(sheet, n, c)}: {motivo}")
 
-    _floats(vals, _BLOCK_TEXT)
+    _floats(vals, _BLOCK_TEXT, sheet, n)
+    for c in ("id_bloque", "id_talud", "modelo"):
+        if vals[c] is None:
+            bad(c, "required value is empty")
     vals["modelo"] = _word(vals["modelo"])
     model = _MODELS.get(vals["modelo"])
     if model is None:
@@ -193,6 +263,7 @@ def _block(vals, n, sheet):
                 bad(c, "must be a whole number")
         if vals["bloque_cresta"] > vals["n_bloques"]:
             bad("bloque_cresta", "must be within [1, n_bloques]")
+        _toppling_geometry(vals, bad)
     for c, allowed in (("perno_tipo", ("activo", "pasivo")), ("retroanalisis", ("si", "no"))):
         if vals[c] is not None:
             vals[c] = _word(vals[c])
@@ -205,9 +276,16 @@ def _distribution(vals, n, sheet):
     def bad(c, motivo):
         raise ValueError(f"{_where(sheet, n, c)}: {motivo}")
 
-    _floats(vals, _DIST_TEXT)
+    _floats(vals, _DIST_TEXT, sheet, n)
     vals["distribucion"] = _word(vals["distribucion"])
     vals["variable"] = _word(vals["variable"])
+    if vals["variable"] not in _ALL_VARS:
+        bad("variable", f"unknown variable; allowed: {', '.join(sorted(_ALL_VARS))}")
+    rng = _DIST_RANGES.get(vals["variable"])
+    if rng is not None:  # el dominio de la columna (o de la variable sin columna) acota la distribución
+        lo, hi, lo_open, hi_open = rng
+        for c in ("minimo", "maximo"):
+            _rango(vals, sheet, n, c, lo, hi, lo_open=lo_open, hi_open=hi_open)
     kind = _KINDS.get(vals["distribucion"])
     if kind is None:
         bad("distribucion", f"must be one of {', '.join(_KINDS)}")
@@ -259,6 +337,8 @@ class BermResult:
     required_width_m: float
     narrower_than_required: bool
     reliability: rm.BermReliability | None
+    sampling: str | None = None  # muestreo y semilla de la confiabilidad (None sin distribución)
+    seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -294,16 +374,12 @@ def block_attention(r: BlockResult) -> list[str]:
     return out
 
 
-class _Located(ValueError):
-    """Error ya ubicado con hoja, fila y columna: no se vuelve a envolver."""
-
-
 def _family(r: BlockRow, s: SlopeResult, col: str) -> rm.PlaneOrientation:
     name = getattr(r, col)
     for f in s.families:
         if f.familia == name:
             return f.mean_plane
-    raise _Located(f"{_where(r.hoja, r.fila, col)}: no family with this name in the tramo of the slope")
+    raise ValueError(f"{_where(r.hoja, r.fila, col)}: no family with this name in the tramo of the slope")
 
 
 def _planar(r: BlockRow, s: SlopeResult):
@@ -320,10 +396,10 @@ def _planar(r: BlockRow, s: SlopeResult):
         i.bolt_mode = rm.BoltMode.Active if r.perno_tipo == "activo" else rm.BoltMode.Passive
     if r.carga_kn is not None:
         i.external_force, i.external_angle_deg = r.carga_kn, r.carga_angulo_grados
-    horizontal = p.dip_deg <= _AXIS_TOL  # sin dirección: no hay bloque planar que deslice
-    if not horizontal:
-        # un plano vertical no aflora: 90 se lleva justo debajo para que el núcleo lo declare no formado
-        i.plane_dip_deg = min(p.dip_deg, 90.0 - 1e-12)
+    horizontal = p.dip_deg <= _AXIS_TOL  # sin dirección: solo se salta el aviso lateral
+    # el núcleo es continuo hasta 0⁺ y rechaza 0 y 90 exactos: horizontal pasa como 1e-9 (puede fallar con agua y
+    # sismo); vertical justo debajo de 90, que no aflora y el núcleo declara no formado
+    i.plane_dip_deg = min(max(p.dip_deg, 1e-9), 90.0 - 1e-12)
     delta = _delta(p.dip_direction_deg, s.face.dip_direction_deg)
     if p.dip_deg >= 90 - _AXIS_TOL:  # eje: el sentido más cercano a la cara es el crítico
         delta = min(delta, 180.0 - delta)
@@ -351,6 +427,7 @@ def _wedge(r: BlockRow, s: SlopeResult):
 
 
 def _toppling(r: BlockRow):
+    """El volteo no toma nada de la cara del talud: la geometría sale de a1, a2 y b (R10); por eso no hay aviso lateral."""
     i = rm.TopplingInput()
     n, crest = int(r.n_bloques), int(r.bloque_cresta)
     i.heights_m = rm.goodman_bray_heights(n, crest, r.a1_m, r.a2_m, r.b_m)
@@ -378,7 +455,12 @@ def _berm(r: BlockRow, face_dip: float, dists, iterations, sampling, seed) -> Be
             hc = h / math.tan(math.radians(ir))
             widths = [hc - b for b in x]
         rel = rm.berm_reliability(widths, req)
+        return BermResult(h, w, face_dip, ir, rit, req, w <= req + _EPS, rel, sampling, seed)
     return BermResult(h, w, face_dip, ir, rit, req, w <= req + _EPS, rel)
+
+
+_NEGATIVE_WIDTH_NOTE = ("berm reliability: some sampled widths are negative (face flatter than the inter-ramp angle or "
+                        "backbreak wider than the bench); they count as not meeting the requirement")
 
 
 def _assess_one(order, r: BlockRow, s: SlopeResult, dists, iterations, sampling, seed, lateral_limit_deg):
@@ -391,6 +473,8 @@ def _assess_one(order, r: BlockRow, s: SlopeResult, dists, iterations, sampling,
         methods.append(berm.ritchie.info)
         if berm.reliability is not None:
             methods += [berm.reliability.info, PROBABILISTIC_INFO]
+            if berm.reliability.width_min < 0:
+                notes.append(_NEGATIVE_WIDTH_NOTE)
     else:
         horizontal = False
         if model == "planar":
@@ -400,21 +484,20 @@ def _assess_one(order, r: BlockRow, s: SlopeResult, dists, iterations, sampling,
             base, fn = _wedge(r, s), rm.wedge_fs
         else:
             base, fn = _toppling(r), rm.toppling_fs
-        if horizontal:
-            notes.append("planar block not formed: the plane is horizontal")
-        else:
-            det = fn(base)
-            warnings += det.warnings
-            notes += det.notes
-            methods.append(det.info)
-            if model == "planar" and r.retroanalisis == "si":
-                back = rm.planar_back_analysis(base, _BACK_FRICTION)
-                notes += back.notes
-                methods.append(back.info)
-        if variables and horizontal and "plane_dip_deg" not in variables:
-            notes.append("probabilistic analysis not run: the block does not form")
-        elif variables:
-            prob = run_probabilistic(model, base, variables, n=iterations, sampling=sampling, seed=seed)
+        det = fn(base)
+        warnings += det.warnings
+        notes += det.notes
+        methods.append(det.info)
+        if model == "planar" and r.retroanalisis == "si":
+            back = rm.planar_back_analysis(base, _BACK_FRICTION)
+            notes += back.notes
+            methods.append(back.info)
+        if variables:
+            try:
+                prob = run_probabilistic(model, base, variables, n=iterations, sampling=sampling, seed=seed)
+            except ValueError as e:  # la fila es válida: el error lo produjo una combinación muestreada
+                raise ValueError(f"during sampling: {e}") from None
+            # con n_valid == 0 «no valid samples» ya viene como nota: un bloque no formado no pide atención (R14)
             warnings += [f"probabilistic: {w}" for w in prob.warnings]
             notes += [f"probabilistic: {t}" for t in prob.notes]
             methods.append(prob.info)
@@ -437,7 +520,11 @@ def _int_arg(v, name, lo):
 def assess_blocks(rows: Iterable[BlockRow], slopes: Iterable[SlopeResult], distributions: Iterable[DistributionRow] = (),
                   *, iterations: int = 5000, sampling: str = "lhs", seed: int = 1,
                   lateral_limit_deg: float = 30.0) -> list[BlockResult]:
-    """Evalúa cada bloque con la cara y las familias de su talud. Un dato imposible lanza con hoja, fila y columna."""
+    """Evalúa cada bloque con la cara y las familias de su talud. Un dato imposible lanza con hoja, fila y columna.
+
+    Las filas armadas a mano pasan por el mismo validador que las cargadas. Todos los cruces de hojas (talud, familias,
+    distribuciones) se revisan antes de evaluar la primera fila.
+    """
     _int_arg(iterations, "iterations", 1)
     _int_arg(seed, "seed", 0)
     if sampling not in ("lhs", "monte_carlo"):
@@ -445,13 +532,17 @@ def assess_blocks(rows: Iterable[BlockRow], slopes: Iterable[SlopeResult], distr
     if not (isinstance(lateral_limit_deg, (int, float)) and math.isfinite(lateral_limit_deg)
             and 0 < lateral_limit_deg < 90):
         raise ValueError("lateral_limit_deg must be within (0, 90)")
-    rows = list(rows)
+    rows = [_block({c: getattr(r, c) for c in BLOCK_COLUMNS}, r.fila, r.hoja) for r in rows]
     by_talud = {s.id_talud: s for s in slopes}
-    by_id = {}
+    by_id, faces = {}, []
     for r in rows:
-        if r.modelo not in _MODELS:
-            raise ValueError(f"{_where(r.hoja, r.fila, 'modelo')}: must be one of {', '.join(_MODELS)}")
+        s = by_talud.get(r.id_talud)
+        if s is None:
+            raise ValueError(f"{_where(r.hoja, r.fila, 'id_talud')}: no slope face with this id_talud")
+        for col in _FAMILY_COLUMNS[_MODELS[r.modelo]]:
+            _family(r, s, col)
         by_id[r.id_bloque] = r
+        faces.append(s)
     per_block: dict[str, list[DistributionRow]] = {}
     for d in distributions:
         r = by_id.get(d.id_bloque)
@@ -465,22 +556,18 @@ def assess_blocks(rows: Iterable[BlockRow], slopes: Iterable[SlopeResult], distr
         if r.modelo == "berma" and lst:
             raise ValueError(f"{_where(d.hoja, d.fila, 'variable')}: a berm takes exactly one distribution "
                              "(buz_cara_grados or retroquiebre_m)")
+        for c in _SAMPLED_NEEDS[_MODELS[r.modelo]].get(d.variable, ()):
+            if getattr(r, c) is None:
+                raise ValueError(f"{_where(r.hoja, r.fila, c)}: required when {d.variable} is sampled in "
+                                 f"{d.hoja} (row {d.fila})")
         lst.append(d)
     out = []
-    for order, r in enumerate(rows, start=1):
-        s = by_talud.get(r.id_talud)
-        if s is None:
-            raise ValueError(f"{_where(r.hoja, r.fila, 'id_talud')}: no slope face with this id_talud")
+    for order, (r, s) in enumerate(zip(rows, faces), start=1):
         try:
             out.append(_assess_one(order, r, s, per_block.get(r.id_bloque, []), iterations, sampling, seed,
                                    lateral_limit_deg))
-        except _Located as e:
-            raise ValueError(str(e)) from None
         except ValueError as e:
-            msg = str(e).split("Received:")[0].strip()
-            for col, name in _VARS[_MODELS[r.modelo]].items():  # el campo del núcleo se nombra con su columna
-                msg = msg.replace(f"'{name}'", f"'{col}'")
-            raise ValueError(f"sheet '{r.hoja}', row {r.fila}: {msg}") from None
+            raise ValueError(f"sheet '{r.hoja}', row {r.fila}: {_clean(str(e), _MODELS[r.modelo])}") from None
     return out
 
 
@@ -555,10 +642,14 @@ def save_block_results(results: Iterable[BlockResult], path) -> Path:
         prob = ([p.sampling, p.n, p.n_valid, p.seed, p.fs_mean, p.fs_sd, p.fs_min, p.fs_max,
                  None if p.pof is None else p.pof * 100, p.reliability_index, p.reliability_index_lognormal]
                 if p is not None else [None] * 11)
+        if b is not None and b.reliability is not None:  # la confiabilidad de berma también se reproduce
+            prob[:4] = [b.sampling, b.reliability.n, None, b.seed]
         berm = ([b.ritchie.width_m, b.required_width_m, b.interramp_deg,
                  None if b.reliability is None else b.reliability.reliability * 100] if b is not None else [None] * 4)
         rows.append([r.id_bloque, r.id_talud, _SHEET_MODEL[r.model], _mode(r), _yes(_formed(r)), r.fs,
                      None if r.fs is None else _yes("att_fs_below_1" in block_attention(r)), *prob,
                      None if ba is None else ba.friction_at_zero_cohesion_deg, *berm,
                      " | ".join(r.warnings), " | ".join(r.notes)])
+    # openpyxl escribe ±inf como celda vacía: el texto «inf» deja iguales el CSV y el xlsx (FS sin fuerza que deslice)
+    rows = [[("inf" if v > 0 else "-inf") if isinstance(v, float) and math.isinf(v) else v for v in f] for f in rows]
     return write_table(path, RESULT_COLUMNS, rows, sheet="Bloques_resultados")

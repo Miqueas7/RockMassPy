@@ -170,11 +170,12 @@ def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: in
     k = len(valid) - len(finite)
     if k:
         notes.append(f"{k} samples with no driving force counted as stable and left out of the FS statistics")
+    if not valid:  # un bloque que nunca se forma es nota, no aviso (R14)
+        notes.append("no valid samples")
     return ProbabilisticResult(
         model, sampling, n, seed, tuple(variables), tuple(fs), len(valid), failed,
         failed / len(valid) if valid else None, mean, sd, min(finite) if finite else None,
-        max(finite) if finite else None, beta, beta_ln, PROBABILISTIC_INFO,
-        tuple(extra_warnings) + (() if valid else ("no valid samples",)), tuple(notes))
+        max(finite) if finite else None, beta, beta_ln, PROBABILISTIC_INFO, tuple(extra_warnings), tuple(notes))
 
 
 _MODELS = {"planar": (rm.PlanarInput, rm.planar_fs), "wedge": (rm.WedgeInput, rm.wedge_fs),
@@ -267,5 +268,8 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
 
 
 def _norm(text: str) -> str:
-    """Agrupa textos del núcleo que solo difieren en un conteo («fail in 3 blocks» y «fail in 5 blocks»)."""
-    return re.sub(r"\d+", "N", text)
+    """Agrupa textos del núcleo que solo difieren en un conteo («fail in 3 blocks» y «fail in 5 blocks»).
+
+    Solo cambia el entero suelto seguido de una palabra (el conteo); «(8)-(9)», «above 100» y «below 1;» quedan.
+    """
+    return re.sub(r"(?<![\w(.\-])\d+(?= [A-Za-z])", "N", text)
