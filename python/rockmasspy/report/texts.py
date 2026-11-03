@@ -247,7 +247,6 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "cap_bl_warnings": {"es": "Avisos y cantidad de bloques que los tienen",
                         "en": "Warnings and number of blocks that have them"},
     "h_blocks": {"es": "Bloques", "en": "Blocks"},
-    "h_block": {"es": "Bloque", "en": "Block"},
     "h_model": {"es": "Modelo", "en": "Model"},
     "h_block_mode": {"es": "Modo", "en": "Mode"},
     "h_fs": {"es": "FS", "en": "FS"},

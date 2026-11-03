@@ -638,7 +638,7 @@ def block_figure(r, kind: str, lang: str):
 
 def _block_blocks(blocks, lang: str, figures: bool) -> tuple:
     """Tablas de bloques (R17) en su orden, cada una solo si tiene filas, y las figuras por número de orden."""
-    from ..blocks import _mode, block_attention
+    from ..blocks import block_attention, block_mode
     from ..viz.style import text
 
     def yes(v):
@@ -648,20 +648,23 @@ def _block_blocks(blocks, lang: str, figures: bool) -> tuple:
                  ("id_bloque", "id_talud", t("h_model", lang), t("h_block_mode", lang), t("h_fs", lang),
                   t("h_fs_le1", lang)),
                  tuple((r.id_bloque, r.id_talud, t(f"model_{r.model}", lang),
-                        "-" if _mode(r) is None else t(f"bmode_{_mode(r)}", lang), _num(r.fs),
+                        "-" if block_mode(r) is None else t(f"bmode_{block_mode(r)}", lang), _num(r.fs),
                         "-" if r.fs is None else yes("att_fs_below_1" in block_attention(r))) for r in blocks))]
     prob = tuple((r.id_bloque, text("prob_lhs" if p.sampling == "lhs" else "prob_monte_carlo", lang),
                   f"{p.n_valid}/{p.n}", str(p.seed), _num(p.fs_mean), _num(p.fs_sd), _num(p.fs_min), _num(p.fs_max),
                   _num(None if p.pof is None else p.pof * 100, ".1f"), _num(p.reliability_index, ".2f"),
                   _num(p.reliability_index_lognormal, ".2f"))
                  for r in blocks for p in (r.probabilistic,) if p is not None)
-    back = tuple((r.id_bloque, _num(phi, ".0f"), _num(c, ".1f"), _num(b.friction_at_zero_cohesion_deg, ".2f"))
+    back = tuple((r.id_bloque, _num(phi, "g"), _num(c, ".1f"), _num(b.friction_at_zero_cohesion_deg, ".2f"))
                  for r in blocks for b in (r.back_analysis,) if b is not None
                  for phi, c in zip(b.friction_deg, b.cohesion))
     berms = tuple((r.id_bloque, r.id_talud, _num(b.bench_height_m, ".1f"), _num(b.berm_width_m, ".2f"),
                    _num(b.ritchie.width_m, ".2f"), _num(b.required_width_m, ".2f"), _num(b.interramp_deg, ".1f"),
                    yes(b.narrower_than_required),
-                   _num(None if b.reliability is None else b.reliability.reliability * 100, ".1f"))
+                   _num(None if b.reliability is None else b.reliability.reliability * 100, ".1f"),
+                   *(("-",) * 3 if b.reliability is None else  # muestreo, n y semilla: la confiabilidad se reproduce
+                     (text("prob_lhs" if b.sampling == "lhs" else "prob_monte_carlo", lang), str(b.reliability.n),
+                      str(b.seed))))
                   for r in blocks for b in (r.berm,) if b is not None)
     if prob:
         out.append(Table(t("cap_prob", lang), ("id_bloque", t("h_sampling", lang), t("h_valid", lang),
@@ -681,7 +684,8 @@ def _block_blocks(blocks, lang: str, figures: bool) -> tuple:
     if berms:
         out.append(Table(t("cap_berms", lang), ("id_bloque", "id_talud", t("h_bench_h", lang), t("h_berm_w", lang),
                                                 t("h_ritchie", lang), t("h_required", lang), t("h_ira", lang),
-                                                t("h_narrower", lang), t("h_berm_rel", lang)), berms))
+                                                t("h_narrower", lang), t("h_berm_rel", lang), t("h_sampling", lang),
+                                                "n", t("h_seed", lang)), berms))
     for r in blocks:
         if r.probabilistic is not None:
             for kind in ("hist", "cdf"):
@@ -698,7 +702,7 @@ def _count_table(key, head_key, counts, lang) -> Table:
 def build_slope_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
                        figures: bool = True, projection: str = "equal_area", blocks=()) -> Report:
     """Informe de taludes: alcance, métodos, resultados, avisos y nota. `blocks` (de `assess_blocks`) suma la 3B."""
-    from ..blocks import block_attention
+    from ..blocks import block_attention, warning_counts
 
     _check_lang(lang)
     results, blocks = list(results), list(blocks)
@@ -707,7 +711,7 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     methods = tuple({(m.method_id, m.source): MethodRef(m.method_id, m.verification.name, m.source)
                      for r in (*results, *blocks) for m in r.methods}.values())
     counts = Counter(w for r in results for w in set(r.warnings))
-    bcounts = Counter(w for r in blocks for w in set(r.warnings))
+    bcounts = warning_counts(blocks)
     notes = dict.fromkeys(n for r in (*results, *blocks) for n in r.notes)
     s4 = ((_count_table("cap_sl_warnings", "h_slopes", counts, lang),) if counts else ())
     s4 += ((_count_table("cap_bl_warnings", "h_blocks", bcounts, lang),) if bcounts else ())

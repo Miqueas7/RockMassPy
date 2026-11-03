@@ -13,7 +13,7 @@ import math
 import random
 import re
 import statistics
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from . import _rockmasspy_core as rm
@@ -150,26 +150,36 @@ class ProbabilisticResult:
 
 def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: int, seed: int,
                  variables: Sequence[str], extra_warnings: Sequence[str] = (),
-                 extra_notes: Sequence[str] | None = None) -> ProbabilisticResult:
+                 extra_notes: Sequence[str] | None = None, capped: Collection[int] = (),
+                 upper_bounds: Collection[int] = ()) -> ProbabilisticResult:
+    """Estadística de las muestras. `capped` y `upper_bounds` son índices de `fs`: un FS en el tope del modelo (cota
+    inferior) cuenta como estable y sale de la estadística, como el infinito; un FS que solo es cota superior cuenta
+    como falla, el lado menos favorable."""
     valid = [f for f in fs if f is not None]
-    if any(math.isnan(f) for f in valid):
-        raise ValueError("FS values must not be NaN")
-    finite = [f for f in valid if math.isfinite(f)]
-    failed = sum(is_failure(f) for f in valid)
+    if any(math.isnan(f) or f == -math.inf for f in valid):
+        raise ValueError("fs: values must not be NaN or -inf")
+    capped, upper_bounds = set(capped), set(upper_bounds)
+    finite = [f for i, f in enumerate(fs) if f is not None and math.isfinite(f) and i not in capped]
+    failed = sum(i in upper_bounds or is_failure(f) for i, f in enumerate(fs) if f is not None)
     mean = math.fsum(finite) / len(finite) if finite else None
     sd = math.sqrt(math.fsum((f - mean) ** 2 for f in finite) / (len(finite) - 1)) if len(finite) > 1 else None
     beta = beta_ln = None
-    if sd and mean > 0:
+    notes = []
+    if sd is not None and sd <= 1e-12 * abs(mean):  # dispersión de puro redondeo: β sería ±1e15 inventado
+        notes.append("FS does not vary with the sampled variables; reliability index undefined")
+    elif sd is not None and mean > 0:
         v = sd / mean
         beta = (mean - 1) / sd
-        beta_ln = math.log(mean / math.sqrt(1 + v * v)) / math.sqrt(math.log(1 + v * v))
-    notes, k = [], len(fs) - len(valid)
+        beta_ln = math.log(mean / math.sqrt(1 + v * v)) / math.sqrt(math.log1p(v * v))
+    k = len(fs) - len(valid)
     if k and extra_notes is None:  # run_probabilistic da su propia nota con el motivo del núcleo
         notes.append(f"{k} samples did not form a block and were excluded")
     notes = list(extra_notes or ()) + notes
-    k = len(valid) - len(finite)
+    k = sum(1 for f in valid if math.isinf(f))
     if k:
         notes.append(f"{k} samples with no driving force counted as stable and left out of the FS statistics")
+    if capped:
+        notes.append(f"{len(capped)} of {n} samples have FS above the cap; excluded from the statistics")
     if not valid:  # un bloque que nunca se forma es nota, no aviso (R14)
         notes.append("no valid samples")
     return ProbabilisticResult(
@@ -239,6 +249,7 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
     warns: dict[str, int] = {}
     notes: dict[str, int] = {}
     reasons: dict[str, int] = {}
+    capped, bounded = [], []
     for i in range(n):
         for name in names:
             _assign(work, name, draws[name][i])
@@ -252,6 +263,12 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
             raise ValueError(f"variable '{hit[0]}': a sampled value is outside the valid range of the model; "
                              "narrow its minimum and maximum") from None
         fs.append(r.factor_of_safety)
+        if model == "toppling":
+            # la cota tan(phi)/(1 - 1e-9) nunca prueba FS > 1 (el mu requerido es >= 1): cuenta como falla
+            if r.fs_bounded:
+                bounded.append(i)
+            elif r.factor_of_safety >= 100.0:  # tope del núcleo (toppling.hpp): cota inferior, como el infinito
+                capped.append(i)
         for w in set(map(_norm, r.warnings)):
             warns[w] = warns.get(w, 0) + 1
         if r.factor_of_safety is None:  # el motivo de no formarse va en la nota del bloque
@@ -264,7 +281,7 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
         fs, model=model, sampling=sampling, n=n, seed=seed, variables=names,
         extra_warnings=[f"{t} ({k} of {n} samples)" for t, k in warns.items()],
         extra_notes=[f"{k} of {n} samples do not form a block ({t})" for t, k in reasons.items()]
-        + [f"{t} ({k} of {n} samples)" for t, k in notes.items()])
+        + [f"{t} ({k} of {n} samples)" for t, k in notes.items()], capped=capped, upper_bounds=bounded)
 
 
 def _norm(text: str) -> str:

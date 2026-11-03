@@ -9,6 +9,7 @@ El volteo no toma nada de la cara del talud (su geometría sale de a1, a2 y b) y
 
 import math
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -17,7 +18,8 @@ from . import _rockmasspy_core as rm
 from .batch import write_table
 from .excel_io import _where
 from .intact_rock import _strip
-from .probabilistic import PROBABILISTIC_INFO, Distribution, ProbabilisticResult, is_failure, run_probabilistic, sample
+from .probabilistic import (PROBABILISTIC_INFO, Distribution, ProbabilisticResult, _norm, is_failure,
+                            run_probabilistic, sample)
 from .slopes import _AXIS_TOL, SlopeResult, _cargar, _delta, _rango, _unique
 
 BLOCKS_SHEET = "Bloques"
@@ -118,7 +120,7 @@ _RANGES = {
     "carga_inmersion_grados": (0, 90, False, False), "buz_sup_grados": (0, 90, False, False),
     "dir_sup_grados": (0, 360, False, False), "ancho_bloque_m": (0, _INF, True, False),
     "buz_base_grados": (0, 90, True, True), "a1_m": (0, _INF, False, False), "a2_m": (0, _INF, False, False),
-    "n_bloques": (1, _INF, False, False), "bloque_cresta": (1, _INF, False, False),
+    "n_bloques": (1, 1000, False, False), "bloque_cresta": (1, _INF, False, False),
     "soporte_kn_m": (0, _INF, False, False), "soporte_inclinacion_grados": (-90, 90, True, True),
     "soporte_altura_m": (0, _INF, True, False), "altura_banco_m": (0, _INF, True, False),
     "ancho_berma_m": (0, _INF, False, False), "ancho_requerido_m": (0, _INF, False, False),
@@ -285,6 +287,8 @@ def _distribution(vals, n, sheet):
     if rng is not None:  # el dominio de la columna (o de la variable sin columna) acota la distribución
         lo, hi, lo_open, hi_open = rng
         for c in ("minimo", "maximo"):
+            if (lo_open and vals[c] == lo) or (hi_open and vals[c] == hi):
+                bad(c, "out of range (open bound)")
             _rango(vals, sheet, n, c, lo, hi, lo_open=lo_open, hi_open=hi_open)
     kind = _KINDS.get(vals["distribucion"])
     if kind is None:
@@ -560,6 +564,9 @@ def assess_blocks(rows: Iterable[BlockRow], slopes: Iterable[SlopeResult], distr
             if getattr(r, c) is None:
                 raise ValueError(f"{_where(r.hoja, r.fila, c)}: required when {d.variable} is sampled in "
                                  f"{d.hoja} (row {d.fila})")
+        # sin el valor en la fila, el FS determinístico (el que decide la atención) correría otro modelo
+        if d.variable in BLOCK_COLUMNS and getattr(r, d.variable) is None:
+            raise ValueError(f"{_where(r.hoja, r.fila, d.variable)}: required because it is sampled in {d.hoja}")
         lst.append(d)
     out = []
     for order, (r, s) in enumerate(zip(rows, faces), start=1):
@@ -592,7 +599,8 @@ def _formed(r: BlockResult) -> bool | None:
     return True
 
 
-def _mode(r: BlockResult) -> str | None:
+def block_mode(r: BlockResult) -> str | None:
+    """Modo del bloque para el informe y el archivo (planar, dos_planos, ..., volteo); None en la berma."""
     if r.model == "wedge" and r.deterministic is not None:
         return _WEDGE_MODES[r.deterministic.mode]
     if r.model == "planar":
@@ -623,6 +631,14 @@ def block_counts(results: Iterable[BlockResult]) -> dict[str, int]:
     return out
 
 
+_SAMPLES = re.compile(r" \(\d+ of \d+ samples\)$")
+
+
+def warning_counts(results: Iterable[BlockResult]) -> Counter:
+    """Avisos agrupados entre bloques, como los de taludes: sin el «(k of n samples)» ni el conteo del núcleo."""
+    return Counter(w for r in results for w in {_norm(_SAMPLES.sub("", x)) for x in r.warnings})
+
+
 RESULT_COLUMNS = ("id_bloque", "id_talud", "modelo", "modo", "formado", "fs", "fs_menor_o_igual_1", "muestreo",
                   "iteraciones", "iteraciones_validas", "semilla", "fs_media", "fs_desv", "fs_min", "fs_max",
                   "pof_pct", "indice_confiabilidad", "indice_confiabilidad_lognormal", "phi_c0_grados",
@@ -646,7 +662,7 @@ def save_block_results(results: Iterable[BlockResult], path) -> Path:
             prob[:4] = [b.sampling, b.reliability.n, None, b.seed]
         berm = ([b.ritchie.width_m, b.required_width_m, b.interramp_deg,
                  None if b.reliability is None else b.reliability.reliability * 100] if b is not None else [None] * 4)
-        rows.append([r.id_bloque, r.id_talud, _SHEET_MODEL[r.model], _mode(r), _yes(_formed(r)), r.fs,
+        rows.append([r.id_bloque, r.id_talud, _SHEET_MODEL[r.model], block_mode(r), _yes(_formed(r)), r.fs,
                      None if r.fs is None else _yes("att_fs_below_1" in block_attention(r)), *prob,
                      None if ba is None else ba.friction_at_zero_cohesion_deg, *berm,
                      " | ".join(r.warnings), " | ".join(r.notes)])

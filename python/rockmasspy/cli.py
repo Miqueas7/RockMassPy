@@ -276,6 +276,8 @@ def _block_args(a) -> None:
         raise ValueError("--iterations must be at least 1")
     if a.seed < 0:
         raise ValueError("--seed must be 0 or more")
+    if a.blocks_output and Path(a.blocks_output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--blocks-output must end in .csv or .xlsx")
 
 
 def _slope(a) -> int:
@@ -296,6 +298,11 @@ def _slope(a) -> int:
         raise ValueError(f"no slope faces in {Path(a.faces).name}")
     rs = assess_slopes(faces, load_families(a.families, sheet=a.sheet_families),
                        lateral_limit_deg=a.lateral_limit)
+    bs = []
+    if a.blocks:  # antes del primer print: un error de bloques deja stdout vacío
+        dists = bk.load_distributions(a.distributions, sheet=a.sheet_distributions) if a.distributions else ()
+        bs = bk.assess_blocks(bk.load_blocks(a.blocks, sheet=a.sheet_blocks), rs, dists, iterations=a.iterations,
+                              sampling=a.sampling.replace("-", "_"), seed=a.seed, lateral_limit_deg=a.lateral_limit)
     c = slope_counts(rs)
     proj = a.projection.replace("-", "_")
     print(f"slopes: {c['slopes']}")
@@ -310,18 +317,14 @@ def _slope(a) -> int:
     for m, name in (("d", "discrete"), ("c", "continuous")):
         print(f"SMR {name}: " + " | ".join(f"{r} {c[f'smr_{m}_{k}']}" for k, r in enumerate(("I", "II", "III", "IV", "V"), 1)))
     print(f"Q-slope: {c['q_slope_evaluated']} faces, {c['face_steeper_than_beta']} steeper than beta")
-    bs = []
     if a.blocks:  # solo agregados de block_counts: nunca un id (R18)
-        dists = bk.load_distributions(a.distributions, sheet=a.sheet_distributions) if a.distributions else ()
-        bs = bk.assess_blocks(bk.load_blocks(a.blocks, sheet=a.sheet_blocks), rs, dists, iterations=a.iterations,
-                              sampling=a.sampling.replace("-", "_"), seed=a.seed, lateral_limit_deg=a.lateral_limit)
         b = bk.block_counts(bs)
         print(f"blocks: {b['blocks']} (planar {b['planar']}, wedge {b['wedge']}, toppling {b['toppling']}, "
               f"berm {b['berm']})")
         print(f"blocks formed: {b['formed']} of {b['planar'] + b['wedge'] + b['toppling']}")
         print(f"FS at or below 1: {b['fs_below_1']} of {b['with_fs']} blocks with FS")
-        print(f"probabilistic: {b['probabilistic']} blocks, {a.iterations} iterations, {a.sampling}, seed {a.seed}")
-        print(f"PoF above 0: {b['pof_above_0']} of {b['probabilistic']} blocks")
+        print(f"probabilistic: {_blocks(b['probabilistic'])}, {a.iterations} iterations, {a.sampling}, seed {a.seed}")
+        print(f"PoF above 0: {b['pof_above_0']} of {_blocks(b['probabilistic'])}")
         print(f"berms narrower than required: {b['berm_narrower']} of {b['berm']}")
         print(f"berm reliability evaluated: {b['berm_reliability_evaluated']}")
         print(f"warnings: {c['warnings'] + b['warnings']} in {_slopes(sum(1 for r in rs if r.warnings))} and "
@@ -330,7 +333,7 @@ def _slope(a) -> int:
         print(f"warnings: {c['warnings']} in {_slopes(sum(1 for r in rs if r.warnings))}")
     for w, n in sorted(Counter(w for r in rs for w in set(r.warnings)).items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({_slopes(n)})")
-    for w, n in sorted(Counter(w for r in bs for w in set(r.warnings)).items(), key=lambda kv: (-kv[1], kv[0])):
+    for w, n in sorted(bk.warning_counts(bs).items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({_blocks(n)})")
     print(f"notes: {c['notes'] + sum(len(r.notes) for r in bs)}")
     if a.output:
