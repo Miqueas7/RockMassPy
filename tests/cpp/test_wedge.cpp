@@ -284,6 +284,7 @@ TEST(Wedge, TaludSuperiorOblicuoNoEsLaCunaReflejada) {
     EXPECT_EQ(a.mode, WedgeMode::PlaneTwo);
     EXPECT_NEAR(*a.factor_of_safety, 1.0000, 1e-4);
     a = wedge_fs(dry({15, 30}, {185, 45}, 35, 35, {180, 85}, {195, 20}));
+    EXPECT_EQ(a.mode, WedgeMode::PlaneTwo);
     EXPECT_NEAR(*a.factor_of_safety, 0.7002, 1e-4);
     EXPECT_GT(wedge_fs(dry({240, 30}, {175, 35}, 35, 35, {180, 80}, {165, 20})).volume, 1e4);  // no el reflejado (1003)
 }

@@ -240,6 +240,7 @@ def test_oblique_upper_slope_is_not_reflected():
     assert r.mode == rm.WedgeMode.PlaneTwo
     assert r.factor_of_safety == pytest.approx(1.0000, abs=1e-4)
     r = rm.wedge_fs(dry((15, 30), (185, 45), 35, 35, (180, 85), (195, 20)))
+    assert r.mode == rm.WedgeMode.PlaneTwo
     assert r.factor_of_safety == pytest.approx(0.7002, abs=1e-4)
 
 

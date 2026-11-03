@@ -55,6 +55,9 @@ def test_tablas_en_su_orden(casos):
     assert len(top.rows) == 16 and top.rows[0][2] == t("topple_sliding", "es")
     (berm,) = tabla(rep, "cap_berms").rows
     assert berm[:2] == ("M1", "T3") and berm[7] == "sí" and berm[8] != "-"
+    # la confiabilidad de berma se reproduce desde el informe: muestreo, n y semilla
+    assert tabla(rep, "cap_berms").header[9:] == (t("h_sampling", "es"), "n", t("h_seed", "es"))
+    assert berm[9:] == ("hipercubo latino", "300", "1")
     pairs = [(m.method_id, m.source) for m in rep.methods]
     ids = [m.method_id for m in rep.methods]
     assert len(pairs) == len(set(pairs))
@@ -89,7 +92,7 @@ def test_en_ingles(casos):
 
 
 def test_todas_las_claves_en_los_dos_idiomas():
-    for k in ("cap_blocks", "cap_prob", "cap_back", "cap_topple", "cap_berms", "h_block", "h_model", "h_block_mode",
+    for k in ("cap_blocks", "cap_prob", "cap_back", "cap_topple", "cap_berms", "h_model", "h_block_mode",
               "h_fs", "h_fs_le1", "h_sampling", "h_valid", "h_seed", "h_mean", "h_sd", "h_min", "h_max", "h_pof",
               "h_beta_n", "h_beta_ln", "h_phi0", "h_bench_h", "h_berm_w", "h_ritchie", "h_required", "h_ira",
               "h_narrower", "h_berm_rel", "h_state", "fig_fs_hist", "fig_fs_cdf", "model_planar", "model_wedge",
@@ -99,6 +102,7 @@ def test_todas_las_claves_en_los_dos_idiomas():
               "cap_bl_warnings", "h_blocks"):
         assert set(REPORT_TEXTS[k]) == {"es", "en"} and all(REPORT_TEXTS[k].values()), k
     assert "3D" in t("sl_scope", "es") and "PoF" in t("sl_scope", "en")
+    assert "h_block" not in REPORT_TEXTS  # clave muerta
 
 
 def test_word_trae_la_tabla_de_bloques(casos, tmp_path):
@@ -113,10 +117,11 @@ def test_word_trae_la_tabla_de_bloques(casos, tmp_path):
 def test_sin_bloques_es_el_informe_de_la_3a(casos, tmp_path):
     _, slopes = casos
     a = rp.write_html(rp.build_slope_report(slopes, title="T", figures=False, date="d"), tmp_path / "a.html")
-    b = rp.write_html(rp.build_slope_report(slopes, title="T", figures=False, date="d", blocks=()), tmp_path / "b.html")
-    assert a.read_text(encoding="utf-8") == b.read_text(encoding="utf-8")
     rep = rp.build_slope_report(slopes, title="T", figures=False, blocks=())
     assert sec3(rep) == rp._slope_blocks(slopes, "es", False)
+    # sin bloques, los métodos son solo los de los taludes de la 3A
+    assert {m.method_id for m in rep.methods} == {m.method_id for s in slopes for m in s.methods}
+    assert not {m.method_id for m in rep.methods} & {"Planar-HoekBray", "Probabilistic-MC-LHS", "Berm-ModifiedRitchie"}
     txt = a.read_text(encoding="utf-8")
     for k in ("cap_blocks", "bl_attention", "cap_bl_warnings"):
         assert t(k, "es").split("{")[0] not in txt
@@ -186,3 +191,23 @@ def test_privacidad_en_el_informe(tmp_path):
     html = rp.write_html(rep, tmp_path / "x.html").read_text(encoding="utf-8")
     assert "B-ZZSENT" in html and "T-ZZSENT" in html
     assert len(re.findall("ZZSENT", html)) == len(re.findall("[BTR]-ZZSENT", html))
+
+
+# --- ola final de la 3B ---
+
+def test_avisos_de_bloques_agrupados_en_el_informe(tmp_path):
+    _, slopes = tb.correr(tmp_path, tb.J35, [tb.talud(fr="40")], [tb.B(**tb.PL1)])
+    rs = [_fake(1.5, warnings=("probabilistic: w (3 of 10 samples)", "conditions fail in 2 blocks")),
+          _fake(1.5, warnings=("probabilistic: w (7 of 10 samples)", "conditions fail in 3 blocks"))]
+    rep = rp.build_slope_report(slopes, title="T", figures=False, blocks=rs)
+    w = next(b for b in rep.sections[3].blocks if isinstance(b, rp.Table) and b.caption == t("cap_bl_warnings", "es"))
+    assert w.rows == (("conditions fail in N blocks", "2"), ("probabilistic: w", "2"))
+
+
+def test_phi_del_retroanalisis_con_g(tmp_path):
+    _, slopes = tb.correr(tmp_path, tb.J35, [tb.talud()], [tb.B(**tb.PL1)])
+    back = SimpleNamespace(friction_deg=[37.5], cohesion=[12.0], friction_at_zero_cohesion_deg=50.3)
+    r = bk.BlockResult("B", "T1", 1, "planar", SimpleNamespace(factor_of_safety=1.5, formed=True), back, None, None,
+                       (), (), ())
+    (fila,) = tabla(rp.build_slope_report(slopes, title="T", figures=False, blocks=[r]), "cap_back").rows
+    assert fila[1] == "37.5"

@@ -215,3 +215,62 @@ def test_distribution_rejects_foreign_params():
 def test_clone_keeps_orientations():
     w = pb._clone(cu2())
     assert repr(w) == repr(cu2()) and w.face.dip_direction_deg == 230 and w.external_direction.plunge_deg == 70
+
+
+# --- ola final de la 3B ------------------------------------------------------------------------------------------
+
+def test_constant_fs_has_no_reliability_index():
+    # c = 0 y seco: FS = tan(phi)/tan(psi) no depende de gamma, la desviación es puro ruido (I1)
+    i = smp_base()
+    i.cohesion, i.friction_deg, i.tension_crack_distance_m = 0.0, 40.0, None
+    r = run_probabilistic("planar", i, {"unit_weight": normal(2.6, 0.1, 2.2, 3.0)}, n=500)
+    assert r.reliability_index is None and r.reliability_index_lognormal is None
+    assert "FS does not vary with the sampled variables; reliability index undefined" in r.notes
+    assert r.pof == 0 and r.n_valid == 500
+    assert r.fs_mean == pytest.approx(math.tan(math.radians(40)) / math.tan(math.radians(35)), rel=1e-12)
+    r = summarize_fs([1.2] * 3, model="planar", sampling="lhs", n=3, seed=1, variables=())
+    assert r.reliability_index is None and r.notes == ("FS does not vary with the sampled variables; reliability "
+                                                       "index undefined",)
+
+
+def test_lognormal_index_uses_log1p():
+    # con v = 1e-9, log(1 + v²) da 0 y el índice lognormal dividiría por cero; log1p lo resuelve
+    r = summarize_fs([2 - 1e-9, 2, 2 + 1e-9], model="planar", sampling="lhs", n=3, seed=1, variables=())
+    assert r.reliability_index_lognormal == pytest.approx(math.log(2) / (r.fs_sd / 2), rel=1e-6)
+
+
+def test_toppling_cap_is_left_out_of_the_statistics():
+    from test_toppling_core import ex1
+    # el tope (FS 100) llega con soporte de unos 4.24e5: la mitad de las muestras queda en el tope
+    r = run_probabilistic("toppling", ex1(60, 0.0), {"support_force": uniform(0, 8.5e5)}, n=200)
+    capped = [f for f in r.fs if f >= 100]
+    rest = [f for f in r.fs if f < 100]
+    assert capped and rest
+    assert r.fs_max < 100 and r.fs_mean == pytest.approx(math.fsum(rest) / len(rest))
+    assert r.n_failed == sum(is_failure(f) for f in rest) and r.n_valid == 200  # el tope cuenta como estable
+    assert f"{len(capped)} of 200 samples have FS above the cap; excluded from the statistics" in r.notes
+    assert r.reliability_index == pytest.approx((r.fs_mean - 1) / r.fs_sd)
+
+
+def _bounded(phi):
+    # sin soporte, el soporte requerido no se anula con ningún mu < 1: el FS es una cota superior
+    i = rm.TopplingInput()
+    i.heights_m = rm.goodman_bray_heights(16, 10, 5, 5, 0.5)
+    i.block_width_m, i.base_dip_deg, i.a1_m, i.a2_m, i.crest_block = 10, 45, 5, 5, 10
+    i.unit_weight, i.friction_deg = 25, phi
+    return i
+
+
+def test_toppling_upper_bound_counts_as_failure():
+    d = rm.toppling_fs(_bounded(55))
+    assert d.fs_bounded and d.factor_of_safety > 1  # la cota no prueba FS > 1
+    r = run_probabilistic("toppling", _bounded(55), {"friction_deg": uniform(40, 60)}, n=400)
+    assert r.pof == 1 and r.n_failed == 400
+    assert any(w.startswith("toppling: support is insufficient") and w.endswith("(400 of 400 samples)")
+               for w in r.warnings)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("-inf")])
+def test_summarize_fs_rejects_nan_and_minus_inf(bad):
+    with pytest.raises(ValueError, match=r"^fs: "):
+        summarize_fs([1.2, bad], model="planar", sampling="lhs", n=2, seed=1, variables=())

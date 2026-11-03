@@ -654,8 +654,8 @@ def test_slope_blocks_summary(tmp_path, capsys):
     lines = out.splitlines()
     assert code == 2 and err == ""  # PL-1 tiene FS < 1
     for ln in ("blocks: 5 (planar 2, wedge 1, toppling 1, berm 1)", "blocks formed: 4 of 4",
-               "FS at or below 1: 1 of 4 blocks with FS", "probabilistic: 1 blocks, 2000 iterations, lhs, seed 3",
-               "PoF above 0: 1 of 1 blocks", "berms narrower than required: 1 of 1", "berm reliability evaluated: 1",
+               "FS at or below 1: 1 of 4 blocks with FS", "probabilistic: 1 block, 2000 iterations, lhs, seed 3",
+               "PoF above 0: 1 of 1 block", "berms narrower than required: 1 of 1", "berm reliability evaluated: 1",
                "warnings: 3 in 3 slopes and 0 blocks"):
         assert ln in lines, ln
     assert lines.index("Q-slope: 0 faces, 0 steeper than beta") < lines.index(
@@ -674,7 +674,7 @@ def test_slope_blocks_pof_does_not_trigger(tmp_path, capsys):
 
     res = tmp_path / "res.csv"
     code, out, _ = run_blocks(capsys, quiet_prob_files(tmp_path), "--iterations", 2000, "--blocks-output", res)
-    assert "FS at or below 1: 0 of 1 blocks with FS" in out and "PoF above 0: 1 of 1 blocks" in out
+    assert "FS at or below 1: 0 of 1 blocks with FS" in out and "PoF above 0: 1 of 1 block" in out.splitlines()
     assert code == 0  # la PoF no pide atención (R14)
     cab, (f,) = tb.leer(res)
     assert len(cab) == 25 and float(f["pof_pct"]) > 0 and f"blocks results: {res}" in out
@@ -826,3 +826,46 @@ def test_help_lists_block_options(capsys):
     for opt in ("--blocks", "--sheet-blocks", "--distributions", "--sheet-distributions", "--iterations", "--sampling",
                 "--seed", "--blocks-output", "monte-carlo"):
         assert opt in out
+
+
+# --- ola final de la 3B ---
+
+def test_slope_blocks_constant_fs_no_traceback(tmp_path, capsys):
+    # c = 0 y seco: el FS no depende de gamma; sin traceback y con el código de la regla del FS (I1)
+    import test_blocks as tb
+
+    fila = dict(id_bloque="B1", id_talud="T1", modelo="planar", altura_m=20, peso_unitario_kn_m3=26,
+                familia_1="J1", cohesion_1_kpa=0, friccion_1_grados=40)
+    files = block_files(tmp_path, tb.J35, [tb.talud(fr="40")], [tb.B(**fila)],
+                        [tb.D("B1", "peso_unitario_kn_m3", "normal", 26, 1, 22, 30)])
+    code, out, err = run_blocks(capsys, files, "--iterations", 500)
+    assert code == 0 and err == "" and "FS at or below 1: 0 of 1 blocks with FS" in out
+
+
+def test_slope_blocks_error_prints_nothing_to_stdout(tmp_path, capsys):
+    import test_blocks as tb
+
+    files = block_files(tmp_path, tb.J35, [tb.talud()], [tb.B(**{**tb.VO1, "n_bloques": 3e9})])
+    code, out, err = run_blocks(capsys, files)
+    assert code == 1 and out == "" and err == "error: sheet 'Bloques', row 2, column 'n_bloques': out of range\n"
+
+
+def test_slope_blocks_output_extension_checked_first(tmp_path, capsys):
+    code = main(["slope", "--faces", str(tmp_path / "no.csv"), "--families", str(tmp_path / "no2.csv"),
+                 "--blocks", str(tmp_path / "no3.csv"), "--blocks-output", str(tmp_path / "r.txt")])
+    cap = capsys.readouterr()
+    assert code == 1 and cap.out == "" and cap.err == "error: --blocks-output must end in .csv or .xlsx\n"
+
+
+def test_slope_blocks_warnings_grouped(tmp_path, capsys):
+    import test_blocks as tb
+
+    v = {**tb.VO1, "soporte_kn_m": "", "buz_base_grados": 60}
+    bf = [tb.B(**v), tb.B(**{**v, "id_bloque": "V2", "n_bloques": 14})]  # 15 y 13 bloques fallan (8)-(9)
+    code, out, _ = run_blocks(capsys, block_files(tmp_path, tb.J35, [tb.talud(fr="40")], bf))
+    lines = out.splitlines()
+    assert code == 2
+    assert "warning: Goodman-Bray conditions (8)-(9) fail in N blocks (2 blocks)" in lines
+    assert ("warning: toppling: support is insufficient for any friction coefficient below 1; FS is an upper bound "
+            "(2 blocks)") in lines
+    assert not any(ln.endswith("(1 block)") for ln in lines)

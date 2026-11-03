@@ -74,7 +74,8 @@ BERMA = dict(id_bloque="M1", id_talud="T1", modelo="berma", altura_banco_m=12, a
 # Sau Mau Ping probabilístico (Hoek 2023, cap. 9) con t pasadas a kN (× 9.81): cada FS queda igual
 G = 9.81
 SMP = dict(id_bloque="S1", id_talud="T1", modelo="planar", altura_m=60, peso_unitario_kn_m3=2.6 * G,
-           peso_agua_kn_m3=1.0 * G, familia_1="J1", cohesion_1_kpa=10 * G, friccion_1_grados=35, dist_grieta_m=15.3)
+           peso_agua_kn_m3=1.0 * G, familia_1="J1", cohesion_1_kpa=10 * G, friccion_1_grados=35, dist_grieta_m=15.3,
+           llenado_agua=0.5, kh=0.08)
 SMP_D = [D("S1", "friccion_1_grados", "normal", 35, 5, 15, 70),
          D("S1", "cohesion_1_kpa", "normal", 10 * G, 2 * G, 0, 25 * G),
          D("S1", "dist_grieta_m", "normal", 15.3, 4, 0, 35.3429),
@@ -576,3 +577,53 @@ def test_methods(tmp_path):
     assert ids[2] == ["Toppling-GoodmanBray1976"]
     assert ids[3] == ["Berm-ModifiedRitchie", "Berm-Reliability-RyanPryor2000", "Probabilistic-MC-LHS"]
     assert ids[4] == ["Planar-HoekBray", "Probabilistic-MC-LHS"]
+
+
+# --- ola final de la 3B ------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("fila,var", [
+    (dict(PL1, kh=""), "kh"),
+    (dict(PL1, llenado_agua=""), "llenado_agua"),
+    (dict(PL1), "dist_grieta_m"),
+    (dict(CU2, presion_1_kpa=""), "presion_1_kpa"),
+    (dict(VO1), "soporte_altura_m"),
+])
+def test_variable_muestreada_exige_su_columna(tmp_path, fila, var):
+    # si no, el FS determinístico correría otro modelo que las muestras (I2)
+    m = _err(tmp_path, [B(**fila)], [D(fila["id_bloque"], var, "uniforme", "", "", 0.1, 0.2)],
+             jf=CU2_J if fila["modelo"] == "cuña" else J35)
+    assert m == f"sheet 'Bloques', row 2, column '{var}': required because it is sampled in Distribuciones", m
+
+
+def test_sau_mau_ping_trae_agua_y_sismo_en_la_fila(tmp_path):
+    (r,), _ = correr(tmp_path, J35, [talud()], [B(**SMP)], SMP_D, iterations=50)
+    assert r.fs == pytest.approx(1.2202, abs=1e-4)  # zw/z 0.5 y kh 0.08, los mismos supuestos que muestrea
+
+
+def test_n_bloques_acotado(tmp_path):
+    m = _err(tmp_path, [B(**{**VO1, "n_bloques": 3e9})])
+    assert m == "sheet 'Bloques', row 2, column 'n_bloques': out of range", m
+    m = _err(tmp_path, [B(**{**VO1, "n_bloques": 1001})])
+    assert m.endswith("'n_bloques': out of range")
+
+
+@pytest.mark.parametrize("var,mn,mx,col", [("buz_plano_grados", 0, 40, "minimo"),
+                                           ("buz_plano_grados", 20, 90, "maximo"),
+                                           ("altura_m", 0, 40, "minimo")])
+def test_limite_abierto_lo_dice(tmp_path, var, mn, mx, col):
+    m = _err(tmp_path, [B(**PL1)], [D("B1", var, "uniforme", "", "", mn, mx)])
+    assert m == f"sheet 'Distribuciones', row 2, column '{col}': out of range (open bound)", m
+
+
+def test_block_mode_es_publico(tmp_path):
+    jf, tf, bf, df = _todas(tmp_path)
+    rs, _ = correr(tmp_path, jf, tf, bf, df, iterations=50)
+    assert [bk.block_mode(r) for r in rs] == ["planar", "dos_planos", "volteo", None, "planar"]
+
+
+def test_avisos_agrupados_entre_bloques():
+    rs = [_fake(1.5, warnings=("probabilistic: w (3 of 10 samples)", "Goodman-Bray conditions (8)-(9) fail in 2 blocks")),
+          _fake(1.5, warnings=("probabilistic: w (7 of 10 samples)", "Goodman-Bray conditions (8)-(9) fail in 3 blocks")),
+          _fake(1.5, warnings=("other",))]
+    assert bk.warning_counts(rs) == {"probabilistic: w": 2, "Goodman-Bray conditions (8)-(9) fail in N blocks": 2,
+                                     "other": 1}

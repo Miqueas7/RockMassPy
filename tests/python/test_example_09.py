@@ -27,7 +27,8 @@ def test_bloques(tmp_path):
     assert r["berm_reliability"] * 100 == pytest.approx(95.0, abs=1.5)
     fs = r["fs"]
     assert fs[0] == pytest.approx(1.065, abs=1e-3) and fs[1] == pytest.approx(1.497, abs=1e-3)
-    assert fs[2] == pytest.approx(1.0, abs=1e-3) and fs[2] < 1 + 1e-9 and fs[3] is None and fs[4] is None
+    # B3: 0.99986, bajo 1 por 1.4e-4 (el artículo publica 1.0): falla por FS < 1, no por la regla del empate
+    assert fs[2] == pytest.approx(0.99986, abs=1e-5) and fs[2] < 1 and fs[3] is None and fs[4] is None
     assert r["retro_phi_c0"] == pytest.approx(50.3, abs=0.1)
     for nombre in r["files"]:
         assert (tmp_path / nombre).stat().st_size > 0, nombre
