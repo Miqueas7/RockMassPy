@@ -36,6 +36,9 @@ def test_table1():
     assert f.blocks[12].shear == pytest.approx(2457.5, abs=0.2)
     assert f.support_toppling == pytest.approx(-1486.8, abs=0.2)
     assert f.support_sliding == pytest.approx(0.47, abs=0.01)
+    g = rm.toppling_forces(ex1(support=0.469), 0.7855)
+    assert g.blocks[0].normal == pytest.approx(1237.1, abs=0.2)
+    assert g.blocks[0].shear == pytest.approx(971.8, abs=0.2)
 
 
 def test_table2():
@@ -68,6 +71,7 @@ def test_zero_force_top_block_is_toppling():
 def test_bounds():
     r = rm.toppling_fs(ex1(60, 1e9))
     assert r.factor_of_safety == 100 and not r.fs_bounded and "toppling FS above 100" in r.notes
+    assert list(r.warnings) == []
     i = ex1(20, 0.0)
     i.base_dip_deg = 60
     r = rm.toppling_fs(i)
@@ -75,13 +79,77 @@ def test_bounds():
     assert any("support is insufficient" in w for w in r.warnings)
 
 
-@settings(max_examples=40, deadline=None)
-@given(st.floats(0.3, 0.98), st.floats(0.3, 0.98), st.floats(0, 5000), st.floats(0, 5000))
-def test_monotone(m1, m2, t1, t2):
-    lo, hi = sorted((m1, m2))
-    assert rm.toppling_forces(ex1(), hi).support_required <= rm.toppling_forces(ex1(), lo).support_required + 1e-9
-    lo, hi = sorted((t1, t2))
-    assert rm.toppling_fs(ex1(38.66, hi)).factor_of_safety >= rm.toppling_fs(ex1(38.66, lo)).factor_of_safety - 1e-9
+@settings(max_examples=60, deadline=None)
+@given(st.integers(3, 12), st.integers(1, 12), st.floats(2, 8), st.floats(0, 6), st.floats(0.2, 2), st.floats(15, 60),
+       st.floats(5, 15), st.floats(25, 55), st.floats(0, 3000))
+def test_required_mu_covers_every_failing_mu(n, crest, a1, a2, b, alpha, dx, phi, t):
+    crest = min(crest, n)
+    try:
+        y = rm.goodman_bray_heights(n, crest, a1, a2, b)
+    except ValueError:
+        return
+    i = rm.TopplingInput()
+    i.heights_m, i.block_width_m, i.base_dip_deg, i.a1_m, i.a2_m, i.crest_block = y, dx, alpha, a1, a2, crest
+    i.unit_weight, i.friction_deg, i.support_force = 25, phi, t
+    try:
+        r = rm.toppling_fs(i)
+    except ValueError:
+        return
+    for k in range(1, 100):
+        mu = k / 100
+        if rm.toppling_forces(i, mu).support_required > t:
+            assert r.friction_required >= mu - 1e-9
+
+
+def test_monotone_example():
+    prev = 1e300
+    for k in range(30, 99, 5):
+        s = rm.toppling_forces(ex1(), k / 100).support_required
+        assert s <= prev + 1e-9
+        prev = s
+    prev = 0
+    for t in (0, 1, 100, 1000, 2013, 4000):
+        v = rm.toppling_fs(ex1(38.66, t)).factor_of_safety
+        assert v >= prev - 1e-9
+        prev = v
+
+
+def test_tie_does_not_flip_warning():
+    t = 771.5239216
+    assert list(rm.toppling_fs(ex1(38.66, t - 1e-6)).warnings) == list(rm.toppling_fs(ex1(38.66, t + 1e-6)).warnings)
+
+
+@pytest.mark.parametrize("s", [1 - 1e-12, 1.0, 1 + 1e-12])
+def test_top_block_noise(s):
+    i = rm.TopplingInput()
+    i.heights_m = [20.0 * s, 10.0 / math.tan(math.radians(30)) * s]
+    i.block_width_m, i.base_dip_deg, i.a1_m, i.a2_m, i.crest_block = 10, 30, 0, 0, 1
+    i.unit_weight, i.friction_deg = 25, 40
+    f = rm.toppling_forces(i, 0.7)
+    assert f.blocks[1].state == rm.TopplingState.Toppling and abs(f.blocks[1].p_lower) < 1e-6
+
+
+def test_support_direction():
+    for d in (60, 70):
+        i = ex1(38.66, 0.0)
+        i.support_angle_deg = d
+        rm.toppling_fs(i)
+    i = ex1(38.66, 100.0)
+    i.support_angle_deg = -80
+    with pytest.raises(ValueError, match="support_angle_deg"):
+        rm.toppling_fs(i)
+    i.support_angle_deg = -74
+    rm.toppling_fs(i)
+
+
+def test_warnings_do_not_echo_values():
+    i = ex1(20, 0.0)
+    i.base_dip_deg = 60
+    r = rm.toppling_fs(i)
+    assert list(r.warnings)
+    for w in r.warnings:
+        for v in ("10.", "60.", "20.", "25.", "0.36"):
+            assert v not in w
 
 
 def _set(**kw):

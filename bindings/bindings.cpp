@@ -558,7 +558,7 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_rw("support_force", &TopplingInput::support_force)
         .def_rw("support_angle_deg", &TopplingInput::support_angle_deg)
         .def_rw("support_height_m", &TopplingInput::support_height_m);
-    nb::class_<TopplingBlock>(m, "TopplingBlock", "Forces and state of one block (n = 1 is the toe block).")
+    nb::class_<TopplingBlock>(m, "TopplingBlock", "Forces and state of one block (n = 1 is the toe block). For block 1, p_lower is always 0 (no block below): the toe support is in p_toppling (Tt) and p_sliding (Ts), so 0 does not mean no support is needed.")
         .def_ro("n", &TopplingBlock::n).def_ro("height_m", &TopplingBlock::height_m)
         .def_ro("m_m", &TopplingBlock::m_m).def_ro("l_m", &TopplingBlock::l_m)
         .def_ro("p_toppling", &TopplingBlock::p_toppling).def_ro("p_sliding", &TopplingBlock::p_sliding)

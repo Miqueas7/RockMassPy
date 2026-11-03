@@ -104,6 +104,7 @@ TEST(Toppling, Bounds) {
     EXPECT_EQ(r.factor_of_safety, 100.0);
     EXPECT_FALSE(r.fs_bounded);
     EXPECT_TRUE(has(r.notes, "toppling FS above 100"));
+    EXPECT_TRUE(r.warnings.empty());  // sin (8)-(9) en el mu artificial
     auto in = ex1(20, 0.0);
     in.base_dip_deg = 60;  // no se sostiene con mu < 1
     r = toppling_fs(in);
@@ -130,7 +131,54 @@ TEST(Toppling, MonotoneInMuAndSupport) {
 TEST(Toppling, WarningsDoNotEchoValues) {
     auto in = ex1(20, 0.0);
     in.base_dip_deg = 60;
-    for (const auto& w : toppling_fs(in).warnings) EXPECT_EQ(w.find("0.36"), std::string::npos);
+    const auto r = toppling_fs(in);
+    ASSERT_FALSE(r.warnings.empty());
+    std::vector<std::string> vals;
+    for (double v : {in.block_width_m, in.base_dip_deg, in.a1_m, in.a2_m, in.unit_weight, in.friction_deg,
+                     r.friction_required, r.factor_of_safety})
+        vals.push_back(std::to_string(static_cast<int>(v)) + ".");
+    for (double v : in.heights_m) vals.push_back(std::to_string(v).substr(0, 5));
+    for (const auto& w : r.warnings) {
+        EXPECT_EQ(w.find("0.36"), std::string::npos);
+        for (const auto& v : vals) EXPECT_EQ(w.find(v), std::string::npos) << v;
+    }
+}
+
+TEST(Toppling, TieOfLabelDoesNotFlipWarning) {
+    // T* = soporte exacto en el que el bloque 4 empata Pt = Ps; el aviso (8)-(9) no depende del signo del ruido
+    const double T = 771.5239216;
+    const auto a = toppling_fs(ex1(38.66, T - 1e-6)), b = toppling_fs(ex1(38.66, T + 1e-6));
+    EXPECT_EQ(a.warnings, b.warnings);
+}
+
+TEST(Toppling, TopBlockNoiseKeepsToppling) {
+    for (double s : {1 - 1e-12, 1.0, 1 + 1e-12}) {
+        TopplingInput in;
+        in.heights_m = {20.0 * s, 10.0 / std::tan(30.0 * kPi / 180.0) * s};
+        in.block_width_m = 10; in.base_dip_deg = 30; in.a1_m = 0; in.a2_m = 0; in.crest_block = 1;
+        in.unit_weight = 25; in.friction_deg = 40;
+        const auto f = toppling_forces(in, 0.7);
+        EXPECT_EQ(f.blocks[1].state, TopplingState::Toppling) << s;
+        EXPECT_NEAR(f.blocks[1].p_lower, 0.0, 1e-6) << s;
+    }
+}
+
+TEST(Toppling, SupportDirection) {
+    for (double d : {60.0, 70.0}) {  // sin soporte la dirección no importa
+        auto in = ex1(38.66, 0.0);
+        in.support_angle_deg = d;
+        EXPECT_NO_THROW(toppling_fs(in));
+    }
+    auto in = ex1(38.66, 100.0);
+    in.support_angle_deg = -80;  // alpha + delta = -50: fuera de (-45, 90) con soporte
+    EXPECT_NE(error_of([&] { toppling_fs(in); }).find("support_angle_deg"), std::string::npos);
+    for (double mu : {0.3, 0.8, 0.85}) EXPECT_FALSE(error_of([&] { toppling_forces(in, mu); }).empty());
+    in.support_angle_deg = -74;  // alpha + delta = -44: dentro; ningún mu lanza en la búsqueda
+    EXPECT_NO_THROW(toppling_fs(in));
+    in.support_angle_deg = 59;  // alpha + delta = 89
+    EXPECT_NO_THROW(toppling_fs(in));
+    in.support_angle_deg = 60;  // alpha + delta = 90
+    EXPECT_FALSE(error_of([&] { toppling_fs(in); }).empty());
 }
 
 TEST(Toppling, RejectsBadInput) {

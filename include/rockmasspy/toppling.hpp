@@ -6,7 +6,10 @@
  * numerados desde el pie (índice 0 = bloque 1) y calculados de arriba abajo. a2 es un dato: la ec. 2 del artículo no
  * calza con su propio ejemplo (R10). Un valor justo en un límite toma el lado menos favorable con holgura 1e-9: un
  * bloque es estable solo si max(Pt, Ps) < -1e-9 Wn, y las condiciones (8)-(9) fallan con Rn <= 1e-9 Wn o
- * |Sn|/Rn >= mu - 1e-9 (salvo en deslizamiento, donde S = mu R por construcción). FS = mu disponible / mu requerido
+ * |Sn|/Rn >= mu - 1e-9 solo con Sn < 0 (deslizamiento cuesta arriba; con Sn >= 0 la (9) equivale a Pt >= Ps, la regla
+ * de etiquetado, y daría un aviso que cambia con el signo del ruido). Con soporte > 0 el ángulo cumple
+ * -45 < alpha + delta < 90: Tt exige cos(alpha + delta) > 0 y Ts exige mu sin + cos > 0 en todo mu de (0, 1], lineal en
+ * mu, o sea cos > 0 y sin + cos > 0. Con soporte 0 la dirección no importa. FS = mu disponible / mu requerido
  * (ec. 15), con tope 100. Los avisos no repiten valores.
  */
 
@@ -81,6 +84,11 @@ inline void check(const TopplingInput& in) {
     validation::require_finite(in.support_angle_deg, "support_angle_deg");
     validation::require(in.support_angle_deg > -90.0 && in.support_angle_deg < 90.0, "support_angle_deg",
                         "must be within (-90, 90)", in.support_angle_deg);
+    // mu-independiente: garantiza los denominadores de las ec. 11-12 en todo mu de (0, 1]
+    if (in.support_force > 0.0 && !(in.base_dip_deg + in.support_angle_deg > -45.0 && in.base_dip_deg + in.support_angle_deg < 90.0))
+        throw std::invalid_argument(
+            "Domain error [RockMassPy]: parameter 'support_angle_deg': base_dip_deg + support_angle_deg must be within "
+            "(-45, 90) for the support to act");
     if (in.support_height_m) {
         validation::require_finite(*in.support_height_m, "support_height_m");
         validation::require(*in.support_height_m > 0.0 && *in.support_height_m <= in.heights_m[0], "support_height_m",
@@ -126,12 +134,9 @@ inline TopplingForces toppling_forces(const TopplingInput& in, double mu) {
     validation::require(mu > 0.0 && mu < 1.0, "mu", "must be within (0, 1)", mu);
     const int N = static_cast<int>(in.heights_m.size());
     const double dx = in.block_width_m, al = rad(in.base_dip_deg), sa = std::sin(al), ca = std::cos(al);
-    const double ang = rad(in.base_dip_deg + in.support_angle_deg);
+    // sin soporte la dirección es irrelevante: Tt y Ts se miden en horizontal
+    const double ang = rad(in.base_dip_deg + (in.support_force > 0.0 ? in.support_angle_deg : 0.0));
     const double den_t = std::cos(ang), den_s = mu * std::sin(ang) + std::cos(ang);
-    if (den_t <= 1e-12 || den_s <= 1e-12)
-        throw std::invalid_argument(
-            "Domain error [RockMassPy]: parameter 'support_angle_deg' the support cannot act against toppling at this "
-            "direction");
     TopplingForces out;
     out.blocks.resize(N);
     double P = 0.0;  // Pn: fuerza que llega del bloque de arriba
@@ -184,11 +189,13 @@ inline TopplingResult toppling_fs(const TopplingInput& in) {
     const auto req = [&](double mu) { return toppling_forces(in, mu); };
     double mu;
     const TopplingForces at_lo = req(lo0);
+    bool capped = false;
     if (at_lo.support_required <= in.support_force) {
         mu = lo0;
         r.forces = at_lo;
         r.factor_of_safety = 100.0;
         r.notes.push_back("toppling FS above 100");
+        capped = true;  // mu artificial: no se evalúan (8)-(9)
     } else {
         const TopplingForces at_hi = req(hi0);
         if (at_hi.support_required > in.support_force) {
@@ -211,9 +218,10 @@ inline TopplingResult toppling_fs(const TopplingInput& in) {
     r.friction_required = mu;
     int fails = 0;
     for (const auto& b : r.forces.blocks) {
+        if (capped) break;
         const double w = in.unit_weight * in.block_width_m * b.height_m;
         fails += b.normal <= kTol * w ||
-                 (b.state != TopplingState::Sliding && std::fabs(b.shear) >= (mu - kTol) * b.normal);
+                 (b.state != TopplingState::Sliding && b.shear < 0.0 && -b.shear >= (mu - kTol) * b.normal);
     }
     if (fails > 0) r.warnings.push_back("Goodman-Bray conditions (8)-(9) fail in " + std::to_string(fails) + " blocks");
     return r;
