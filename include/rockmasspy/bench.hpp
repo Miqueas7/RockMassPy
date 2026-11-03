@@ -37,8 +37,6 @@ struct BermReliability {
 namespace bench_detail {
 constexpr double kPi = 3.14159265358979323846;
 inline double cot_deg(double d) { return 1.0 / std::tan(d * kPi / 180.0); }
-// cara = 90 da cot = 0 exacto (tan(90 deg) en coma flotante no es infinito)
-inline double cot_face(double d) { return d == 90.0 ? 0.0 : cot_deg(d); }
 inline void face(double f) {
     validation::require_finite(f, "face_angle_deg");
     validation::require(f > 0.0 && f <= 90.0, "face_angle_deg", "must be within (0, 90]", f);
@@ -62,7 +60,7 @@ inline double bench_width(double bench_height_m, double interramp_deg, double fa
     validation::require(interramp_deg > 0.0 && interramp_deg < 90.0, "interramp_deg", "must be within (0, 90)",
                         interramp_deg);
     face(face_angle_deg);
-    return bench_height_m * (cot_deg(interramp_deg) - cot_face(face_angle_deg));
+    return bench_height_m * (cot_deg(interramp_deg) - cot_deg(face_angle_deg));
 }
 
 /// Ángulo interrampa en grados: atan(H / (W + H cot(cara))).
@@ -71,7 +69,7 @@ inline double interramp_angle(double bench_height_m, double berm_width_m, double
     validation::require_positive(bench_height_m, "bench_height_m");
     validation::require_non_negative(berm_width_m, "berm_width_m");
     face(face_angle_deg);
-    return std::atan(bench_height_m / (berm_width_m + bench_height_m * cot_face(face_angle_deg))) * 180.0 / kPi;
+    return std::atan(bench_height_m / (berm_width_m + bench_height_m * cot_deg(face_angle_deg))) * 180.0 / kPi;
 }
 
 /// Confiabilidad de berma: cumple si ancho > requerido + 1e-9.

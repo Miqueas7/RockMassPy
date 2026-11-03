@@ -21,6 +21,7 @@ TEST(Bench, RitchieModified) {
     EXPECT_NEAR(ritchie_berm_width(12).width_m, 6.9, 1e-12);
     EXPECT_NEAR(ritchie_berm_width(15).width_m, 7.5, 1e-12);
     EXPECT_EQ(ritchie_berm_width(12).info.method_id, "Berm-ModifiedRitchie");
+    EXPECT_EQ(ritchie_berm_width(12).info.verification, Verification::PrimaryLaterAuthors);
     EXPECT_FALSE(error_of([] { ritchie_berm_width(0); }).empty());
     EXPECT_NE(error_of([] { ritchie_berm_width(kNan); }).find("bench_height_m"), std::string::npos);
 }
@@ -54,6 +55,7 @@ TEST(Bench, Reliability) {
     EXPECT_DOUBLE_EQ(r.width_min, 5);
     EXPECT_DOUBLE_EQ(r.width_max, 8);
     EXPECT_EQ(r.info.method_id, "Berm-Reliability-RyanPryor2000");
+    EXPECT_EQ(r.info.verification, Verification::PrimaryLaterAuthors);
 }
 
 TEST(Bench, ReliabilityBoundary) {
