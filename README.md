@@ -293,7 +293,8 @@ On top of the kinematics, `assess_blocks(...)` and `rockmass slope --blocks` run
 
 A block row with a `Distribuciones` row for its variables also gets a **probability of failure** (Monte Carlo or Latin
 hypercube, truncated normal, exponential or uniform variables, a fixed seed), with the FS mean, deviation and
-reliability index.
+reliability index. A sampled variable that has a column in `Bloques` must also be filled in the row: the
+deterministic FS, the only one that decides attention, runs on that value.
 
 Read this part twice:
 

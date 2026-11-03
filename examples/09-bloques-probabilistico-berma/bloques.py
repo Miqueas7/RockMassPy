@@ -38,7 +38,7 @@ _BLOQUES = [
          familia_2="J2", cohesion_1_kpa=10, friccion_1_grados=40, cohesion_2_kpa=20, friccion_2_grados=35,
          presion_1_kpa=5, presion_2_kpa=15, carga_kn=180, carga_tendencia_grados=168, carga_inmersion_grados=70,
          buz_sup_grados=5, dir_sup_grados=225),
-    # B3: volteo con la geometría regular de VO-1 (Goodman y Bray ejemplo 1b, cable en el pie); FS 1.0
+    # B3: volteo con la geometría regular de VO-1 (Goodman y Bray ejemplo 1b, cable en el pie); FS 0.99986 (publicado 1.0)
     dict(id_bloque="B3", id_talud="TL3", modelo="volteo", peso_unitario_kn_m3=25, friccion_1_grados=33.02,
          ancho_bloque_m=10, buz_base_grados=30, a1_m=5, a2_m=5, b_m=1, n_bloques=16, bloque_cresta=10,
          soporte_kn_m=2013, soporte_inclinacion_grados=0),

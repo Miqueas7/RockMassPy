@@ -11,7 +11,8 @@ python bloques.py salida/
 Escribe `Familias.csv`, `Taludes.csv`, `Bloques.csv` y `Distribuciones.csv`; evalúa los taludes (3A) y los bloques (3B)
 con semilla 9; guarda `bloques_resultados.csv`, el histograma y la curva de PoF del planar (`fs_hist_1.png`,
 `fs_cdf_1.png`), el informe `bloques.html` (y `bloques.docx` si hay python-docx) y corre `rockmass slope --blocks`.
-Termina con código 0; la CLI termina con **2** (algo pide atención, ver más abajo).
+El script termina con código 0 aunque `rockmass slope --blocks`, que corre por dentro, termina con **2** (algo pide
+atención, ver más abajo): el script solo guarda ese código, no lo devuelve.
 
 ## Qué calcula cada bloque
 
@@ -19,7 +20,7 @@ Termina con código 0; la CLI termina con **2** (algo pide atención, ver más a
 |---|---|---|---|
 | B1 | planar (Hoek y Bray) con grieta de tracción crítica al 90 % de agua, sismo 0.08 y retroanálisis | Sau Mau Ping, RocPlane problema 1 | FS 1.065; PoF cercana a 7 % |
 | B2 | cuña por resolución vectorial, dos planos, agua por junta y carga externa | CU-2, SWedge problema 6 (Priest 1993) | FS 1.497, un solo valor |
-| B3 | volteo de Goodman y Bray, 16 bloques, cable en el pie de 2013 kN | VO-1, ejemplo 1b | FS 0.9999 (cuenta como 1.0) |
+| B3 | volteo de Goodman y Bray, 16 bloques, cable en el pie de 2013 kN | VO-1, ejemplo 1b | FS 0.99986 (Goodman y Bray publican 1.0) |
 | B4 | banco-berma: banco de 12 m, berma de 12 m, cara de 65 grados con distribución | Ryan y Pryor (2000), fig. 3.8 | Ritchie 6.9 m; confiabilidad cercana a 95 % |
 | B5 | planar con un plano de 60 grados bajo una cara de 50 | inventado | el bloque no se forma |
 
@@ -34,7 +35,9 @@ evalúan una sola vez.
 - **La semilla fija la corrida.** Con la misma semilla, el mismo número de muestras y las mismas hojas, la PoF sale
   idéntica en cualquier máquina. Cambiar la semilla mueve la PoF menos de un punto (de 6.6 a 7.4 % con las semillas 1, 2, 3, 9 y 10); si se
   mueve más, faltan muestras.
-- **El FS igual a 1 cuenta como falla** (con holgura de 1e-9). Por eso B3, que da 0.9999, pide atención.
+- **B3 pide atención porque su FS es menor que 1.** Da 0.99986, 1.4e-4 bajo 1, aunque el artículo publica 1.0. No
+  es la regla del empate: esa regla (un FS igual a 1 cuenta como falla, con holgura de 1e-9) solo actúa cuando el FS
+  cae justo en 1, como en un retroanálisis devuelto al modelo.
 - **La PoF es condicional a que el bloque se forme**; las muestras que no forman bloque se cuentan aparte (`n` y
   `n_valid`). Una muestra con despegue cuenta como falla.
 - **La librería no dice «aceptable».** Un FS bajo 1 es mecánica: el equilibrio no se cumple. Un FS de 1.065 o una PoF
@@ -49,8 +52,10 @@ evalúan una sola vez.
   un borde de barra, no hay barras mezcladas.
 - **Curva de PoF** (`fs_cdf_1.png`): la curva acumulada corta FS = 1 a la altura de la PoF.
 - **Retroanálisis** (B1, `retroanalisis = si`): para φ de 10 a 50 grados cada 5, la cohesión que da FS = 1. En B1, la
-  curva c–φ llega a c = 0 con φ cercano a 50 grados (`phi_c0_grados` en el archivo de resultados): si el talud estuviera
-  justo en equilibrio y sin cohesión, esa sería la fricción. Cualquier par (c, φ) sobre la curva da FS = 1.
+  curva c–φ llega a c = 0 con φ cercano a 50.3 grados (`phi_c0_grados` en el archivo de resultados). Ese punto queda
+  apenas fuera de la malla de 10 a 50 de la tabla: no es una fila de la tabla, sale de la ecuación con c = 0. Si el
+  talud estuviera justo en equilibrio y sin cohesión, esa sería la fricción. Cualquier par (c, φ) sobre la curva da
+  FS = 1.
 - **Confiabilidad de berma** (B4): el porcentaje de bermas con ancho final mayor que el requerido (aquí el de Ritchie,
   0.2 H + 4.5 m). El ancho sale de la cara muestreada y del ángulo interrampa de diseño. Un ancho igual al requerido
   no cumple.
