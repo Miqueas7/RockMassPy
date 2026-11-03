@@ -224,14 +224,72 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "sl_s5": {"es": "Nota", "en": "Note"},
     "sl_scope": {
         "es": "Este documento reúne el análisis cinemático de Markland (deslizamiento planar, en cuña y volteo), el SMR "
-              "de Romana y el Q-slope de cada talud. La cinemática dice si el movimiento es posible por geometría: es "
-              "factibilidad, no un factor de seguridad ni una probabilidad. El SMR y el Q-slope son métodos empíricos. "
-              "El factor de seguridad por equilibrio límite llega en la siguiente etapa de la librería, y el ingeniero decide.",
+              "de Romana y el Q-slope de cada talud y, si se dan bloques, su factor de seguridad (FS) por equilibrio "
+              "límite (planar, cuña y volteo), su análisis probabilístico y el ancho de berma. La cinemática dice si el "
+              "movimiento es posible por geometría: es factibilidad, no un factor de seguridad ni una probabilidad. El SMR "
+              "y el Q-slope son métodos empíricos. El FS y la probabilidad "
+              "de falla (PoF) se informan sin juzgar su aceptación: los criterios de aceptación llegan en la etapa 3D "
+              "de la librería, y el ingeniero decide.",
         "en": "This document gathers Markland's kinematic analysis (planar sliding, wedge sliding and toppling), Romana's "
-              "SMR and the Q-slope of each slope. Kinematics says whether movement is geometrically possible: it is "
-              "feasibility, not a factor of safety or a probability. SMR and Q-slope are empirical methods. The "
-              "limit-equilibrium factor of safety arrives in the library's next stage, and the engineer decides.",
+              "SMR and the Q-slope of each slope and, when blocks are given, their limit-equilibrium factor of safety "
+              "(FS) (planar, wedge and toppling), their probabilistic analysis and the berm width. Kinematics says "
+              "whether movement is geometrically possible: it is feasibility, not a factor of safety or a probability. "
+              "SMR and Q-slope are empirical methods. The FS and the "
+              "probability of failure (PoF) are reported without judging their acceptance: acceptance criteria arrive "
+              "in stage 3D of the library, and the engineer decides.",
     },
+    # --- Bloques (3B) ---
+    "cap_blocks": {"es": "Bloques evaluados", "en": "Blocks assessed"},
+    "cap_prob": {"es": "Análisis probabilístico", "en": "Probabilistic analysis"},
+    "cap_back": {"es": "Retroanálisis (FS = 1)", "en": "Back analysis (FS = 1)"},
+    "cap_topple": {"es": "Volteo, bloque {n}: fuerzas por bloque", "en": "Toppling, block {n}: forces per block"},
+    "cap_berms": {"es": "Bermas", "en": "Berms"},
+    "cap_bl_warnings": {"es": "Avisos y cantidad de bloques que los tienen",
+                        "en": "Warnings and number of blocks that have them"},
+    "h_blocks": {"es": "Bloques", "en": "Blocks"},
+    "h_model": {"es": "Modelo", "en": "Model"},
+    "h_block_mode": {"es": "Modo", "en": "Mode"},
+    "h_fs": {"es": "FS", "en": "FS"},
+    "h_fs_le1": {"es": "FS ≤ 1", "en": "FS ≤ 1"},
+    "h_sampling": {"es": "Muestreo", "en": "Sampling"},
+    "h_valid": {"es": "Válidas/n", "en": "Valid/n"},
+    "h_seed": {"es": "Semilla", "en": "Seed"},
+    "h_mean": {"es": "Media", "en": "Mean"},
+    "h_sd": {"es": "Desviación", "en": "Std. dev."},
+    "h_min": {"es": "Mínimo", "en": "Minimum"},
+    "h_max": {"es": "Máximo", "en": "Maximum"},
+    "h_pof": {"es": "PoF (%)", "en": "PoF (%)"},
+    "h_beta_n": {"es": "β", "en": "β"},
+    "h_beta_ln": {"es": "β_LN", "en": "β_LN"},
+    "h_phi0": {"es": "φ con c = 0 (°)", "en": "φ with c = 0 (°)"},
+    "h_bench_h": {"es": "Altura de banco (m)", "en": "Bench height (m)"},
+    "h_berm_w": {"es": "Berma de diseño (m)", "en": "Design berm (m)"},
+    "h_ritchie": {"es": "Ritchie (m)", "en": "Ritchie (m)"},
+    "h_required": {"es": "Requerido (m)", "en": "Required (m)"},
+    "h_ira": {"es": "Interrampa (°)", "en": "Inter-ramp (°)"},
+    "h_narrower": {"es": "Más angosta que el requerido", "en": "Narrower than required"},
+    "h_berm_rel": {"es": "Confiabilidad (%)", "en": "Reliability (%)"},
+    "h_state": {"es": "Estado", "en": "State"},
+    "fig_fs_hist": {"es": "Histograma del FS, bloque {n}", "en": "FS histogram, block {n}"},
+    "fig_fs_cdf": {"es": "Curva de PoF, bloque {n}", "en": "PoF curve, block {n}"},
+    "model_planar": {"es": "planar", "en": "planar"},
+    "model_wedge": {"es": "cuña", "en": "wedge"},
+    "model_toppling": {"es": "volteo", "en": "toppling"},
+    "model_berm": {"es": "berma", "en": "berm"},
+    "bmode_planar": {"es": "planar", "en": "planar"},
+    "bmode_dos_planos": {"es": "dos planos", "en": "two planes"},
+    "bmode_plano_1": {"es": "plano 1", "en": "plane 1"},
+    "bmode_plano_2": {"es": "plano 2", "en": "plane 2"},
+    "bmode_despegue": {"es": "despegue", "en": "lift-off"},
+    "bmode_no_formado": {"es": "no formado", "en": "not formed"},
+    "bmode_volteo": {"es": "volteo", "en": "toppling"},
+    "topple_stable": {"es": "estable", "en": "stable"},
+    "topple_toppling": {"es": "vuelca", "en": "toppling"},
+    "topple_sliding": {"es": "desliza", "en": "sliding"},
+    "att_fs_below_1": {"es": "FS ≤ 1", "en": "FS ≤ 1"},
+    "att_block_warnings": {"es": "avisos", "en": "warnings"},
+    "bl_attention": {"es": "Bloques que piden atención: {n} de {m}. Motivos (bloques): {why}.",
+                     "en": "Blocks that need attention: {n} of {m}. Reasons (blocks): {why}."},
     "cap_slopes": {"es": "Taludes evaluados (k de n: casos críticos)", "en": "Slopes assessed (k of n: critical cases)"},
     "cap_families": {"es": "Familias de discontinuidades (Fisher)", "en": "Discontinuity families (Fisher)"},
     "cap_smr": {

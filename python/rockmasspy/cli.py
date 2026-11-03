@@ -254,9 +254,36 @@ def _slopes(n: int) -> str:
     return f"{n} slope" + ("" if n == 1 else "s")
 
 
+def _blocks(n: int) -> str:
+    return f"{n} block" + ("" if n == 1 else "s")
+
+
+_BLOCK_ONLY = (("distributions", "--distributions"), ("blocks_output", "--blocks-output"),
+               ("iterations", "--iterations"), ("sampling", "--sampling"), ("seed", "--seed"))
+
+
+def _block_args(a) -> None:
+    """Valida las opciones de bloques antes de leer archivos; deja los valores por defecto en `a`."""
+    if not a.blocks:
+        for attr, flag in _BLOCK_ONLY:
+            if getattr(a, attr) is not None:
+                raise ValueError(f"{flag} needs --blocks")
+        return
+    a.iterations = 5000 if a.iterations is None else a.iterations
+    a.seed = 1 if a.seed is None else a.seed
+    a.sampling = a.sampling or "lhs"
+    if a.iterations < 1:
+        raise ValueError("--iterations must be at least 1")
+    if a.seed < 0:
+        raise ValueError("--seed must be 0 or more")
+    if a.blocks_output and Path(a.blocks_output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--blocks-output must end in .csv or .xlsx")
+
+
 def _slope(a) -> int:
     from collections import Counter
 
+    from . import blocks as bk
     from . import report as rp
     from .slopes import assess_slopes, load_families, load_slope_faces, save_slope_results, slope_counts
 
@@ -265,11 +292,17 @@ def _slope(a) -> int:
         raise ValueError("report must end in .docx or .html")
     if not 0 < a.lateral_limit < 90:
         raise ValueError("--lateral-limit must be between 0 and 90 degrees")
+    _block_args(a)
     faces = load_slope_faces(a.faces, sheet=a.sheet_faces)
     if not faces:
         raise ValueError(f"no slope faces in {Path(a.faces).name}")
     rs = assess_slopes(faces, load_families(a.families, sheet=a.sheet_families),
                        lateral_limit_deg=a.lateral_limit)
+    bs = []
+    if a.blocks:  # antes del primer print: un error de bloques deja stdout vacío
+        dists = bk.load_distributions(a.distributions, sheet=a.sheet_distributions) if a.distributions else ()
+        bs = bk.assess_blocks(bk.load_blocks(a.blocks, sheet=a.sheet_blocks), rs, dists, iterations=a.iterations,
+                              sampling=a.sampling.replace("-", "_"), seed=a.seed, lateral_limit_deg=a.lateral_limit)
     c = slope_counts(rs)
     proj = a.projection.replace("-", "_")
     print(f"slopes: {c['slopes']}")
@@ -284,12 +317,29 @@ def _slope(a) -> int:
     for m, name in (("d", "discrete"), ("c", "continuous")):
         print(f"SMR {name}: " + " | ".join(f"{r} {c[f'smr_{m}_{k}']}" for k, r in enumerate(("I", "II", "III", "IV", "V"), 1)))
     print(f"Q-slope: {c['q_slope_evaluated']} faces, {c['face_steeper_than_beta']} steeper than beta")
-    print(f"warnings: {c['warnings']} in {_slopes(sum(1 for r in rs if r.warnings))}")
+    if a.blocks:  # solo agregados de block_counts: nunca un id (R18)
+        b = bk.block_counts(bs)
+        print(f"blocks: {b['blocks']} (planar {b['planar']}, wedge {b['wedge']}, toppling {b['toppling']}, "
+              f"berm {b['berm']})")
+        print(f"blocks formed: {b['formed']} of {b['planar'] + b['wedge'] + b['toppling']}")
+        print(f"FS at or below 1: {b['fs_below_1']} of {b['with_fs']} blocks with FS")
+        print(f"probabilistic: {_blocks(b['probabilistic'])}, {a.iterations} iterations, {a.sampling}, seed {a.seed}")
+        print(f"PoF above 0: {b['pof_above_0']} of {_blocks(b['probabilistic'])}")
+        print(f"berms narrower than required: {b['berm_narrower']} of {b['berm']}")
+        print(f"berm reliability evaluated: {b['berm_reliability_evaluated']}")
+        print(f"warnings: {c['warnings'] + b['warnings']} in {_slopes(sum(1 for r in rs if r.warnings))} and "
+              f"{_blocks(sum(1 for r in bs if r.warnings))}")
+    else:
+        print(f"warnings: {c['warnings']} in {_slopes(sum(1 for r in rs if r.warnings))}")
     for w, n in sorted(Counter(w for r in rs for w in set(r.warnings)).items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({_slopes(n)})")
-    print(f"notes: {c['notes']}")
+    for w, n in sorted(bk.warning_counts(bs).items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"warning: {w} ({_blocks(n)})")
+    print(f"notes: {c['notes'] + sum(len(r.notes) for r in bs)}")
     if a.output:
         print(f"results: {save_slope_results(rs, a.output)}")
+    if a.blocks_output:
+        print(f"blocks results: {bk.save_block_results(bs, a.blocks_output)}")
     if a.charts:
         from .viz import save_figure
 
@@ -297,13 +347,19 @@ def _slope(a) -> int:
             for mode in (None, *rp.slope_modes(r)):
                 path = Path(a.charts) / f"estereograma_{n}_{mode or 'density'}.png"
                 print(f"chart: {save_figure(rp.slope_figure(r, mode, a.lang, proj), path)}")
+        for r in bs:
+            if r.probabilistic is not None:
+                for kind in ("hist", "cdf"):
+                    path = Path(a.charts) / f"fs_{kind}_{r.order}.png"
+                    print(f"chart: {save_figure(rp.block_figure(r, kind, a.lang), path)}")
     if a.report:
         rep = rp.build_slope_report(rs, title=a.title or t("slope_title", a.lang), lang=a.lang, author=a.author or "",
-                                    figures=not a.no_figures, projection=proj)
+                                    figures=not a.no_figures, projection=proj, blocks=bs)
         out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
         print(f"report: {out}")
     print("the library recommends, the engineer decides")
-    return 2 if any(r.needs_attention for r in rs) else 0
+    # una sola regla: needs_attention del talud (3A) y block_attention del bloque (R14)
+    return 2 if any(r.needs_attention for r in rs) or any(bk.block_attention(r) for r in bs) else 0
 
 
 def _snake(name: str) -> str:
@@ -507,6 +563,14 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--author")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.add_argument("--no-figures", action="store_true")
+    c.add_argument("--blocks", metavar="BLOQUES", help="planar, wedge, toppling and berm blocks (sheet Bloques)")
+    c.add_argument("--sheet-blocks", default="Bloques")
+    c.add_argument("--distributions", metavar="DIST", help="random variables per block (needs --blocks)")
+    c.add_argument("--sheet-distributions", default="Distribuciones")
+    c.add_argument("--iterations", type=int, metavar="N", help="samples per probabilistic block (default 5000)")
+    c.add_argument("--sampling", choices=("lhs", "monte-carlo"), help="default lhs")
+    c.add_argument("--seed", type=int, help="default 1")
+    c.add_argument("--blocks-output", metavar="RES.csv|.xlsx")
     c.set_defaults(fn=_slope)
     return p
 

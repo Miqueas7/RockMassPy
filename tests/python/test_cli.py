@@ -623,3 +623,249 @@ def test_slope_kinematics_count_says_what_it_counts(tmp_path, capsys):
     tf = [T(id_="T1", tramo="R-ZZSENT"), T(id_="T2", tramo="R-ZZSENT", fr="")]
     _, out, _ = run_slope(tmp_path, capsys, files=slope_files(tmp_path, tf))
     assert "kinematics run on 1 of 2 slopes; planes: 4" in out.splitlines()
+
+
+# --- rockmass slope --blocks ---
+
+def block_files(tmp_path, jf, tf, bf, df=()):
+    import test_blocks as tb
+    from test_slopes import fam, tal
+
+    out = [tal(tmp_path, tf), fam(tmp_path, jf), tb.blq(tmp_path, bf)]
+    return out + ([tb.dis(tmp_path, df)] if df else [])
+
+
+def run_blocks(capsys, files, *extra):
+    faces, fams, blocks, *dists = files
+    args = ["slope", "--faces", str(faces), "--families", str(fams), "--blocks", str(blocks)]
+    code = main(args + (["--distributions", str(dists[0])] if dists else []) + [str(e) for e in extra])
+    cap = capsys.readouterr()
+    return code, cap.out, cap.err
+
+
+def todas_files(tmp_path):
+    import test_blocks as tb
+
+    return block_files(tmp_path, *tb._todas(tmp_path))
+
+
+def test_slope_blocks_summary(tmp_path, capsys):
+    code, out, err = run_blocks(capsys, todas_files(tmp_path), "--iterations", 2000, "--seed", 3)
+    lines = out.splitlines()
+    assert code == 2 and err == ""  # PL-1 tiene FS < 1
+    for ln in ("blocks: 5 (planar 2, wedge 1, toppling 1, berm 1)", "blocks formed: 4 of 4",
+               "FS at or below 1: 1 of 4 blocks with FS", "probabilistic: 1 block, 2000 iterations, lhs, seed 3",
+               "PoF above 0: 1 of 1 block", "berms narrower than required: 1 of 1", "berm reliability evaluated: 1",
+               "warnings: 3 in 3 slopes and 0 blocks"):
+        assert ln in lines, ln
+    assert lines.index("Q-slope: 0 faces, 0 steeper than beta") < lines.index(
+        "blocks: 5 (planar 2, wedge 1, toppling 1, berm 1)")
+    assert out.rstrip().endswith("the library recommends, the engineer decides")
+
+
+def quiet_prob_files(tmp_path):
+    import test_blocks as tb
+
+    return block_files(tmp_path, tb.J35, [tb.talud(fr="40")], [tb.B(**tb.SMP)], tb.SMP_D)
+
+
+def test_slope_blocks_pof_does_not_trigger(tmp_path, capsys):
+    import test_blocks as tb
+
+    res = tmp_path / "res.csv"
+    code, out, _ = run_blocks(capsys, quiet_prob_files(tmp_path), "--iterations", 2000, "--blocks-output", res)
+    assert "FS at or below 1: 0 of 1 blocks with FS" in out and "PoF above 0: 1 of 1 block" in out.splitlines()
+    assert code == 0  # la PoF no pide atención (R14)
+    cab, (f,) = tb.leer(res)
+    assert len(cab) == 25 and float(f["pof_pct"]) > 0 and f"blocks results: {res}" in out
+
+
+def test_slope_blocks_files_charts_report(tmp_path, capsys):
+    from rockmasspy.report.texts import t
+
+    res, ch, html = tmp_path / "r.csv", tmp_path / "ch", tmp_path / "x.html"
+    code, out, _ = run_blocks(capsys, todas_files(tmp_path), "--iterations", 200, "--blocks-output", res,
+                              "--charts", ch, "--report", html)
+    assert code == 2 and res.exists()
+    for name in ("fs_hist_5.png", "fs_cdf_5.png"):
+        assert (ch / name).exists() and f"chart: {ch / name}" in out
+    assert not list(ch.glob("fs_*_[1-4].png"))
+    text = html.read_text(encoding="utf-8")
+    assert t("cap_blocks", "es") in text and t("cap_prob", "es") in text
+
+
+def test_slope_blocks_same_seed_same_output(tmp_path, capsys):
+    import test_blocks as tb
+
+    files = quiet_prob_files(tmp_path)
+    res = tmp_path / "r.csv"
+    a = run_blocks(capsys, files, "--iterations", 2000, "--blocks-output", res)
+    (fa,) = tb.leer(res)[1]
+    b = run_blocks(capsys, files, "--iterations", 2000, "--blocks-output", res)
+    (fb,) = tb.leer(res)[1]
+    assert a == b and fa == fb
+    c = run_blocks(capsys, files, "--iterations", 2000, "--blocks-output", res, "--sampling", "monte-carlo")
+    (fc,) = tb.leer(res)[1]
+    assert "monte-carlo" in c[1] and fc["muestreo"] == "monte_carlo" and fc["pof_pct"] != fa["pof_pct"]
+
+
+def test_slope_blocks_note_alone_keeps_code(tmp_path, capsys):
+    import test_blocks as tb
+
+    files = block_files(tmp_path, ["R1,J1,50,180"], [tb.talud(fr="60")], [tb.B(**tb.PL1)])  # no formado
+    code, out, _ = run_blocks(capsys, files)
+    assert code == 0 and "blocks formed: 0 of 1" in out and "notes: 1" in out
+
+
+def _fake_block(fs, warnings=(), notes=()):
+    from types import SimpleNamespace
+
+    from rockmasspy import blocks as bk
+
+    det = None if fs is None else SimpleNamespace(factor_of_safety=fs, formed=True)
+    return bk.BlockResult("B", "T1", 1, "planar", det, None, None, None, tuple(warnings), tuple(notes), ())
+
+
+def test_slope_blocks_count_parity(tmp_path, capsys, monkeypatch):
+    import test_blocks as tb
+    from rockmasspy import blocks as bk
+    from rockmasspy.report.texts import t
+
+    fakes = [_fake_block(x) for x in (0.5, 1.0, 1 + 1e-12, 1.2)]
+    monkeypatch.setattr(bk, "assess_blocks", lambda *a, **k: fakes)
+    files = block_files(tmp_path, tb.J35, [tb.talud(fr="40")], [tb.B(**tb.PL1)])
+    res, html = tmp_path / "p.csv", tmp_path / "p.html"
+    code, out, _ = run_blocks(capsys, files, "--blocks-output", res, "--report", html, "--no-figures")
+    k = bk.block_counts(fakes)["fs_below_1"]
+    assert f"FS at or below 1: {k} of 4 blocks with FS" in out.splitlines() and k == 3 and code == 2
+    _, filas = tb.leer(res)
+    assert sum(f["fs_menor_o_igual_1"] == "si" for f in filas) == k
+    tabla = html.read_text(encoding="utf-8").split(t("cap_blocks", "es"))[1].split("</table>")[0]
+    assert tabla.count(f"<td>{t('sl_yes', 'es')}</td>") == k
+
+
+@pytest.mark.parametrize("case", ["fs", "warning", "slope", "note", "quiet"])
+def test_slope_blocks_attention_parity(tmp_path, capsys, monkeypatch, case):
+    import test_blocks as tb
+    from rockmasspy import blocks as bk
+
+    r = {"fs": _fake_block(0.9), "warning": _fake_block(1.5, warnings=("w",)), "slope": _fake_block(1.5),
+         "note": _fake_block(1.5, notes=("n",)), "quiet": _fake_block(1.5)}[case]
+    monkeypatch.setattr(bk, "assess_blocks", lambda *a, **k: [r])
+    tf = [tb.talud(fr="" if case == "slope" else "40")]  # sin fricción: aviso del talud
+    html = tmp_path / "a.html"
+    code, _, _ = run_blocks(capsys, block_files(tmp_path, tb.J35, tf, [tb.B(**tb.PL1)]), "--report", html,
+                            "--no-figures")
+    att = "piden atención" in html.read_text(encoding="utf-8")
+    assert (code == 2) == att == (case in ("fs", "warning", "slope"))
+
+
+@pytest.mark.parametrize("case", ["modelo", "dist_sin_blocks", "iter0", "seed", "familia", "media", "muestreada",
+                                  "output_sin_blocks", "sampling_sin_blocks"])
+def test_slope_blocks_input_errors(tmp_path, capsys, case):
+    import test_blocks as tb
+
+    bf, df, extra = [tb.B(**tb.PL1)], (), []
+    if case == "modelo":
+        bf = [tb.B(**{**tb.PL1, "modelo": "losa"})]
+    elif case == "familia":
+        bf = [tb.B(**{**tb.PL1, "familia_1": "J9"})]
+    elif case == "media":
+        df = [tb.D("B1", "kh", "normal", 0.5, 0.01, 0, 0.1)]
+    elif case == "muestreada":
+        bf = [tb.B(**{**tb.PL1, "dist_grieta_m": 15})]
+        df = [tb.D("B1", "buz_plano_grados", "uniforme", "", "", 20, 45)]
+    elif case == "iter0":
+        extra = ["--iterations", "0"]
+    elif case == "seed":
+        extra = ["--seed", "-1"]
+    files = block_files(tmp_path, tb.J35, [tb.talud()], bf, df)
+    if case.endswith("_sin_blocks"):
+        d = tb.dis(tmp_path, [tb.D("B1", "kh", "uniforme", "", "", 0, 0.1)])
+        flag = {"dist_sin_blocks": ["--distributions", str(d)], "output_sin_blocks": ["--blocks-output", "x.csv"],
+                "sampling_sin_blocks": ["--sampling", "lhs"]}[case]
+        code = main(["slope", "--faces", str(files[0]), "--families", str(files[1]), *flag])
+        cap = capsys.readouterr()
+        out, err = cap.out, cap.err
+    else:
+        code, out, err = run_blocks(capsys, files, *extra)
+    assert code == 1 and "Traceback" not in err, err
+    assert len(err.strip().splitlines()) == 1 and err.startswith("error: "), err
+    assert "Domain error" not in err and "Received" not in err and "losa" not in err and "J9" not in err
+    assert case != "media" or ("0.5" not in err and "0.01" not in err)
+    assert case != "muestreada" or "during sampling" in err
+    assert case != "iter0" or "--iterations" in err
+
+
+def test_slope_blocks_privacy(tmp_path, capsys):
+    docx = pytest.importorskip("docx")
+    import test_blocks as tb
+
+    jf = ["R-ZZSENT,J1,35,180"] * 3
+    tf = [tb.talud("T-ZZSENT", "R-ZZSENT")]
+    bf = [tb.B(**{**tb.SMP, "id_bloque": "B-ZZSENT", "id_talud": "T-ZZSENT"}),
+          tb.B(**{**tb.PL1, "id_bloque": "B2-ZZSENT", "id_talud": "T-ZZSENT", "retroanalisis": "si"})]
+    df = [tb.D("B-ZZSENT", "friccion_1_grados", "normal", 35, 5, 15, 70)]
+    files = block_files(tmp_path, jf, tf, bf, df)
+    html, word, ch = tmp_path / "x.html", tmp_path / "x.docx", tmp_path / "ch"
+    code, out, err = run_blocks(capsys, files, "--iterations", 200, "--report", html, "--charts", ch)
+    assert code == 2 and "ZZSENT" not in out + err
+    code, out, err = run_blocks(capsys, files, "--iterations", 200, "--report", word)
+    assert "ZZSENT" not in out + err
+    d = docx.Document(str(word))
+    wtext = "\n".join([p.text for p in d.paragraphs] + [c.text for x in d.tables for row in x.rows for c in row.cells])
+    for txt in (html.read_text(encoding="utf-8"), wtext):
+        assert "B-ZZSENT" in txt and "T-ZZSENT" in txt
+        assert len(re.findall("ZZSENT", txt)) == len(re.findall(r"(?:B2?|T|R)-ZZSENT", txt))
+
+
+def test_help_lists_block_options(capsys):
+    with pytest.raises(SystemExit):
+        main(["slope", "--help"])
+    out = capsys.readouterr().out
+    for opt in ("--blocks", "--sheet-blocks", "--distributions", "--sheet-distributions", "--iterations", "--sampling",
+                "--seed", "--blocks-output", "monte-carlo"):
+        assert opt in out
+
+
+# --- ola final de la 3B ---
+
+def test_slope_blocks_constant_fs_no_traceback(tmp_path, capsys):
+    # c = 0 y seco: el FS no depende de gamma; sin traceback y con el código de la regla del FS (I1)
+    import test_blocks as tb
+
+    fila = dict(id_bloque="B1", id_talud="T1", modelo="planar", altura_m=20, peso_unitario_kn_m3=26,
+                familia_1="J1", cohesion_1_kpa=0, friccion_1_grados=40)
+    files = block_files(tmp_path, tb.J35, [tb.talud(fr="40")], [tb.B(**fila)],
+                        [tb.D("B1", "peso_unitario_kn_m3", "normal", 26, 1, 22, 30)])
+    code, out, err = run_blocks(capsys, files, "--iterations", 500)
+    assert code == 0 and err == "" and "FS at or below 1: 0 of 1 blocks with FS" in out
+
+
+def test_slope_blocks_error_prints_nothing_to_stdout(tmp_path, capsys):
+    import test_blocks as tb
+
+    files = block_files(tmp_path, tb.J35, [tb.talud()], [tb.B(**{**tb.VO1, "n_bloques": 3e9})])
+    code, out, err = run_blocks(capsys, files)
+    assert code == 1 and out == "" and err == "error: sheet 'Bloques', row 2, column 'n_bloques': out of range\n"
+
+
+def test_slope_blocks_output_extension_checked_first(tmp_path, capsys):
+    code = main(["slope", "--faces", str(tmp_path / "no.csv"), "--families", str(tmp_path / "no2.csv"),
+                 "--blocks", str(tmp_path / "no3.csv"), "--blocks-output", str(tmp_path / "r.txt")])
+    cap = capsys.readouterr()
+    assert code == 1 and cap.out == "" and cap.err == "error: --blocks-output must end in .csv or .xlsx\n"
+
+
+def test_slope_blocks_warnings_grouped(tmp_path, capsys):
+    import test_blocks as tb
+
+    v = {**tb.VO1, "soporte_kn_m": "", "buz_base_grados": 60}
+    bf = [tb.B(**v), tb.B(**{**v, "id_bloque": "V2", "n_bloques": 14})]  # 15 y 13 bloques fallan (8)-(9)
+    code, out, _ = run_blocks(capsys, block_files(tmp_path, tb.J35, [tb.talud(fr="40")], bf))
+    lines = out.splitlines()
+    assert code == 2
+    assert "warning: Goodman-Bray conditions (8)-(9) fail in N blocks (2 blocks)" in lines
+    assert ("warning: toppling: support is insufficient for any friction coefficient below 1; FS is an upper bound "
+            "(2 blocks)") in lines
+    assert not any(ln.endswith("(1 block)") for ln in lines)

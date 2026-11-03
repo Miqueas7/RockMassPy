@@ -21,9 +21,13 @@
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 #include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/planar.hpp"
 #include "rockmasspy/q_slope.hpp"
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
+#include "rockmasspy/wedge.hpp"
+#include "rockmasspy/toppling.hpp"
+#include "rockmasspy/bench.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -480,4 +484,111 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("notes", &QSlopeResult::notes);
     m.def("q_slope_beta", &q_slope_beta, nb::arg("q_slope"), "beta = 20*log10(Q-slope) + 65, uncapped.");
     m.def("q_slope", &q_slope, nb::arg("input"));
+
+    // Falla planar de Hoek y Bray
+    nb::enum_<BoltMode>(m, "BoltMode", "Bolt behaviour: Active reduces the driving force, Passive adds to the resistance.")
+        .value("Active", BoltMode::Active).value("Passive", BoltMode::Passive);
+    nb::class_<PlanarInput>(m, "PlanarInput", "Planar block: geometry, strength, tension crack, water, kh, bolt and external load.")
+        .def(nb::init<>())
+        .def_rw("height_m", &PlanarInput::height_m).def_rw("face_dip_deg", &PlanarInput::face_dip_deg)
+        .def_rw("plane_dip_deg", &PlanarInput::plane_dip_deg).def_rw("unit_weight", &PlanarInput::unit_weight)
+        .def_rw("cohesion", &PlanarInput::cohesion).def_rw("friction_deg", &PlanarInput::friction_deg)
+        .def_rw("tension_crack_distance_m", &PlanarInput::tension_crack_distance_m)
+        .def_rw("water_fill", &PlanarInput::water_fill).def_rw("water_unit_weight", &PlanarInput::water_unit_weight)
+        .def_rw("kh", &PlanarInput::kh).def_rw("bolt_force", &PlanarInput::bolt_force)
+        .def_rw("bolt_plunge_deg", &PlanarInput::bolt_plunge_deg).def_rw("bolt_mode", &PlanarInput::bolt_mode)
+        .def_rw("external_force", &PlanarInput::external_force)
+        .def_rw("external_angle_deg", &PlanarInput::external_angle_deg);
+    nb::class_<TensionCrack>(m, "TensionCrack", "Critical tension crack depth and distance behind the crest.")
+        .def_ro("depth_m", &TensionCrack::depth_m).def_ro("distance_m", &TensionCrack::distance_m);
+    nb::class_<PlanarResult>(m, "PlanarResult", "Planar factor of safety (None if not formed) and its forces per metre.")
+        .def_ro("factor_of_safety", &PlanarResult::factor_of_safety).def_ro("formed", &PlanarResult::formed)
+        .def_ro("tension_crack_depth_m", &PlanarResult::tension_crack_depth_m).def_ro("weight", &PlanarResult::weight)
+        .def_ro("base_area", &PlanarResult::base_area).def_ro("uplift_force", &PlanarResult::uplift_force)
+        .def_ro("crack_water_force", &PlanarResult::crack_water_force).def_ro("normal_force", &PlanarResult::normal_force)
+        .def_ro("driving_force", &PlanarResult::driving_force).def_ro("resisting_force", &PlanarResult::resisting_force)
+        .def_ro("info", &PlanarResult::info).def_ro("warnings", &PlanarResult::warnings)
+        .def_ro("notes", &PlanarResult::notes);
+    nb::class_<PlanarBackAnalysis>(m, "PlanarBackAnalysis", "Cohesion that gives FS = 1 for each friction angle.")
+        .def_ro("friction_deg", &PlanarBackAnalysis::friction_deg).def_ro("cohesion", &PlanarBackAnalysis::cohesion)
+        .def_ro("friction_at_zero_cohesion_deg", &PlanarBackAnalysis::friction_at_zero_cohesion_deg)
+        .def_ro("info", &PlanarBackAnalysis::info).def_ro("notes", &PlanarBackAnalysis::notes);
+    m.def("critical_tension_crack", &critical_tension_crack, nb::arg("height_m"), nb::arg("face_dip_deg"),
+          nb::arg("plane_dip_deg"));
+    m.def("planar_fs", &planar_fs, nb::arg("input"));
+    m.def("planar_back_analysis", &planar_back_analysis, nb::arg("input"), nb::arg("friction_deg"));
+
+    // Cuña tetraédrica por resolución vectorial
+    nb::enum_<WedgeMode>(m, "WedgeMode", "Sliding mode of a wedge.")
+        .value("TwoPlanes", WedgeMode::TwoPlanes).value("PlaneOne", WedgeMode::PlaneOne)
+        .value("PlaneTwo", WedgeMode::PlaneTwo).value("Lifting", WedgeMode::Lifting)
+        .value("NotFormed", WedgeMode::NotFormed);
+    nb::class_<WedgeJoint>(m, "WedgeJoint", "Wedge joint: orientation, strength and mean water pressure on it.")
+        .def(nb::init<>())
+        .def_rw("plane", &WedgeJoint::plane).def_rw("cohesion", &WedgeJoint::cohesion)
+        .def_rw("friction_deg", &WedgeJoint::friction_deg).def_rw("water_pressure", &WedgeJoint::water_pressure);
+    nb::class_<WedgeInput>(m, "WedgeInput", "Tetrahedral wedge: two joints, face, upper slope, height, kh and external load.")
+        .def(nb::init<>())
+        .def_rw("joint1", &WedgeInput::joint1).def_rw("joint2", &WedgeInput::joint2)
+        .def_rw("face", &WedgeInput::face).def_rw("upper", &WedgeInput::upper)
+        .def_rw("height_m", &WedgeInput::height_m).def_rw("unit_weight", &WedgeInput::unit_weight)
+        .def_rw("kh", &WedgeInput::kh).def_rw("external_force", &WedgeInput::external_force)
+        .def_rw("external_direction", &WedgeInput::external_direction);
+    nb::class_<WedgeResult>(m, "WedgeResult", "Wedge factor of safety (None if not formed), mode, geometry and forces.")
+        .def_ro("factor_of_safety", &WedgeResult::factor_of_safety).def_ro("mode", &WedgeResult::mode)
+        .def_ro("intersection", &WedgeResult::intersection).def_ro("volume", &WedgeResult::volume)
+        .def_ro("weight", &WedgeResult::weight).def_ro("area1", &WedgeResult::area1)
+        .def_ro("area2", &WedgeResult::area2).def_ro("face_area", &WedgeResult::face_area)
+        .def_ro("upper_area", &WedgeResult::upper_area).def_ro("normal1", &WedgeResult::normal1)
+        .def_ro("normal2", &WedgeResult::normal2).def_ro("driving_force", &WedgeResult::driving_force)
+        .def_ro("resisting_force", &WedgeResult::resisting_force).def_ro("info", &WedgeResult::info)
+        .def_ro("warnings", &WedgeResult::warnings).def_ro("notes", &WedgeResult::notes);
+    m.def("wedge_fs", &wedge_fs, nb::arg("input"));
+
+    // Volteo de bloques de Goodman y Bray
+    nb::enum_<TopplingState>(m, "TopplingState", "Failure state of a block: Stable, Toppling or Sliding.")
+        .value("Stable", TopplingState::Stable).value("Toppling", TopplingState::Toppling)
+        .value("Sliding", TopplingState::Sliding);
+    nb::class_<TopplingInput>(m, "TopplingInput", "Block toppling: block heights from the toe, geometry, strength and toe support.")
+        .def(nb::init<>())
+        .def_rw("heights_m", &TopplingInput::heights_m).def_rw("block_width_m", &TopplingInput::block_width_m)
+        .def_rw("base_dip_deg", &TopplingInput::base_dip_deg).def_rw("a1_m", &TopplingInput::a1_m)
+        .def_rw("a2_m", &TopplingInput::a2_m).def_rw("crest_block", &TopplingInput::crest_block)
+        .def_rw("unit_weight", &TopplingInput::unit_weight).def_rw("friction_deg", &TopplingInput::friction_deg)
+        .def_rw("support_force", &TopplingInput::support_force)
+        .def_rw("support_angle_deg", &TopplingInput::support_angle_deg)
+        .def_rw("support_height_m", &TopplingInput::support_height_m);
+    nb::class_<TopplingBlock>(m, "TopplingBlock", "Forces and state of one block (n = 1 is the toe block). For block 1, p_lower is always 0 (no block below): the toe support is in p_toppling (Tt) and p_sliding (Ts), so 0 does not mean no support is needed.")
+        .def_ro("n", &TopplingBlock::n).def_ro("height_m", &TopplingBlock::height_m)
+        .def_ro("m_m", &TopplingBlock::m_m).def_ro("l_m", &TopplingBlock::l_m)
+        .def_ro("p_toppling", &TopplingBlock::p_toppling).def_ro("p_sliding", &TopplingBlock::p_sliding)
+        .def_ro("p_lower", &TopplingBlock::p_lower).def_ro("normal", &TopplingBlock::normal)
+        .def_ro("shear", &TopplingBlock::shear).def_ro("state", &TopplingBlock::state);
+    nb::class_<TopplingForces>(m, "TopplingForces", "Block forces from the crest down and the support needed at the toe.")
+        .def_ro("blocks", &TopplingForces::blocks).def_ro("support_toppling", &TopplingForces::support_toppling)
+        .def_ro("support_sliding", &TopplingForces::support_sliding)
+        .def_ro("support_required", &TopplingForces::support_required);
+    nb::class_<TopplingResult>(m, "TopplingResult", "Toppling factor of safety (FS = mu available / mu required).")
+        .def_ro("factor_of_safety", &TopplingResult::factor_of_safety)
+        .def_ro("friction_required", &TopplingResult::friction_required).def_ro("forces", &TopplingResult::forces)
+        .def_ro("fs_bounded", &TopplingResult::fs_bounded).def_ro("capped", &TopplingResult::capped).def_ro("info", &TopplingResult::info)
+        .def_ro("warnings", &TopplingResult::warnings).def_ro("notes", &TopplingResult::notes);
+    m.def("goodman_bray_heights", &goodman_bray_heights, nb::arg("n_blocks"), nb::arg("crest_block"), nb::arg("a1_m"),
+          nb::arg("a2_m"), nb::arg("b_m"));
+    m.def("toppling_forces", &toppling_forces, nb::arg("input"), nb::arg("mu"));
+    m.def("toppling_fs", &toppling_fs, nb::arg("input"));
+
+    // Banco-berma
+    nb::class_<RitchieWidth>(m, "RitchieWidth", "Modified Ritchie minimum berm width (0.2 H + 4.5).")
+        .def_ro("width_m", &RitchieWidth::width_m).def_ro("info", &RitchieWidth::info);
+    nb::class_<BermReliability>(m, "BermReliability", "Share of benches whose berm width exceeds the criterion.")
+        .def_ro("reliability", &BermReliability::reliability).def_ro("n", &BermReliability::n)
+        .def_ro("n_meeting", &BermReliability::n_meeting).def_ro("width_mean", &BermReliability::width_mean)
+        .def_ro("width_min", &BermReliability::width_min).def_ro("width_max", &BermReliability::width_max)
+        .def_ro("info", &BermReliability::info);
+    m.def("ritchie_berm_width", &ritchie_berm_width, nb::arg("bench_height_m"));
+    m.def("bench_width", &bench_width, nb::arg("bench_height_m"), nb::arg("interramp_deg"), nb::arg("face_angle_deg"));
+    m.def("interramp_angle", &interramp_angle, nb::arg("bench_height_m"), nb::arg("berm_width_m"),
+          nb::arg("face_angle_deg"));
+    m.def("berm_reliability", &berm_reliability, nb::arg("widths_m"), nb::arg("required_width_m"));
 }

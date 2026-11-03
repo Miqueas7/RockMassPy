@@ -283,6 +283,79 @@ rockmass slope --faces Taludes.csv --families Familias.csv --report taludes.html
 
 Ve `examples/08-taludes-cinematica-smr-qslope/`.
 
+## Bloques en roca, probabilidad de falla y diseño banco–berma
+
+Sobre la cinemática, `assess_blocks(...)` y `rockmass slope --blocks` corren **bloques de equilibrio límite** por cada
+fila de una hoja `Bloques`, cada una ligada a una cara de talud por `id_talud`:
+- **planar** (Hoek y Bray), con grieta de tracción, agua, sismo horizontal, perno o fuerza externa, y retroanálisis
+  opcional (los pares c–φ que dan FS = 1);
+- **cuña** por resolución vectorial (dos planos, un plano o despegue), con presión de agua por junta, sismo y fuerza
+  externa;
+- **volteo** de bloques regulares (Goodman y Bray 1976), con fuerza de soporte opcional en el pie;
+- **berma** (Ritchie modificado, 0.2 H + 4.5 m): ángulo interrampa, ancho frente al requerido y, con una distribución,
+  la confiabilidad de la berma.
+
+Un bloque con filas en `Distribuciones` para sus variables recibe además una **probabilidad de falla** (Monte Carlo o
+hipercubo latino, variables normales truncadas, exponenciales o uniformes, semilla fija), con el FS medio, la
+desviación y el índice de confiabilidad.
+
+Lee esto dos veces:
+
+- **La PoF depende de las distribuciones que tú eliges.** La librería propaga lo que le das; no sabe cuánto varía tu
+  macizo. Con la misma semilla, el mismo número de muestras y las mismas hojas, la PoF sale igual en cualquier máquina.
+- **El FS igual a 1 cuenta como falla** (con holgura de 1e-9), una muestra con despegue cuenta como falla y la PoF es
+  condicional a que el bloque se forme (se informan `n` y `n_valid`).
+- **La librería nunca dice «aceptable».** Solo un FS menor que 1 y los avisos cambian el código de salida. La PoF, la
+  confiabilidad de la berma y la comparación con Ritchie se informan y no se juzgan: los criterios de aceptación son
+  de la fase 3D, y el análisis es 2D, por metro de talud.
+- **Privacidad:** `id_bloque` e `id_talud` salen solo en las tablas del informe y en el archivo de resultados, nunca
+  en la consola, las figuras ni un mensaje de error. No pongas códigos de labor ni de mina en los nombres de `familia`:
+  llegan a los avisos.
+
+```python
+import rockmasspy as rm
+from rockmasspy.probabilistic import Distribution, run_probabilistic
+
+# Sau Mau Ping (problema 1 de verificación de RocPlane, en kN): H 60 m, cara 50, plano 35, c 100 kPa, φ 35, kh 0.08
+i = rm.PlanarInput()
+i.height_m, i.face_dip_deg, i.plane_dip_deg = 60, 50, 35
+i.unit_weight, i.water_unit_weight, i.cohesion, i.friction_deg, i.kh = 27, 10, 100, 35, 0.08
+i.water_fill = 1.0                                    # saturado, sin grieta de tracción
+print(f"{rm.planar_fs(i).factor_of_safety:.3f}")      # 0.818
+crack = rm.critical_tension_crack(60, 50, 35)         # grieta crítica del talud seco, llena al 90 %
+print(f"{crack.depth_m:.4f} {crack.distance_m:.4f}")  # 14.0092 15.3358
+i.tension_crack_distance_m, i.water_fill = crack.distance_m, 0.9
+print(f"{rm.planar_fs(i).factor_of_safety:.3f}")      # 1.065
+variables = {"friction_deg": Distribution("normal", 15, 70, 35, 5),
+             "cohesion": Distribution("normal", 0, 250, 100, 20),
+             "tension_crack_distance_m": Distribution("normal", 0, 35.34, 15.3, 4),
+             "water_fill": Distribution("exponential", 0, 1, 0.5),
+             "kh": Distribution("exponential", 0, 0.16, 0.08)}
+r = run_probabilistic("planar", i, variables, n=5000, sampling="lhs", seed=9)
+print(f"{r.pof * 100:.1f} {r.n_valid}/{r.n}")         # 7.4 5000/5000
+print(f"{rm.ritchie_berm_width(12).width_m:.1f}")     # 6.9
+```
+
+Los bloques salen de una hoja `Bloques` (`rm.load_blocks`, una fila por análisis, columna `modelo` = `planar`, `cuña`,
+`volteo` o `berma`) y las variables aleatorias de una hoja `Distribuciones` (`rm.load_distributions`: `id_bloque`,
+`variable`, `distribucion` = `normal`, `exponencial` o `uniforme`, `media`, `desviacion`, `minimo`, `maximo`), ambas en
+xlsx o CSV. Cada bloque toma la cara y la orientación media (Fisher) de las familias de su talud, así que `Taludes` no
+gana columnas. `rm.block_counts` da los conteos y `rm.save_block_results` escribe el archivo de resultados de 25
+columnas; `report.build_slope_report(..., blocks=...)` agrega las tablas de bloques y `report.block_figure` dibuja el
+histograma del FS y la curva de PoF. Desde la línea de comandos (0 si todo está bien, 1 si hay un error de entrada, 2 si
+algo pide atención):
+
+```bash
+rockmass slope --faces Taludes.csv --families Familias.csv --blocks Bloques.csv --distributions Distribuciones.csv \
+    --iterations 5000 --sampling lhs --seed 9 --blocks-output bloques_resultados.csv --report taludes.html --charts fig
+```
+
+Opciones: `--blocks` (pide `--faces` y `--families`), `--sheet-blocks`, `--distributions`, `--sheet-distributions`,
+`--iterations` (por defecto 5000), `--sampling lhs|monte-carlo` (por defecto `lhs`), `--seed` (por defecto 1) y
+`--blocks-output RES.csv|.xlsx`. Todas, salvo la propia `--blocks`, necesitan `--blocks`.
+
+Mira `examples/09-bloques-probabilistico-berma/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
