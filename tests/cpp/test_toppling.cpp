@@ -85,6 +85,7 @@ TEST(Toppling, VO1) {
     EXPECT_EQ(r.info.method_id, "Toppling-GoodmanBray1976");
     EXPECT_NEAR(r.friction_required, std::tan(38.66 * kPi / 180) / r.factor_of_safety, 1e-12);
     EXPECT_FALSE(r.fs_bounded);
+    EXPECT_FALSE(r.capped);
     EXPECT_NEAR(r.forces.support_required, 2013, 1e-3);
 }
 
@@ -103,12 +104,14 @@ TEST(Toppling, Bounds) {
     auto r = toppling_fs(ex1(60, 1e9));
     EXPECT_EQ(r.factor_of_safety, 100.0);
     EXPECT_FALSE(r.fs_bounded);
+    EXPECT_TRUE(r.capped);
     EXPECT_TRUE(has(r.notes, "toppling FS above 100"));
     EXPECT_TRUE(r.warnings.empty());  // sin (8)-(9) en el mu artificial
     auto in = ex1(20, 0.0);
     in.base_dip_deg = 60;  // no se sostiene con mu < 1
     r = toppling_fs(in);
     EXPECT_TRUE(r.fs_bounded);
+    EXPECT_FALSE(r.capped);
     EXPECT_LT(r.factor_of_safety, std::tan(20 * kPi / 180) + 1e-6);
     EXPECT_TRUE(has(r.warnings, "support is insufficient for any friction coefficient below 1; FS is an upper bound"));
 }

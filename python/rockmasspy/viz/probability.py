@@ -17,6 +17,17 @@ def _pie(res, lang):
                        f"{text('prob_seed', lang)} {res.seed}"))
 
 
+def _drawn(res) -> list[float]:
+    """Muestras con posición en el eje: FS finito y no acotado (el tope y la cota superior no son un FS)."""
+    ex = set(res.excluded)
+    return [f for i, f in enumerate(res.fs) if f is not None and math.isfinite(f) and i not in ex]
+
+
+def _excluded_failures(res) -> int:
+    """Fallas que no se dibujan (cotas superiores): con las barras de falla suman n_failed."""
+    return res.n_failed - sum(1 for f in _drawn(res) if is_failure(f))
+
+
 def _base(res, title, style, key):
     """Figura con ejes, título y pie; None en `ax` si no hay muestras válidas."""
     lang = style.lang
@@ -36,6 +47,9 @@ def _base(res, title, style, key):
     if k:  # válidas y estables, pero sin posición en el eje
         ax.text(0.02, 0.89, text("prob_infinite", lang).format(k=k), transform=ax.transAxes, ha="left",
                 va="top", fontsize=style.font_size - 1)
+    if res.excluded:  # cotas del volteo: válidas, contadas en la PoF, sin posición en el eje
+        ax.text(0.02, 0.84 if k else 0.89, text("prob_excluded", lang).format(k=len(res.excluded),
+                f=_excluded_failures(res)), transform=ax.transAxes, ha="left", va="top", fontsize=style.font_size - 1)
     return fig, ax
 
 
@@ -49,7 +63,7 @@ def plot_fs_histogram(result: ProbabilisticResult, *, title: str = "", bins: int
         return fig
     from matplotlib.patches import Patch
 
-    vals = [f for f in result.fs if f is not None and math.isfinite(f)]
+    vals = _drawn(result)
     lo, hi = min(vals + [1.0]), max(vals + [1.0])
     if hi == lo:
         lo, hi = lo - 0.5, hi + 0.5
@@ -82,9 +96,12 @@ def plot_fs_cdf(result: ProbabilisticResult, *, title: str = "", style: Style = 
     from matplotlib.lines import Line2D
 
     n = result.n_valid
-    vals = sorted(f for f in result.fs if f is not None and math.isfinite(f))
-    # FS infinito (sin fuerza que deslice) cuenta como válido y estable: la curva acumula sobre n_valid
-    ax.step(vals, [(i + 1) / n for i in range(len(vals))], where="post", color="black", lw=1.4)
+    vals = sorted(_drawn(result))
+    # FS infinito y tope cuentan como válidos y estables: la curva acumula sobre n_valid. Las cotas superiores son
+    # fallas sin FS conocido: la curva arranca en su fracción, así corta FS = 1 en la PoF
+    f0 = _excluded_failures(result)
+    ax.step([min(vals + [1.0])] + vals, [f0 / n] + [(f0 + i + 1) / n for i in range(len(vals))], where="post",
+            color="black", lw=1.4)
     ax.axvline(1.0, color="black", lw=1.2, ls="--")
     ax.scatter([1.0], [result.pof], marker="o", c="white", edgecolors="black", linewidths=1.2, s=70, zorder=4)
     ax.set_ylim(0, 1.02)

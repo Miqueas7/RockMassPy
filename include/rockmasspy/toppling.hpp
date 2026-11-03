@@ -55,6 +55,7 @@ struct TopplingResult {
     double factor_of_safety, friction_required;
     TopplingForces forces;
     bool fs_bounded;
+    bool capped;  // FS en el tope de 100: cota inferior
     MethodInfo info;
     std::vector<std::string> warnings, notes;
 };
@@ -185,17 +186,16 @@ inline TopplingResult toppling_fs(const TopplingInput& in) {
     using namespace toppling_detail;
     check(in);
     const double tphi = std::tan(rad(in.friction_deg)), lo0 = tphi / 100.0, hi0 = 1.0 - 1e-9;
-    TopplingResult r{0.0, 0.0, {}, false, info(), {}, {}};
+    TopplingResult r{0.0, 0.0, {}, false, false, info(), {}, {}};
     const auto req = [&](double mu) { return toppling_forces(in, mu); };
     double mu;
     const TopplingForces at_lo = req(lo0);
-    bool capped = false;
     if (at_lo.support_required <= in.support_force) {
         mu = lo0;
         r.forces = at_lo;
         r.factor_of_safety = 100.0;
         r.notes.push_back("toppling FS above 100");
-        capped = true;  // mu artificial: no se evalúan (8)-(9)
+        r.capped = true;  // mu artificial: no se evalúan (8)-(9)
     } else {
         const TopplingForces at_hi = req(hi0);
         if (at_hi.support_required > in.support_force) {
@@ -218,7 +218,7 @@ inline TopplingResult toppling_fs(const TopplingInput& in) {
     r.friction_required = mu;
     int fails = 0;
     for (const auto& b : r.forces.blocks) {
-        if (capped) break;
+        if (r.capped) break;
         const double w = in.unit_weight * in.block_width_m * b.height_m;
         fails += b.normal <= kTol * w ||
                  (b.state != TopplingState::Sliding && b.shear < 0.0 && -b.shear >= (mu - kTol) * b.normal);

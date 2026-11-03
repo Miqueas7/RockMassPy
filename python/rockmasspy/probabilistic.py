@@ -146,20 +146,22 @@ class ProbabilisticResult:
     info: rm.MethodInfo
     warnings: tuple[str, ...]
     notes: tuple[str, ...]
+    excluded: tuple[int, ...] = ()  # índices de muestras con FS acotado (tope o cota superior): fuera de la estadística
 
 
 def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: int, seed: int,
                  variables: Sequence[str], extra_warnings: Sequence[str] = (),
                  extra_notes: Sequence[str] | None = None, capped: Collection[int] = (),
                  upper_bounds: Collection[int] = ()) -> ProbabilisticResult:
-    """Estadística de las muestras. `capped` y `upper_bounds` son índices de `fs`: un FS en el tope del modelo (cota
-    inferior) cuenta como estable y sale de la estadística, como el infinito; un FS que solo es cota superior cuenta
-    como falla, el lado menos favorable."""
+    """Estadística de las muestras. `capped` y `upper_bounds` son índices de `fs`, y una cota no es un FS: las dos
+    salen de la media, la desviación, el mínimo, el máximo y los índices. En la PoF cuentan del lado que se conoce: el
+    tope (cota inferior) como estable, como el infinito; la cota superior como falla, el lado menos favorable."""
     valid = [f for f in fs if f is not None]
     if any(math.isnan(f) or f == -math.inf for f in valid):
         raise ValueError("fs: values must not be NaN or -inf")
     capped, upper_bounds = set(capped), set(upper_bounds)
-    finite = [f for i, f in enumerate(fs) if f is not None and math.isfinite(f) and i not in capped]
+    excluded = capped | upper_bounds
+    finite = [f for i, f in enumerate(fs) if f is not None and math.isfinite(f) and i not in excluded]
     failed = sum(i in upper_bounds or is_failure(f) for i, f in enumerate(fs) if f is not None)
     mean = math.fsum(finite) / len(finite) if finite else None
     sd = math.sqrt(math.fsum((f - mean) ** 2 for f in finite) / (len(finite) - 1)) if len(finite) > 1 else None
@@ -180,12 +182,16 @@ def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: in
         notes.append(f"{k} samples with no driving force counted as stable and left out of the FS statistics")
     if capped:
         notes.append(f"{len(capped)} of {n} samples have FS above the cap; excluded from the statistics")
+    if upper_bounds:
+        notes.append(f"{len(upper_bounds)} of {n} samples have FS only as an upper bound; counted as failures and "
+                     "excluded from the statistics")
     if not valid:  # un bloque que nunca se forma es nota, no aviso (R14)
         notes.append("no valid samples")
     return ProbabilisticResult(
         model, sampling, n, seed, tuple(variables), tuple(fs), len(valid), failed,
         failed / len(valid) if valid else None, mean, sd, min(finite) if finite else None,
-        max(finite) if finite else None, beta, beta_ln, PROBABILISTIC_INFO, tuple(extra_warnings), tuple(notes))
+        max(finite) if finite else None, beta, beta_ln, PROBABILISTIC_INFO, tuple(extra_warnings), tuple(notes),
+        tuple(sorted(excluded)))
 
 
 _MODELS = {"planar": (rm.PlanarInput, rm.planar_fs), "wedge": (rm.WedgeInput, rm.wedge_fs),
@@ -267,8 +273,9 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
             # la cota tan(phi)/(1 - 1e-9) nunca prueba FS > 1 (el mu requerido es >= 1): cuenta como falla
             if r.fs_bounded:
                 bounded.append(i)
-            elif r.factor_of_safety >= 100.0:  # tope del núcleo (toppling.hpp): cota inferior, como el infinito
+            elif r.capped:  # el tope solo trae su nota, que summarize_fs da una vez para todas las muestras
                 capped.append(i)
+                continue
         for w in set(map(_norm, r.warnings)):
             warns[w] = warns.get(w, 0) + 1
         if r.factor_of_safety is None:  # el motivo de no formarse va en la nota del bloque

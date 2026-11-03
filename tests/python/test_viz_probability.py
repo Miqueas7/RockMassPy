@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("matplotlib")
 from matplotlib.text import Text
 
-from rockmasspy.probabilistic import run_probabilistic, summarize_fs
+from rockmasspy.probabilistic import run_probabilistic, summarize_fs, uniform
 from rockmasspy.viz import Style, plot_fs_cdf, plot_fs_histogram
 from rockmasspy.viz.save import save_figure
 from rockmasspy.viz.style import TEXTS
@@ -118,6 +118,9 @@ def _allowed(res, lang):
     ok.add(f"{TEXTS['prob_seed'][lang]} {res.seed}")
     k = sum(1 for f in res.fs if f is not None and f == float("inf"))
     ok.add(TEXTS["prob_infinite"][lang].format(k=k))
+    if res.excluded:
+        ok.add(TEXTS["prob_excluded"][lang].format(k=len(res.excluded), f=res.n_failed - sum(
+            1 for i, f in enumerate(res.fs) if i not in res.excluded and f is not None and f < 1 + 1e-9)))
     ok.add(f"{TEXTS['prob_pof'][lang]} = {res.pof * 100:.1f} %" if res.pof is not None else "")
     return ok
 
@@ -127,7 +130,7 @@ def _allowed(res, lang):
 def test_all_text_from_texts_or_numbers(res, plot, lang):
     inf = summarize_fs([0.5, 2.0, float("inf"), float("inf"), None], model="planar", sampling="lhs", n=5,
                        seed=1, variables=("x",))
-    for r in (res, inf):
+    for r in (res, inf, _mixed()):
         ok = _allowed(r, lang)
         for t in _textos(plot(r, style=Style(lang=lang))):
             for part in t.split(" | "):
@@ -168,3 +171,47 @@ def test_no_identifier_leak(res, plot, tmp_path):
     fig = plot(res, title="Bloque 1")
     p = save_figure(fig, tmp_path / "f.svg")
     assert "ZZSENT" not in p.read_text(encoding="utf-8")
+
+
+# --- R1: cotas del volteo fuera de la estadística y de la figura ---
+
+def _vo_bounded():
+    import rockmasspy as rm
+    i = rm.TopplingInput()  # probe9: alfa 45, sin soporte; ningún mu < 1 alcanza
+    i.heights_m = rm.goodman_bray_heights(16, 10, 5, 5, 0.5)
+    i.block_width_m, i.base_dip_deg, i.a1_m, i.a2_m, i.crest_block = 10, 45, 5, 5, 10
+    i.unit_weight, i.friction_deg = 25, 55
+    return run_probabilistic("toppling", i, {"friction_deg": uniform(40, 60)}, n=400)
+
+
+def _mixed():
+    # 2 drawn (0.5 falla, 2.0 estable), índice 2 cota superior (falla), índice 3 tope (estable)
+    return summarize_fs([0.5, 2.0, 1.3, 100.0], model="toppling", sampling="lhs", n=4, seed=1, variables=("x",),
+                        capped=[3], upper_bounds=[2])
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_bounded_samples_are_not_drawn_but_counted(lang):
+    for r, k, f in ((_vo_bounded(), 400, 400), (_mixed(), 2, 1)):
+        note = TEXTS["prob_excluded"][lang].format(k=k, f=f)
+        h = plot_fs_histogram(r, style=Style(lang=lang))
+        bars = [p for p in h.axes[0].patches if p.get_hatch()]
+        assert round(sum(p.get_height() for p in bars)) + f == r.n_failed  # la figura cuenta n_failed
+        drawn = round(sum(p.get_height() for p in h.axes[0].patches))
+        assert drawn == r.n_valid - k
+        assert note in _textos(h)
+        c = plot_fs_cdf(r, style=Style(lang=lang))
+        assert note in _textos(c)
+        if r.fs_mean is not None:
+            ys = c.axes[0].lines[0].get_ydata()
+            xs = c.axes[0].lines[0].get_xdata()
+            assert max(y for x, y in zip(xs, ys) if x <= 1.0) == pytest.approx(r.pof)  # la curva corta FS = 1 en la PoF
+    r = _vo_bounded()
+    assert r.pof == 1 and r.n_failed == 400 and r.reliability_index is None
+    assert "prob_excluded" in TEXTS and "{k}" in TEXTS["prob_excluded"]["es"]
+    assert "cota o tope" in TEXTS["prob_excluded"]["es"] and "bound or cap" in TEXTS["prob_excluded"]["en"]
+
+
+def test_capped_samples_not_drawn_at_100():
+    ax = plot_fs_histogram(_mixed()).axes[0]
+    assert ax.get_xlim()[1] < 50

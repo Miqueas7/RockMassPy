@@ -162,6 +162,8 @@ TEXTS: dict[str, dict[str, str]] = {
     "prob_pof_at_one": {"es": "PoF leída en FS = 1", "en": "PoF read at FS = 1"},
     "prob_infinite": {"es": "{k} muestras con FS infinito (no se dibujan)",
                       "en": "{k} samples with infinite FS (not drawn)"},
+    "prob_excluded": {"es": "{k} muestras fuera de la estadística (cota o tope); {f} cuentan como falla",
+                      "en": "{k} samples outside the statistics (bound or cap); {f} count as failures"},
     "prob_fs": {"es": "Factor de seguridad (FS)", "en": "Factor of safety (FS)"},
     "prob_frequency": {"es": "Número de muestras", "en": "Number of samples"},
     "prob_cumulative": {"es": "Probabilidad acumulada del FS", "en": "Cumulative probability of FS"},

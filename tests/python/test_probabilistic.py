@@ -183,7 +183,8 @@ def test_core_warnings_aggregated():
 def test_toppling_notes_and_grouped_counts():
     from test_toppling_core import ex1
     r = run_probabilistic("toppling", ex1(60, 0.0), {"support_force": uniform(0, 1e9)}, n=100)
-    assert any(n.startswith("toppling FS above 100 (") and n.endswith(" of 100 samples)") for n in r.notes)
+    k = sum(1 for f in r.fs if f == 100.0)
+    assert r.notes == (f"{k} of 100 samples have FS above the cap; excluded from the statistics",)  # una sola nota
     i = ex1(20, 0.0)
     i.base_dip_deg = 60
     r = run_probabilistic("toppling", i, {"friction_deg": uniform(15, 25)}, n=60)
@@ -248,6 +249,7 @@ def test_toppling_cap_is_left_out_of_the_statistics():
     assert capped and rest
     assert r.fs_max < 100 and r.fs_mean == pytest.approx(math.fsum(rest) / len(rest))
     assert r.n_failed == sum(is_failure(f) for f in rest) and r.n_valid == 200  # el tope cuenta como estable
+    assert r.excluded == tuple(i for i, f in enumerate(r.fs) if f >= 100)
     assert f"{len(capped)} of 200 samples have FS above the cap; excluded from the statistics" in r.notes
     assert r.reliability_index == pytest.approx((r.fs_mean - 1) / r.fs_sd)
 
@@ -266,6 +268,10 @@ def test_toppling_upper_bound_counts_as_failure():
     assert d.fs_bounded and d.factor_of_safety > 1  # la cota no prueba FS > 1
     r = run_probabilistic("toppling", _bounded(55), {"friction_deg": uniform(40, 60)}, n=400)
     assert r.pof == 1 and r.n_failed == 400
+    # la cota no es un FS: fuera de la estadística, como el tope (R1)
+    assert r.excluded == tuple(range(400)) and r.fs_mean is None and r.fs_min is None and r.reliability_index is None
+    assert ("400 of 400 samples have FS only as an upper bound; counted as failures and excluded from the statistics"
+            in r.notes)
     assert any(w.startswith("toppling: support is insufficient") and w.endswith("(400 of 400 samples)")
                for w in r.warnings)
 

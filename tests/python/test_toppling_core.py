@@ -70,12 +70,12 @@ def test_zero_force_top_block_is_toppling():
 
 def test_bounds():
     r = rm.toppling_fs(ex1(60, 1e9))
-    assert r.factor_of_safety == 100 and not r.fs_bounded and "toppling FS above 100" in r.notes
+    assert r.factor_of_safety == 100 and not r.fs_bounded and r.capped and "toppling FS above 100" in r.notes
     assert list(r.warnings) == []
     i = ex1(20, 0.0)
     i.base_dip_deg = 60
     r = rm.toppling_fs(i)
-    assert r.fs_bounded and r.factor_of_safety < math.tan(math.radians(20)) + 1e-6
+    assert r.fs_bounded and not r.capped and r.factor_of_safety < math.tan(math.radians(20)) + 1e-6
     assert any("support is insufficient" in w for w in r.warnings)
 
 

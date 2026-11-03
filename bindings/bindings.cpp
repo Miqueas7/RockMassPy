@@ -571,7 +571,7 @@ NB_MODULE(_rockmasspy_core, m) {
     nb::class_<TopplingResult>(m, "TopplingResult", "Toppling factor of safety (FS = mu available / mu required).")
         .def_ro("factor_of_safety", &TopplingResult::factor_of_safety)
         .def_ro("friction_required", &TopplingResult::friction_required).def_ro("forces", &TopplingResult::forces)
-        .def_ro("fs_bounded", &TopplingResult::fs_bounded).def_ro("info", &TopplingResult::info)
+        .def_ro("fs_bounded", &TopplingResult::fs_bounded).def_ro("capped", &TopplingResult::capped).def_ro("info", &TopplingResult::info)
         .def_ro("warnings", &TopplingResult::warnings).def_ro("notes", &TopplingResult::notes);
     m.def("goodman_bray_heights", &goodman_bray_heights, nb::arg("n_blocks"), nb::arg("crest_block"), nb::arg("a1_m"),
           nb::arg("a2_m"), nb::arg("b_m"));
