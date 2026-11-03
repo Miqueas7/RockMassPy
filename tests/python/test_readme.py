@@ -122,3 +122,18 @@ def test_readme_slope_example(archivo, titulo):
     with contextlib.redirect_stdout(salida):
         exec(compile(codigo[0], archivo, "exec"), {})
     assert salida.getvalue().splitlines() == esperado
+
+
+BSECCION = [("README.md", "## Rock blocks, probability of failure and bench–berm design"),
+            ("README.es.md", "## Bloques en roca, probabilidad de falla y diseño banco–berma")]
+
+
+@pytest.mark.parametrize("archivo,titulo", BSECCION)
+def test_readme_blocks_example(archivo, titulo):
+    codigo = bloques(archivo, titulo)
+    assert len(codigo) == 1, f"{archivo}: expected one python block under {titulo!r}"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[0].splitlines() if ln.startswith("print(") and "#" in ln]
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        exec(compile(codigo[0], archivo, "exec"), {})
+    assert salida.getvalue().splitlines() == esperado
