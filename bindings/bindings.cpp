@@ -26,6 +26,7 @@
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
 #include "rockmasspy/wedge.hpp"
+#include "rockmasspy/toppling.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -542,4 +543,37 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("resisting_force", &WedgeResult::resisting_force).def_ro("info", &WedgeResult::info)
         .def_ro("warnings", &WedgeResult::warnings).def_ro("notes", &WedgeResult::notes);
     m.def("wedge_fs", &wedge_fs, nb::arg("input"));
+
+    // Volteo de bloques de Goodman y Bray
+    nb::enum_<TopplingState>(m, "TopplingState", "Failure state of a block: Stable, Toppling or Sliding.")
+        .value("Stable", TopplingState::Stable).value("Toppling", TopplingState::Toppling)
+        .value("Sliding", TopplingState::Sliding);
+    nb::class_<TopplingInput>(m, "TopplingInput", "Block toppling: block heights from the toe, geometry, strength and toe support.")
+        .def(nb::init<>())
+        .def_rw("heights_m", &TopplingInput::heights_m).def_rw("block_width_m", &TopplingInput::block_width_m)
+        .def_rw("base_dip_deg", &TopplingInput::base_dip_deg).def_rw("a1_m", &TopplingInput::a1_m)
+        .def_rw("a2_m", &TopplingInput::a2_m).def_rw("crest_block", &TopplingInput::crest_block)
+        .def_rw("unit_weight", &TopplingInput::unit_weight).def_rw("friction_deg", &TopplingInput::friction_deg)
+        .def_rw("support_force", &TopplingInput::support_force)
+        .def_rw("support_angle_deg", &TopplingInput::support_angle_deg)
+        .def_rw("support_height_m", &TopplingInput::support_height_m);
+    nb::class_<TopplingBlock>(m, "TopplingBlock", "Forces and state of one block (n = 1 is the toe block).")
+        .def_ro("n", &TopplingBlock::n).def_ro("height_m", &TopplingBlock::height_m)
+        .def_ro("m_m", &TopplingBlock::m_m).def_ro("l_m", &TopplingBlock::l_m)
+        .def_ro("p_toppling", &TopplingBlock::p_toppling).def_ro("p_sliding", &TopplingBlock::p_sliding)
+        .def_ro("p_lower", &TopplingBlock::p_lower).def_ro("normal", &TopplingBlock::normal)
+        .def_ro("shear", &TopplingBlock::shear).def_ro("state", &TopplingBlock::state);
+    nb::class_<TopplingForces>(m, "TopplingForces", "Block forces from the crest down and the support needed at the toe.")
+        .def_ro("blocks", &TopplingForces::blocks).def_ro("support_toppling", &TopplingForces::support_toppling)
+        .def_ro("support_sliding", &TopplingForces::support_sliding)
+        .def_ro("support_required", &TopplingForces::support_required);
+    nb::class_<TopplingResult>(m, "TopplingResult", "Toppling factor of safety (FS = mu available / mu required).")
+        .def_ro("factor_of_safety", &TopplingResult::factor_of_safety)
+        .def_ro("friction_required", &TopplingResult::friction_required).def_ro("forces", &TopplingResult::forces)
+        .def_ro("fs_bounded", &TopplingResult::fs_bounded).def_ro("info", &TopplingResult::info)
+        .def_ro("warnings", &TopplingResult::warnings).def_ro("notes", &TopplingResult::notes);
+    m.def("goodman_bray_heights", &goodman_bray_heights, nb::arg("n_blocks"), nb::arg("crest_block"), nb::arg("a1_m"),
+          nb::arg("a2_m"), nb::arg("b_m"));
+    m.def("toppling_forces", &toppling_forces, nb::arg("input"), nb::arg("mu"));
+    m.def("toppling_fs", &toppling_fs, nb::arg("input"));
 }
