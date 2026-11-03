@@ -27,6 +27,7 @@
 #include "rockmasspy/stereonet.hpp"
 #include "rockmasspy/wedge.hpp"
 #include "rockmasspy/toppling.hpp"
+#include "rockmasspy/bench.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -576,4 +577,18 @@ NB_MODULE(_rockmasspy_core, m) {
           nb::arg("a2_m"), nb::arg("b_m"));
     m.def("toppling_forces", &toppling_forces, nb::arg("input"), nb::arg("mu"));
     m.def("toppling_fs", &toppling_fs, nb::arg("input"));
+
+    // Banco-berma
+    nb::class_<RitchieWidth>(m, "RitchieWidth", "Modified Ritchie minimum berm width (0.2 H + 4.5).")
+        .def_ro("width_m", &RitchieWidth::width_m).def_ro("info", &RitchieWidth::info);
+    nb::class_<BermReliability>(m, "BermReliability", "Share of benches whose berm width exceeds the criterion.")
+        .def_ro("reliability", &BermReliability::reliability).def_ro("n", &BermReliability::n)
+        .def_ro("n_meeting", &BermReliability::n_meeting).def_ro("width_mean", &BermReliability::width_mean)
+        .def_ro("width_min", &BermReliability::width_min).def_ro("width_max", &BermReliability::width_max)
+        .def_ro("info", &BermReliability::info);
+    m.def("ritchie_berm_width", &ritchie_berm_width, nb::arg("bench_height_m"));
+    m.def("bench_width", &bench_width, nb::arg("bench_height_m"), nb::arg("interramp_deg"), nb::arg("face_angle_deg"));
+    m.def("interramp_angle", &interramp_angle, nb::arg("bench_height_m"), nb::arg("berm_width_m"),
+          nb::arg("face_angle_deg"));
+    m.def("berm_reliability", &berm_reliability, nb::arg("widths_m"), nb::arg("required_width_m"));
 }
