@@ -32,6 +32,10 @@ def _base(res, title, style, key):
         return fig, None
     ax.text(0.02, 0.96, f"{text('prob_pof', lang)} = {res.pof * 100:.1f} %", transform=ax.transAxes,
             ha="left", va="top", fontsize=style.font_size + 2, fontweight="bold")
+    k = sum(1 for f in res.fs if f is not None and math.isinf(f))
+    if k:  # válidas y estables, pero sin posición en el eje
+        ax.text(0.02, 0.89, text("prob_infinite", lang).format(k=k), transform=ax.transAxes, ha="left",
+                va="top", fontsize=style.font_size - 1)
     return fig, ax
 
 
@@ -50,13 +54,17 @@ def plot_fs_histogram(result: ProbabilisticResult, *, title: str = "", bins: int
     if hi == lo:
         lo, hi = lo - 0.5, hi + 0.5
     w = (hi - lo) / bins
-    fail, ok = [0] * bins, [0] * bins
+    nl, nr = max(1, math.ceil((1 - lo) / w - 1e-9)), max(1, math.ceil((hi - 1) / w - 1e-9))
+    fail, ok = [0] * nl, [0] * nr  # FS = 1 es borde: a su izquierda solo hay fallas, a su derecha solo estables
     for f in vals:
-        (fail if is_failure(f) else ok)[min(int((f - lo) / w), bins - 1)] += 1
-    xs = [lo + i * w for i in range(bins)]
+        if is_failure(f):
+            fail[min(max(math.floor((f - (1 - nl * w)) / w), 0), nl - 1)] += 1
+        else:
+            ok[min(max(math.floor((f - 1) / w), 0), nr - 1)] += 1
+    xf, xo = [1 - (nl - i) * w for i in range(nl)], [1 + i * w for i in range(nr)]
     c_ok, c_fail = support_color(1, 2, style), support_color(2, 2, style)
-    ax.bar(xs, fail, width=w, align="edge", color=c_fail, edgecolor="black", linewidth=0.4, hatch="//")
-    ax.bar(xs, ok, width=w, align="edge", bottom=fail, color=c_ok, edgecolor="black", linewidth=0.4)
+    ax.bar(xf, fail, width=w, align="edge", color=c_fail, edgecolor="black", linewidth=0.4, hatch="//")
+    ax.bar(xo, ok, width=w, align="edge", color=c_ok, edgecolor="black", linewidth=0.4)
     ax.axvline(1.0, color="black", lw=1.5, ls="--")
     ax.set_ylabel(text("prob_frequency", lang), fontsize=style.font_size)
     ax.legend(handles=[Patch(facecolor=c_fail, edgecolor="black", hatch="//", label=text("prob_failure", lang)),
@@ -82,6 +90,6 @@ def plot_fs_cdf(result: ProbabilisticResult, *, title: str = "", style: Style = 
     ax.set_ylim(0, 1.02)
     ax.set_ylabel(text("prob_cumulative", lang), fontsize=style.font_size)
     ax.legend(handles=[Line2D([], [], ls="", marker="o", markersize=8, markerfacecolor="white",
-                              markeredgecolor="black", label=f"{text('prob_pof', lang)} (FS = 1)")],
+                              markeredgecolor="black", label=text("prob_pof_at_one", lang))],
               loc="lower right", fontsize=style.font_size - 1)
     return fig

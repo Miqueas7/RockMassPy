@@ -111,11 +111,56 @@ def test_bins_and_matplotlib_message(res):
     assert "rockmasspy[viz]" in out.stderr
 
 
-def test_all_text_from_texts_or_numbers(res, tmp_path):
-    fig = plot_fs_histogram(res, style=Style(lang="en"))
-    allowed = {v["en"] for v in TEXTS.values()}
-    for t in _textos(fig):
-        assert t in allowed or re.fullmatch(r"[-\d.,− ]+", t) or res.info.method_id in t or t.startswith("PoF"), t
+def _allowed(res, lang):
+    ok = {v[lang] for k, v in TEXTS.items() if "{" not in v[lang]}
+    ok.add(res.info.method_id)
+    ok.add(TEXTS["prob_samples"][lang].format(valid=res.n_valid, n=res.n))
+    ok.add(f"{TEXTS['prob_seed'][lang]} {res.seed}")
+    k = sum(1 for f in res.fs if f is not None and f == float("inf"))
+    ok.add(TEXTS["prob_infinite"][lang].format(k=k))
+    ok.add(f"{TEXTS['prob_pof'][lang]} = {res.pof * 100:.1f} %" if res.pof is not None else "")
+    return ok
+
+
+@pytest.mark.parametrize("plot", FIGS)
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_all_text_from_texts_or_numbers(res, plot, lang):
+    inf = summarize_fs([0.5, 2.0, float("inf"), float("inf"), None], model="planar", sampling="lhs", n=5,
+                       seed=1, variables=("x",))
+    for r in (res, inf):
+        ok = _allowed(r, lang)
+        for t in _textos(plot(r, style=Style(lang=lang))):
+            for part in t.split(" | "):
+                assert part in ok or re.fullmatch(r"[\d.−-]+", part), part
+
+
+def test_inf_note_both_languages():
+    r = summarize_fs([0.5, 2.0, float("inf"), float("inf")], model="planar", sampling="lhs", n=4, seed=1,
+                     variables=("x",))
+    for plot in FIGS:
+        for lang in ("es", "en"):
+            assert TEXTS["prob_infinite"][lang].format(k=2) in _textos(plot(r, style=Style(lang=lang)))
+    assert TEXTS["prob_infinite"]["es"].format(k=1) not in _textos(plot_fs_histogram(
+        summarize_fs([0.5, 2.0], model="planar", sampling="lhs", n=2, seed=1, variables=("x",))))
+
+
+def test_all_infinite():
+    r = summarize_fs([float("inf")] * 3, model="planar", sampling="lhs", n=3, seed=1, variables=("x",))
+    assert r.n_valid == 3 and r.pof == 0
+    for plot in FIGS:
+        t = _textos(plot(r))
+        assert "PoF = 0.0 %" in t and TEXTS["prob_infinite"]["es"].format(k=3) in t
+
+
+@pytest.mark.parametrize("bins", [1, 3, 40])
+def test_one_is_bin_edge_and_no_mixed_bars(res, bins):
+    ax = plot_fs_histogram(res, bins=bins).axes[0]
+    edges = [e for p in ax.patches for e in (p.get_x(), p.get_x() + p.get_width())]
+    assert any(abs(e - 1.0) < 1e-12 for e in edges)
+    for p in ax.patches:  # ninguna barra cruza FS = 1; las rayadas quedan a la izquierda
+        assert p.get_x() + p.get_width() <= 1 + 1e-12 or p.get_x() >= 1 - 1e-12
+        assert bool(p.get_hatch()) == (p.get_x() < 1 - 1e-12)
+    assert round(sum(p.get_height() for p in ax.patches if p.get_hatch())) == res.n_failed
 
 
 @pytest.mark.parametrize("plot", FIGS)
