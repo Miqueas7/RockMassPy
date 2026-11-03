@@ -68,3 +68,6 @@ from .design_inputs import (DESIGN_SHEETS, DesignInputs, PedestrianRefugeSpacing
 from .verify import STATUSES, Finding, VerificationResult  # noqa: E402,F401  (la función `verify` taparía el módulo: se usa desde rockmasspy.verify)
 from . import q_slope_tables  # noqa: E402,F401
 from . import probabilistic  # noqa: E402,F401
+from .blocks import (BLOCK_COLUMNS, DISTRIBUTION_COLUMNS, BermResult, BlockResult, BlockRow,  # noqa: E402,F401
+                     DistributionRow, assess_blocks, block_attention, block_counts, load_blocks, load_distributions,
+                     save_block_results)
