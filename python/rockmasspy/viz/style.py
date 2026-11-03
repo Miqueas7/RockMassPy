@@ -156,6 +156,19 @@ TEXTS: dict[str, dict[str, str]] = {
     "stereo_oblique_zone": {"es": "Zona oblicua", "en": "Oblique zone"},
     "stereo_feasibility": {"es": "factibilidad, no probabilidad", "en": "feasibility, not probability"},
     "mixed_datums": {"es": "datums mixtos", "en": "mixed datums"},
+    "prob_hist_title": {"es": "Distribución del factor de seguridad", "en": "Factor of safety distribution"},
+    "prob_cdf_title": {"es": "Probabilidad de falla acumulada", "en": "Cumulative probability of failure"},
+    "prob_fs": {"es": "Factor de seguridad (FS)", "en": "Factor of safety (FS)"},
+    "prob_frequency": {"es": "Número de muestras", "en": "Number of samples"},
+    "prob_cumulative": {"es": "Proporción acumulada de muestras", "en": "Cumulative share of samples"},
+    "prob_pof": {"es": "PoF", "en": "PoF"},
+    "prob_failure": {"es": "Falla (FS ≤ 1)", "en": "Failure (FS ≤ 1)"},
+    "prob_stable": {"es": "Estable (FS > 1)", "en": "Stable (FS > 1)"},
+    "prob_samples": {"es": "{valid} de {n} muestras válidas", "en": "{valid} of {n} valid samples"},
+    "prob_seed": {"es": "semilla", "en": "seed"},
+    "prob_lhs": {"es": "hipercubo latino", "en": "Latin hypercube"},
+    "prob_monte_carlo": {"es": "Monte Carlo simple", "en": "plain Monte Carlo"},
+    "prob_no_valid": {"es": "Ninguna muestra formó un bloque válido", "en": "No sample formed a valid block"},
 }
 
 
