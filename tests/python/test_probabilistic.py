@@ -52,6 +52,8 @@ def test_lhs_stratification():
     assert list(s) == ["a", "b"]
     for v in s.values():
         assert sorted(math.floor(u * 50) for u in v) == list(range(50))
+    ranks = [[math.floor(u * 50) for u in v] for v in s.values()]
+    assert ranks[0] != ranks[1]  # permutaciones independientes por variable
 
 
 def test_sample_errors():
@@ -116,8 +118,9 @@ def test_unformed_planar_samples():
     i.tension_crack_distance_m = 0.0
     r = run_probabilistic("planar", i, {"plane_dip_deg": uniform(45, 55)}, n=400)
     assert 0 < r.fs.count(None) < 400 and r.n_valid == 400 - r.fs.count(None)
-    assert any("did not form a block and were excluded" in n for n in r.notes)
-    assert r.n_failed <= r.n_valid
+    k = r.fs.count(None)
+    assert any(n.startswith(f"{k} of 400 samples do not form a block (planar block not formed") for n in r.notes)
+    assert r.n == 400 and r.n_valid < r.n and r.pof == r.n_failed / r.n_valid
 
 
 def test_infinite_fs_and_n1():
@@ -141,10 +144,69 @@ def test_toppling_runs():
 def test_unknown_names_and_model():
     with pytest.raises(ValueError) as e:
         run_probabilistic("planar", smp_base(), {"friccion": uniform(0, 1)}, n=5)
-    assert "friction_deg" in str(e.value)
+    assert "friction_deg" in str(e.value) and "friccion" not in str(e.value)
     with pytest.raises(ValueError):
         run_probabilistic("wedge", cu2(), {"joint3.cohesion": uniform(0, 1)}, n=5)
     with pytest.raises(ValueError):
         run_probabilistic("nope", smp_base(), {}, n=5)
     with pytest.raises(ValueError):
         run_probabilistic("planar", smp_base(), SMP_VARS, n=5, sampling="sobol")
+
+
+def test_wedge_joint_variable_named_without_value():
+    with pytest.raises(ValueError) as e:
+        run_probabilistic("wedge", cu2(), {"joint1.friction_deg": uniform(95, 99)}, n=5)
+    m = str(e.value)
+    assert m.startswith("variable 'joint1.friction_deg':") and "Received" not in m
+    assert not any(ch.isdigit() for ch in m.replace("joint1", ""))
+
+
+def test_error_not_blamed_on_unsampled_field():
+    i = smp_base()
+    i.friction_deg = 95.0  # campo fijo malo; la variable muestreada es otra
+    with pytest.raises(ValueError) as e:
+        run_probabilistic("planar", i, {"cohesion": uniform(5, 15)}, n=5)
+    assert "variable" not in str(e.value) and "Received" not in str(e.value)
+
+
+def test_core_warnings_aggregated():
+    r = run_probabilistic("wedge", cu2(), {"joint1.water_pressure": uniform(0, 0.1)}, n=500)
+    k = sum(1 for f in r.fs if f == 0)
+    assert 0 < k < 500 and f"wedge lifts off both joints ({k} of 500 samples)" in r.warnings
+    i = smp_base()
+    i.water_fill = 1.0
+    r = run_probabilistic("planar", i, {"water_unit_weight": uniform(1, 10)}, n=200)
+    w = [x for x in r.warnings if x.startswith("effective normal force on the plane is negative")]
+    assert len(w) == 1 and w[0].endswith(" of 200 samples)") and "Received" not in w[0]
+
+
+def test_toppling_notes_and_grouped_counts():
+    from test_toppling_core import ex1
+    r = run_probabilistic("toppling", ex1(60, 0.0), {"support_force": uniform(0, 1e9)}, n=100)
+    assert any(n.startswith("toppling FS above N (") and n.endswith(" of 100 samples)") for n in r.notes)
+    i = ex1(20, 0.0)
+    i.base_dip_deg = 60
+    r = run_probabilistic("toppling", i, {"friction_deg": uniform(15, 25)}, n=60)
+    assert r.warnings and all(w.endswith(" of 60 samples)") for w in r.warnings)
+    assert len(set(r.warnings)) == len(r.warnings)
+    from rockmasspy.probabilistic import _norm
+    assert _norm("fail in 12 blocks") == _norm("fail in 5 blocks") == "fail in N blocks"
+
+
+def test_sampling_an_unset_optional_field():
+    i = smp_base()
+    i.tension_crack_distance_m = None
+    r = run_probabilistic("planar", i, {"tension_crack_distance_m": uniform(5, 20)}, n=30)
+    assert r.n_valid == 30 and i.tension_crack_distance_m is None
+
+
+def test_distribution_rejects_foreign_params():
+    with pytest.raises(ValueError):
+        pb.Distribution("uniform", 0, 1, mean=5)
+    with pytest.raises(ValueError):
+        pb.Distribution("exponential", 0, 1, mean=0.5, sd=1)
+
+
+def test_clone_keeps_orientations():
+    w = pb._clone(cu2())
+    assert repr(w) == repr(cu2()) and w.face.dip_direction_deg == 230 and w.external_direction.plunge_deg == 70

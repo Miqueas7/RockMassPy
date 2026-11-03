@@ -2,6 +2,8 @@
 
 El azar sale solo de `random.Random(seed).random()` (secuencia estable entre versiones de Python) y de
 `statistics.NormalDist`; el FS de cada muestra lo calcula el núcleo C++. Fuente: Hoek (2023) PRE cap. 9.
+Independencia de plataforma: la secuencia de `random()` es exacta; las funciones trascendentes del núcleo C++ (sin,
+cos, atan, ...) pueden diferir en 1 ulp entre plataformas, así que un FS puede variar en ~1e-15 relativo.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import enum
 import math
 import random
+import re
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -46,7 +49,11 @@ class Distribution:
         if self.minimum >= self.maximum:
             raise ValueError(f"{k} distribution: minimum must be below maximum")
         if k == "uniform":
+            if self.mean is not None or self.sd is not None:
+                raise ValueError("uniform distribution takes no mean or sd")
             return
+        if k == "exponential" and self.sd is not None:
+            raise ValueError("exponential distribution takes no sd")
         if self.mean is None:
             raise ValueError(f"{k} distribution: mean is required")
         if k == "normal" and (self.sd is None or self.sd <= 0):
@@ -142,7 +149,8 @@ class ProbabilisticResult:
 
 
 def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: int, seed: int,
-                 variables: Sequence[str]) -> ProbabilisticResult:
+                 variables: Sequence[str], extra_warnings: Sequence[str] = (),
+                 extra_notes: Sequence[str] | None = None) -> ProbabilisticResult:
     valid = [f for f in fs if f is not None]
     if any(math.isnan(f) for f in valid):
         raise ValueError("FS values must not be NaN")
@@ -156,8 +164,9 @@ def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: in
         beta = (mean - 1) / sd
         beta_ln = math.log(mean / math.sqrt(1 + v * v)) / math.sqrt(math.log(1 + v * v))
     notes, k = [], len(fs) - len(valid)
-    if k:
+    if k and extra_notes is None:  # run_probabilistic da su propia nota con el motivo del núcleo
         notes.append(f"{k} samples did not form a block and were excluded")
+    notes = list(extra_notes or ()) + notes
     k = len(valid) - len(finite)
     if k:
         notes.append(f"{k} samples with no driving force counted as stable and left out of the FS statistics")
@@ -165,7 +174,7 @@ def summarize_fs(fs: Sequence[float | None], *, model: str, sampling: str, n: in
         model, sampling, n, seed, tuple(variables), tuple(fs), len(valid), failed,
         failed / len(valid) if valid else None, mean, sd, min(finite) if finite else None,
         max(finite) if finite else None, beta, beta_ln, PROBABILISTIC_INFO,
-        () if valid else ("no valid samples",), tuple(notes))
+        tuple(extra_warnings) + (() if valid else ("no valid samples",)), tuple(notes))
 
 
 _MODELS = {"planar": (rm.PlanarInput, rm.planar_fs), "wedge": (rm.WedgeInput, rm.wedge_fs),
@@ -186,15 +195,16 @@ def _clone(obj):
     vals = {n: _clone(getattr(obj, n)) for n in _props(obj)}
     try:
         new = type(obj)()
-    except TypeError:  # sin constructor vacío (PlaneOrientation, LineOrientation): argumentos en orden
-        return type(obj)(*vals.values())
+    except TypeError:  # sin constructor vacío (PlaneOrientation, LineOrientation): por nombre
+        return type(obj)(**vals)
     for n, v in vals.items():
         setattr(new, n, v)
     return new
 
 
 def _valid_names(model: str, base) -> list[str]:
-    names = [n for n in _props(base) if isinstance(getattr(base, n), float)]
+    # un opcional vacío (None) se puede muestrear: la muestra aporta el valor
+    names = [n for n in _props(base) if isinstance(getattr(base, n), float) or getattr(base, n) is None]
     if model == "wedge":
         names += [f"{j}.{f}" for j in ("joint1", "joint2") for f in _JOINT_FIELDS]
     return sorted(names)
@@ -220,22 +230,42 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
     valid = _valid_names(model, base)
     for name in variables:
         if name not in valid:
-            raise ValueError(f"unknown variable '{name}' for model '{model}'; valid names: {', '.join(valid)}")
+            raise ValueError(f"unknown variable; allowed: {', '.join(valid)}")
     draws = sample(variables, n, sampling=sampling, seed=seed)
     names = tuple(draws)
     work = _clone(base)  # una copia de trabajo: la base no se toca
     fs: list[float | None] = []
+    warns: dict[str, int] = {}
+    notes: dict[str, int] = {}
+    reasons: dict[str, int] = {}
     for i in range(n):
         for name in names:
             _assign(work, name, draws[name][i])
         try:
-            fs.append(fn(work).factor_of_safety)
+            r = fn(work)
         except ValueError as e:
             msg = str(e)
-            hit = [v for v in names if f"'{v.split('.')[-1]}'" in msg]
-            if not hit:  # no viene de una variable muestreada: mensaje del núcleo sin el valor
+            hit = [v for v in names if f"parameter '{v}'" in msg]
+            if not hit:  # combinación con un campo fijo: mensaje del núcleo sin el valor
                 raise ValueError(msg.split("Received:")[0].strip()) from None
-            who = "' or '".join(hit)
-            raise ValueError(f"variable '{who}': a sampled value is outside the valid range of the model; "
+            raise ValueError(f"variable '{hit[0]}': a sampled value is outside the valid range of the model; "
                              "narrow its minimum and maximum") from None
-    return summarize_fs(fs, model=model, sampling=sampling, n=n, seed=seed, variables=names)
+        fs.append(r.factor_of_safety)
+        for w in set(map(_norm, r.warnings)):
+            warns[w] = warns.get(w, 0) + 1
+        if r.factor_of_safety is None:  # el motivo de no formarse va en la nota del bloque
+            for t in set(map(_norm, r.notes)) or {"no reason given"}:
+                reasons[t] = reasons.get(t, 0) + 1
+        else:
+            for t in set(map(_norm, r.notes)):
+                notes[t] = notes.get(t, 0) + 1
+    return summarize_fs(
+        fs, model=model, sampling=sampling, n=n, seed=seed, variables=names,
+        extra_warnings=[f"{t} ({k} of {n} samples)" for t, k in warns.items()],
+        extra_notes=[f"{k} of {n} samples do not form a block ({t})" for t, k in reasons.items()]
+        + [f"{t} ({k} of {n} samples)" for t, k in notes.items()])
+
+
+def _norm(text: str) -> str:
+    """Agrupa textos del núcleo que solo difieren en un conteo («fail in 3 blocks» y «fail in 5 blocks»)."""
+    return re.sub(r"\d+", "N", text)
