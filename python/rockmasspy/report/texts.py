@@ -384,6 +384,94 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "smr_mode_planar": {"es": "planar", "en": "planar"},
     "smr_mode_toppling": {"es": "volteo", "en": "toppling"},
     "smr_mode_wedge": {"es": "cuña", "en": "wedge"},
+    # --- Informe de taludes completo con criterios de aceptación (3D) ---
+    "sx_1": {"es": "Resumen ejecutivo", "en": "Executive summary"},
+    "sx_2": {"es": "Alcance y criterios", "en": "Scope and criteria"},
+    "sx_3": {"es": "Cinemática, SMR y Q-slope", "en": "Kinematics, SMR and Q-slope"},
+    "sx_4": {"es": "Bloques", "en": "Blocks"},
+    "sx_5": {"es": "Equilibrio límite y Sarma", "en": "Limit equilibrium and Sarma"},
+    "sx_6": {"es": "Verificación de criterios", "en": "Criteria check"},
+    "sx_7": {"es": "Normativa", "en": "Regulations"},
+    "sx_8": {"es": "Avisos y notas", "en": "Warnings and notes"},
+    "sx_9": {"es": "Métodos y anexos", "en": "Methods and appendices"},
+    "crit_scope": {
+        "es": "Este documento reúne los resultados de taludes de la librería (cinemática, SMR y Q-slope; bloques "
+              "planares, en cuña y de volteo con su análisis probabilístico y la berma; equilibrio límite 2D, Sarma, "
+              "ky y Newmark) y compara cada uno con el criterio de aceptación que eligió el usuario. Cada chequeo "
+              "dice «cumple», «no cumple» o «no verificable», con el criterio, su fuente, su fuerza (ley o guía) y "
+              "su marca. La librería recomienda y el ingeniero decide.",
+        "en": "This document gathers the library's slope results (kinematics, SMR and Q-slope; planar, wedge and "
+              "toppling blocks with their probabilistic analysis and the berm; 2D limit equilibrium, Sarma, ky and "
+              "Newmark) and compares each one with the acceptance criterion chosen by the user. Each check says "
+              "\"meets\", \"fails\" or \"not verifiable\", with the criterion, its source, its force (law or "
+              "guide) and its mark. The library recommends and the engineer decides.",
+    },
+    "crit_profile_only": {
+        "es": "No se eligió un perfil de criterios de aceptación: solo se revisa la normativa de la sección 7.",
+        "en": "No acceptance criteria profile was chosen: only the regulations of section 7 are checked.",
+    },
+    "cap_crit_summary": {"es": "Resumen por objeto: resultados y estado frente a cada criterio",
+                         "en": "Summary by object: results and status against each criterion"},
+    "cap_crit_profile": {"es": "Perfil de criterios de aceptación", "en": "Acceptance criteria profile"},
+    "cap_crit_checks": {"es": "Chequeos de criterios, uno por fila", "en": "Criteria checks, one per row"},
+    "cap_crit_normative": {"es": "Normativa: requisitos del perfil normativo", "en": "Regulations: requirements of the "
+                           "regulatory profile"},
+    "crit_counts": {"es": "Chequeos: {n}. Cumple: {meets}; no cumple: {fails}; no verificable: {not_verifiable}.",
+                    "en": "Checks: {n}. Meets: {meets}; fails: {fails}; not verifiable: {not_verifiable}."},
+    "crit_attention": {"es": "Piden atención los «no cumple», por regla: {why}.",
+                       "en": "The \"fails\" need attention, by rule: {why}."},
+    "crit_not_verifiable": {"es": "Chequeos no verificables: {n}. Son nota: la razón de cada uno está en la sección 6.",
+                            "en": "Checks not verifiable: {n}. They are notes: the reason for each one is in "
+                                  "section 6."},
+    "crit_normative_fails": {"es": "La normativa de la sección 7 tiene requisitos que no se cumplen: {n}.",
+                             "en": "The regulations of section 7 have requirements that are not met: {n}."},
+    "crit_no_profile": {"es": "No se pasó un perfil normativo.", "en": "No regulatory profile was given."},
+    "crit_no_blocks": {"es": "No se evaluaron bloques.", "en": "No blocks were assessed."},
+    "crit_no_le": {"es": "No se evaluaron análisis de equilibrio límite.",
+                   "en": "No limit equilibrium analyses were assessed."},
+    "crit_mark_V2": {
+        "es": "Marca V2: los valores de este perfil vienen de una fuente secundaria que reproduce la tabla original; "
+              "el original no se leyó. Conviene confirmarlos con la fuente antes de usarlos en un diseño.",
+        "en": "Mark V2: the values of this profile come from a secondary source that reproduces the original table; "
+              "the original was not read. Confirm them against the source before using them in a design.",
+    },
+    "crit_mark_user": {
+        "es": "Marca «user»: los criterios vienen de la tabla propia del usuario. La librería no verificó su fuente; "
+              "su respaldo es responsabilidad de quien los dio.",
+        "en": "Mark \"user\": the criteria come from the user's own table. The library did not verify their source; "
+              "backing them is the responsibility of whoever gave them.",
+    },
+    "h_object": {"es": "Objeto", "en": "Object"},
+    "h_id_object": {"es": "Id", "en": "Id"},
+    "h_scale": {"es": "Escala", "en": "Scale"},
+    "h_consequence": {"es": "Consecuencia", "en": "Consequence"},
+    "h_fs_pseudo": {"es": "FS seudoestático", "en": "Pseudo-static FS"},
+    "h_criterion": {"es": "Criterio", "en": "Criterion"},
+    "h_rule": {"es": "Regla", "en": "Rule"},
+    "h_crit_required": {"es": "Requerido", "en": "Required"},
+    "h_obtained": {"es": "Obtenido", "en": "Obtained"},
+    "h_range_used": {"es": "Rango usado", "en": "Range used"},
+    "h_reason": {"es": "Razón", "en": "Reason"},
+    "years": {"es": "años", "en": "years"},
+    "h_range_policy": {"es": "Política de rangos", "en": "Range policy"},
+    "cr_meets": {"es": "cumple", "en": "meets"},
+    "cr_fails": {"es": "no cumple", "en": "fails"},
+    "cr_not_verifiable": {"es": "no verificable", "en": "not verifiable"},
+    "kind_block": {"es": "Bloque", "en": "Block"},
+    "kind_berm": {"es": "Berma", "en": "Berm"},
+    "kind_le": {"es": "Equilibrio límite", "en": "Limit equilibrium"},
+    "kind_le_set": {"es": "Conjunto de análisis", "en": "Set of analyses"},
+    "rule_slope_fs_static": {"es": "FS estático mínimo", "en": "Minimum static FS"},
+    "rule_slope_fs_pseudostatic": {"es": "FS seudoestático mínimo", "en": "Minimum pseudo-static FS"},
+    "rule_slope_pof": {"es": "PoF máxima", "en": "Maximum PoF"},
+    "rule_berm_reliability": {"es": "Confiabilidad de berma mínima", "en": "Minimum berm reliability"},
+    "rule_deformation_required": {"es": "Análisis de deformación", "en": "Deformation analysis"},
+    "rule_pseudostatic_analysis_present": {"es": "Análisis seudoestático global", "en": "Overall pseudo-static "
+                                           "analysis"},
+    "policy_conservative": {"es": "conservadora: extremo alto del rango para un mínimo y bajo para un máximo",
+                            "en": "conservative: upper end of the range for a minimum and lower end for a maximum"},
+    "policy_upper": {"es": "extremo alto de cada rango", "en": "upper end of each range"},
+    "policy_lower": {"es": "extremo bajo de cada rango", "en": "lower end of each range"},
 }
 
 

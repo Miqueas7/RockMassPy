@@ -719,8 +719,14 @@ def _le_blocks(le, lang: str, figures: bool) -> tuple:
 
     rows, surf = [], []
     for r in le:
-        ky = None if r.yield_ is None else r.yield_.ky
+        ky = r.ky
         nm = None if r.newmark is None else r.newmark.displacement_m
+        if r.sarma is not None:  # una fila, como el archivo: FS, FS estático, Kc como ky y Newmark
+            fs, fs0 = r.sarma.factor_of_safety, le_static_fs(r)[0]
+            rows.append((r.id_analisis, r.id_seccion, t("le_surf_sarma", lang), text("le_method_sarma", lang),
+                         _num(r.kh), _num(fs), _num(fs0),
+                         "-" if fs is None else t("sl_yes" if is_failure(fs) else "sl_no", lang), "-", _num(ky),
+                         _num(nm)))
         for k, (x, fs0) in enumerate(zip(r.results, le_static_fs(r))):
             fs = x.factor_of_safety
             rows.append((r.id_analisis, r.id_seccion, t(f"le_surf_{r.surface_type}", lang),
@@ -754,9 +760,15 @@ def _count_table(key, head_key, counts, lang) -> Table:
 
 
 def build_slope_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
-                       figures: bool = True, projection: str = "equal_area", blocks=(), le=()) -> Report:
+                       figures: bool = True, projection: str = "equal_area", blocks=(), le=(), criteria=None,
+                       criteria_profile=None, range_policy: str | None = None, profile_checks=None) -> Report:
     """Informe de taludes: alcance, métodos, resultados, avisos y nota. `blocks` (de `assess_blocks`) suma la 3B y
-    `le` (de `assess_le`) el equilibrio límite de la 3C; con `le`, `results` puede ir vacío."""
+    `le` (de `assess_le`) el equilibrio límite de la 3C; con `le`, `results` puede ir vacío.
+
+    `criteria` (los chequeos de `assess_criteria`, con su `criteria_profile` y la `range_policy` usada; None = la del
+    perfil) o `profile_checks` (los del perfil normativo, p. ej. el art. 264) dan el informe completo de la 3D:
+    resumen ejecutivo, alcance y criterios, cinemática, bloques, equilibrio límite y Sarma, verificación, normativa,
+    avisos y métodos. Sin ninguno de los dos, el informe es el de la 3C."""
     from ..blocks import block_attention, warning_counts
     from ..limit_equilibrium import le_attention, le_warning_counts
 
@@ -764,6 +776,8 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     results, blocks, le = list(results), list(blocks), list(le)
     if not results and not le:
         raise ValueError("results is empty: nothing to report")
+    if criteria is not None and criteria_profile is None:
+        raise ValueError("criteria needs criteria_profile")
     methods = _dedup_methods(m for r in (*results, *blocks, *le) for m in r.methods)
     counts = Counter(w for r in results for w in set(r.warnings))
     bcounts = warning_counts(blocks)
@@ -788,6 +802,11 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     if l_att:
         s4 += (Paragraph(t("le_attention", lang).format(n=l_att, m=len(le), why=", ".join(
             f"{t(k, lang)} ({v})" for k, v in lwhy.items()))),)
+    if criteria is not None or profile_checks is not None:
+        sections = _criteria_sections(results, blocks, le, lang, figures, projection, methods, s4, notes,
+                                      criteria, criteria_profile, range_policy, profile_checks)
+        return Report(title, _subtitle(t(slope_title_key(bool(results)), lang), author, lang), lang, sections,
+                      methods, DISCLAIMER[lang], __version__, date or datetime.date.today().isoformat())
     if notes:
         s4 += (Paragraph(t("h_notes", lang) + ":"), *(Paragraph(n) for n in notes))
     sections = (
@@ -805,6 +824,128 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     )
     return Report(title, _subtitle(t(slope_title_key(bool(results)), lang), author, lang), lang, sections, methods,
                   DISCLAIMER[lang], __version__, date or datetime.date.today().isoformat())
+
+
+_CMP = {">=": "≥", "<=": "≤", ">": ">", "<": "<"}
+_PCT_RULES = ("slope_pof", "berm_reliability")
+
+
+def _crit_required(c, lang) -> str:
+    if c.required is None:
+        return "-"
+    unit = (" %" if c.rule in _PCT_RULES
+            else " " + t("years", lang) if c.rule == "pseudostatic_analysis_present" else "")
+    return f"{_CMP[c.comparison]} {c.required:g}{unit}"
+
+
+def _crit_rows(checks, lang) -> tuple:
+    """Una fila por chequeo: objeto, id, criterio, regla, estado, requerido, obtenido, rango, razón y su respaldo."""
+    return tuple((t(f"kind_{c.object_kind}", lang), c.object_id or "-", c.item_id or "-", t(f"rule_{c.rule}", lang),
+                  t(f"cr_{c.status}", lang), _crit_required(c, lang),
+                  _num(c.obtained, ".1f" if c.rule in _PCT_RULES else ".3f"), c.range_used or "-", c.reason or "-",
+                  c.source or "-", t(f"force_{c.force}", lang), c.verification) for c in checks)
+
+
+def _crit_summary(blocks, le, checks, lang) -> Table:
+    """Una fila por objeto con sus resultados (los mismos valores que compara `assess_criteria`) y su estado por regla."""
+    from ..criteria import _block_value, _le_value
+
+    rules = list(dict.fromkeys(c.rule for c in checks))
+    status: dict = {}
+    for c in checks:
+        status.setdefault((c.object_kind, c.object_id), {}).setdefault(c.rule, []).append(t(f"cr_{c.status}", lang))
+    objs = [("berm" if r.model == "berm" else "block", r.id_bloque, r) for r in blocks]
+    objs += [("le", r.id_analisis, r) for r in le]
+    objs += [("le_set", "", None)] if any(c.object_kind == "le_set" for c in checks) else []
+    rows = []
+    for kind, oid, r in objs:
+        if r is None:
+            vals = ("-",) * 6
+        elif kind == "le":
+            vals = (r.escala or "-", r.consecuencia or "-", _num(_le_value("slope_fs_static", r)[0]),
+                    _num(_le_value("slope_fs_pseudostatic", r)[0]), "-",
+                    _num(None if r.newmark is None else r.newmark.displacement_m))
+        else:
+            pof = _block_value("slope_pof", r)[0]
+            vals = (r.escala or "-", r.consecuencia or "-", _num(_block_value("slope_fs_static", r)[0]), "-",
+                    _num(None if pof is None else float(pof), ".1f"), "-")
+        st = status.get((kind, oid), {})
+        rows.append((t(f"kind_{kind}", lang), oid or "-", *vals, *(" / ".join(st.get(x, ["-"])) for x in rules)))
+    return Table(t("cap_crit_summary", lang),
+                 (t("h_object", lang), t("h_id_object", lang), t("h_scale", lang), t("h_consequence", lang),
+                  t("h_fs_static", lang), t("h_fs_pseudo", lang), t("h_pof", lang), t("h_newmark", lang),
+                  *(t(f"rule_{x}", lang) for x in rules)), tuple(rows))
+
+
+def _why(att, lang) -> str:
+    return ", ".join(f"{t(f'rule_{k}', lang)} ({v})" for k, v in sorted(att.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _criteria_sections(results, blocks, le, lang, figures, projection, methods, s4, notes, criteria, profile,
+                       range_policy, profile_checks) -> tuple:
+    """Las nueve secciones del informe completo (3D). Conteos y atención salen de `criteria_counts` y
+    `criteria_attention`, como la CLI; los ids solo van en celdas de tabla."""
+    from ..criteria import criteria_attention, criteria_counts, profile_marks
+
+    checks, pchecks = list(criteria or ()), list(profile_checks or ())
+    counts, att = criteria_counts(checks), criteria_attention(checks)
+    p_fails = sum(c.needs_attention for c in pchecks)
+    att_paras = [Paragraph(t("crit_attention", lang).format(why=_why(att, lang)))] if att else []
+    if p_fails:
+        att_paras.append(Paragraph(t("crit_normative_fails", lang).format(n=p_fails)))
+
+    if criteria is None:
+        s1 = [Paragraph(t("crit_profile_only", lang)), *att_paras]
+    else:
+        s1 = [Paragraph(t("crit_counts", lang).format(n=counts["checks"], **counts)), *att_paras,
+              _crit_summary(blocks, le, checks, lang)]
+
+    s2 = [Paragraph(t("crit_scope", lang))]
+    if criteria is None:
+        s2.append(Paragraph(t("crit_profile_only", lang)))
+    else:
+        marks, forces = profile_marks(profile)
+        policy = profile.range_policy if range_policy is None else range_policy
+        s2.append(Table(t("cap_crit_profile", lang), (t("h_field", lang), t("h_value", lang)), (
+            (t("h_id", lang), profile.profile_id), (t("h_name", lang), profile.name[lang]),
+            (t("h_instruments", lang), "; ".join(profile.instruments)),
+            (t("h_source", lang), "; ".join(dict.fromkeys(title_ for title_, _ in profile.sources.values()))),
+            (t("h_force", lang), "/".join(t(f"force_{f}", lang) for f in forces.split("/"))),
+            (t("h_mark", lang), marks), (t("h_range_policy", lang), t(f"policy_{policy}", lang)))))
+        s2 += [Paragraph(t(f"crit_mark_{m}", lang)) for m in ("V2", "user") if m in marks.split("/")]
+
+    head = (t("h_object", lang), t("h_id_object", lang), t("h_criterion", lang), t("h_rule", lang),
+            t("h_status", lang), t("h_crit_required", lang), t("h_obtained", lang), t("h_range_used", lang),
+            t("h_reason", lang), t("h_source", lang), t("h_force", lang), t("h_mark", lang))
+    if criteria is None:
+        s6 = (Paragraph(t("crit_profile_only", lang)),)
+    elif checks:
+        s6 = (Table(t("cap_crit_checks", lang), head, _crit_rows(checks, lang)),)
+    else:
+        s6 = (Paragraph(t("none_items", lang)),)
+    s7 = ((Table(t("cap_crit_normative", lang), head, _crit_rows(pchecks, lang)),) if pchecks
+          else (Paragraph(t("crit_no_profile", lang)),))
+
+    s8 = s4 + tuple(att_paras)
+    if counts["not_verifiable"]:
+        s8 += (Paragraph(t("crit_not_verifiable", lang).format(n=counts["not_verifiable"])),)
+    if notes:
+        s8 += (Paragraph(t("h_notes", lang) + ":"), *(Paragraph(n) for n in notes))
+    return (
+        Section("1", t("sx_1", lang), tuple(s1)),
+        Section("2", t("sx_2", lang), tuple(s2)),
+        Section("3", t("sx_3", lang), _slope_blocks(results, lang, figures, projection) if results
+                else (Paragraph(t("sl_no_slopes", lang)),)),
+        Section("4", t("sx_4", lang), _block_blocks(blocks, lang, figures) if blocks
+                else (Paragraph(t("crit_no_blocks", lang)),)),
+        Section("5", t("sx_5", lang), _le_blocks(le, lang, figures) if le else (Paragraph(t("crit_no_le", lang)),)),
+        Section("6", t("sx_6", lang), s6),
+        Section("7", t("sx_7", lang), s7),
+        Section("8", t("sx_8", lang), s8),
+        Section("9", t("sx_9", lang), (Table(
+            t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
+            tuple((m.method_id, m.verification, m.source) for m in methods)), Paragraph(DISCLAIMER[lang]))),
+    )
 
 
 def slope_title_key(rock_slopes: bool) -> str:

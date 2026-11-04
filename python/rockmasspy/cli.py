@@ -285,6 +285,67 @@ def _block_args(a) -> None:
         raise ValueError("--blocks-output must end in .csv or .xlsx")
 
 
+_CRITERIA_ONLY = (("criteria_output", "--criteria-output"), ("range_policy", "--range-policy"))
+
+
+def _criteria_args(a):
+    """Valida las opciones de criterios antes de leer archivos; devuelve (perfil de criterios, perfil normativo)."""
+    from .criteria import load_criteria_table
+    from .normative import available_profiles, get_profile
+
+    if not a.criteria:
+        for attr, flag in _CRITERIA_ONLY:
+            if getattr(a, attr) is not None:
+                raise ValueError(f"{flag} needs --criteria")
+    if a.criteria_output and Path(a.criteria_output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--criteria-output must end in .csv or .xlsx")
+    norm = None
+    if getattr(a, "profile", None):
+        norm = get_profile(a.profile)
+        if not any(i.check == "pseudostatic_analysis_present" for i in norm.items):
+            raise ValueError("--profile: the profile has no pseudo-static analysis requirement (art. 264)")
+    if not a.criteria:
+        return None, norm
+    if a.criteria in available_profiles():
+        return get_profile(a.criteria), norm
+    if Path(a.criteria).suffix.lower() in (".csv", ".xlsx"):
+        return load_criteria_table(a.criteria), norm
+    # sin repetir el valor: puede ser una ruta
+    raise ValueError(f"--criteria: not a profile id ({', '.join(sorted(available_profiles()))}) "
+                     f"nor a .csv or .xlsx table")
+
+
+def _assess_criteria(a, prof, norm, blocks=(), le=()):
+    """(chequeos de criterios, chequeos del perfil normativo); cada uno None si no se pidió."""
+    from .criteria import assess_criteria, criteria_assignments, return_periods
+
+    asg, tr = criteria_assignments(blocks, le), return_periods(le)
+    checks = None if prof is None else assess_criteria(prof, blocks=blocks, le=le, assignments=asg,
+                                                        range_policy=a.range_policy, return_periods=tr)
+    pchecks = None if norm is None else [c for c in assess_criteria(norm, le=le, assignments=asg, return_periods=tr)
+                                         if c.rule == "pseudostatic_analysis_present"]
+    return checks, pchecks
+
+
+_STATUS_EN = {"meets": "meets", "fails": "fails", "not_verifiable": "not verifiable"}
+
+
+def _print_criteria(prof, norm, checks, pchecks) -> bool:
+    """Líneas del resumen, sin ids; True si algo «no cumple» (R10)."""
+    from .criteria import criteria_attention, criteria_counts, profile_marks
+
+    if checks is not None:
+        c = criteria_counts(checks)
+        print(f"criteria: {prof.profile_id} ({', '.join(profile_marks(prof))})")
+        print(f"meets: {c['meets']}, fails: {c['fails']}, not verifiable: {c['not_verifiable']}")
+        for rule, n in sorted(criteria_attention(checks).items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"fails by rule: {rule} ({n})")
+    for x in pchecks or ():
+        print(f"profile: {norm.profile_id}, {x.item_id}: {_STATUS_EN[x.status]} [{x.force}]"
+              + (f" ({x.reason})" if x.reason else ""))
+    return bool(checks and criteria_attention(checks)) or any(x.needs_attention for x in pchecks or ())
+
+
 def _slope(a) -> int:
     from collections import Counter
 
@@ -298,6 +359,9 @@ def _slope(a) -> int:
     if not 0 < a.lateral_limit < 90:
         raise ValueError("--lateral-limit must be between 0 and 90 degrees")
     _block_args(a)
+    if a.criteria and not a.blocks:
+        raise ValueError("--criteria needs --blocks")
+    prof, _ = _criteria_args(a)
     faces = load_slope_faces(a.faces, sheet=a.sheet_faces)
     if not faces:
         raise ValueError(f"no slope faces in {Path(a.faces).name}")
@@ -308,6 +372,7 @@ def _slope(a) -> int:
         dists = bk.load_distributions(a.distributions, sheet=a.sheet_distributions) if a.distributions else ()
         bs = bk.assess_blocks(bk.load_blocks(a.blocks, sheet=a.sheet_blocks), rs, dists, iterations=a.iterations,
                               sampling=a.sampling.replace("-", "_"), seed=a.seed, lateral_limit_deg=a.lateral_limit)
+    checks, _ = _assess_criteria(a, prof, None, blocks=bs)
     c = slope_counts(rs)
     proj = a.projection.replace("-", "_")
     print(f"slopes: {c['slopes']}")
@@ -341,10 +406,15 @@ def _slope(a) -> int:
     for w, n in sorted(bk.warning_counts(bs).items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({_blocks(n)})")
     print(f"notes: {c['notes'] + sum(len(r.notes) for r in bs)}")
+    crit_fails = _print_criteria(prof, None, checks, None)
     if a.output:
         print(f"results: {save_slope_results(rs, a.output)}")
     if a.blocks_output:
         print(f"blocks results: {bk.save_block_results(bs, a.blocks_output)}")
+    if a.criteria_output:
+        from .criteria import save_criteria_results
+
+        print(f"criteria results: {save_criteria_results(checks, a.criteria_output)}")
     if a.charts:
         from .viz import save_figure
 
@@ -359,12 +429,13 @@ def _slope(a) -> int:
                     print(f"chart: {save_figure(rp.block_figure(r, kind, a.lang), path)}")
     if a.report:
         rep = rp.build_slope_report(rs, title=a.title or t("slope_title", a.lang), lang=a.lang, author=a.author or "",
-                                    figures=not a.no_figures, projection=proj, blocks=bs)
+                                    figures=not a.no_figures, projection=proj, blocks=bs, criteria=checks,
+                                    criteria_profile=prof, range_policy=a.range_policy)
         out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
         print(f"report: {out}")
     print("the library recommends, the engineer decides")
-    # una sola regla: needs_attention del talud (3A) y block_attention del bloque (R14)
-    return 2 if any(r.needs_attention for r in rs) or any(bk.block_attention(r) for r in bs) else 0
+    # una sola regla: needs_attention del talud (3A), block_attention del bloque (R14) y un «no cumple» (R10)
+    return 2 if any(r.needs_attention for r in rs) or any(bk.block_attention(r) for r in bs) or crit_fails else 0
 
 
 def _analyses(n: int) -> str:
@@ -401,6 +472,8 @@ def _le(a) -> int:
         raise ValueError("report must end in .docx or .html")
     if a.output and Path(a.output).suffix.lower() not in (".csv", ".xlsx"):
         raise ValueError("--output must end in .csv or .xlsx")
+    prof, norm = _criteria_args(a)
+
     def progress(k, n):  # avance en stderr, sin ids; stdout queda para el resumen
         if n > 1:
             print(f"analysis {k} of {n}...", file=sys.stderr, flush=True)
@@ -408,19 +481,27 @@ def _le(a) -> int:
     rs = le.assess_le(_le_source(a), progress=progress)  # antes del primer print: un error deja stdout vacío
     if not rs:
         raise ValueError("no analyses in Analisis_LE")
+    checks, pchecks = _assess_criteria(a, prof, norm, le=rs)
     c = le.le_counts(rs)
-    print(f"analyses: {c['analyses']} (circular {c['circular']}, block {c['block']}, given {c['given']})")
+    sarma = f", sarma {c['sarma']}" if "sarma" in c else ""  # como le_counts: solo si hay alguno
+    print(f"analyses: {c['analyses']} (circular {c['circular']}, block {c['block']}, given {c['given']}{sarma})")
     print(f"FS at or below 1: {c['fs_below_1']} of {c['with_fs']}")
-    low = min(((x.factor_of_safety, x.info.method_id) for r in rs for x in r.results
-               if x.factor_of_safety is not None), default=None)
+    fs = [(x.factor_of_safety, x.info.method_id) for r in rs for x in r.results]
+    fs += [(r.sarma.factor_of_safety, r.sarma.info.method_id) for r in rs if r.sarma is not None]
+    low = min(((v, m) for v, m in fs if v is not None), default=None)
     print("lowest FS: none" if low is None else f"lowest FS: {low[0]:.3f} ({low[1]})")
     print(f"Newmark: {_analyses(c['with_newmark'])}")
     print(f"warnings: {c['warnings']} in {_analyses(sum(1 for r in rs if r.warnings))}")
     for w, n in sorted(le.le_warning_counts(rs).items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({_analyses(n)})")
     print(f"notes: {c['notes']}")
+    crit_fails = _print_criteria(prof, norm, checks, pchecks)
     if a.output:
         print(f"results: {le.save_le_results(rs, a.output)}")
+    if a.criteria_output:
+        from .criteria import save_criteria_results
+
+        print(f"criteria results: {save_criteria_results(checks, a.criteria_output)}")
     if a.charts:
         from .viz import save_figure
 
@@ -430,11 +511,12 @@ def _le(a) -> int:
                 print(f"chart: {save_figure(rp.newmark_figure(r, a.lang), Path(a.charts) / f'newmark_{r.order}.png')}")
     if a.report:
         rep = rp.build_slope_report([], title=a.title or t(rp.slope_title_key(False), a.lang), lang=a.lang,
-                                    author=a.author or "", figures=not a.no_figures, le=rs)
+                                    author=a.author or "", figures=not a.no_figures, le=rs, criteria=checks,
+                                    criteria_profile=prof, range_policy=a.range_policy, profile_checks=pchecks)
         out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
         print(f"report: {out}")
     print("the library recommends, the engineer decides")
-    return 2 if any(le.le_attention(r) for r in rs) else 0  # una sola regla (R14)
+    return 2 if any(le.le_attention(r) for r in rs) or crit_fails else 0  # una sola regla (R14) y R10
 
 
 def _snake(name: str) -> str:
@@ -647,6 +729,7 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--sampling", choices=("lhs", "monte-carlo"), help="default lhs")
     c.add_argument("--seed", type=int, help="default 1")
     c.add_argument("--blocks-output", metavar="RES.csv|.xlsx")
+    _criteria_inputs(c)
     c.set_defaults(fn=_slope)
     c = sub.add_parser("le", help="2D limit equilibrium, critical slip surface, ky and Newmark")
     _le_inputs(c, "--workbook")
@@ -657,8 +740,20 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--author")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.add_argument("--no-figures", action="store_true")
+    _criteria_inputs(c)
+    c.add_argument("--profile", metavar="PE-DS024-2016", help="regulatory profile for art. 264 (pseudo-static "
+                   "analysis of the overall slope)")
     c.set_defaults(fn=_le)
     return p
+
+
+def _criteria_inputs(c) -> None:
+    """Criterios de aceptación (3D): los mismos en `slope` (sobre los bloques) y en `le`."""
+    c.add_argument("--criteria", metavar="ID|CRITERIOS.csv|.xlsx", help="acceptance criteria: a profile id "
+                   "(READ-STACEY-2009, NDEP-2021, DMIRS-WA-2019, RYAN-PRYOR-2000) or your own table (sheet Criterios)")
+    c.add_argument("--criteria-output", metavar="RES.csv|.xlsx", help="one row per criterion check (needs --criteria)")
+    c.add_argument("--range-policy", choices=("conservative", "upper", "lower"),
+                   help="value used inside a criterion range (default: the profile's; needs --criteria)")
 
 
 def _le_inputs(c, workbook_flag: str) -> None:

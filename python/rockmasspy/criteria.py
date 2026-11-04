@@ -92,17 +92,21 @@ def _no_match_reason(items, scale, cons) -> str:
     return "the profile has no criterion for this consequence"
 
 
-def _word(v, allowed, what):
+def _word(v, what):
     if v is None:
         return None
     if not isinstance(v, str):
         raise ValueError(f"assignments: {what} must be text")
-    v = v.strip().casefold()
-    if not v:
-        return None
-    if v not in allowed:
-        raise ValueError(f"assignments: unknown {what}; expected one of {', '.join(allowed)}")
-    return v
+    return v.strip().casefold() or None  # una palabra fuera de la lista se juzga en assess_criteria
+
+
+def _unknown(scale, cons) -> str:
+    """Razón «no verificable» si la escala o la consecuencia no es de la lista (sin repetir el texto del usuario)."""
+    if scale is not None and scale not in SCALES:
+        return "unknown scale"
+    if cons is not None and cons not in CONSEQUENCES:
+        return "unknown consequence"
+    return ""
 
 
 def _finite(x) -> bool:
@@ -185,7 +189,7 @@ def _assigner(assignments: Mapping):
             return None, None
         if isinstance(v, str) or len(v) != 2:
             raise ValueError("assignments: each value must be a pair (scale, consequence)")
-        return _word(v[0], SCALES, "scale"), _word(v[1], CONSEQUENCES, "consequence")
+        return _word(v[0], "scale"), _word(v[1], "consequence")
     return assign
 
 
@@ -215,6 +219,8 @@ def _pseudostatic_present(item, le, assign, return_periods):
         return "not_verifiable", "return period not given for a pseudo-static overall analysis"
     if not glob and any(s is None for s in scales):
         return "not_verifiable", "no scale assigned"
+    if not glob and any(s not in SCALES for s in scales):
+        return "not_verifiable", "unknown scale"
     return "fails", "no pseudo-static analysis of the overall slope with the required return period"
 
 
@@ -224,7 +230,8 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
     """Un chequeo por objeto y regla del perfil que aplica a su tipo (y por ítem si varios calzan).
 
     `assignments`: {(tipo, id): (escala, consecuencia)} con tipo `block`, `berm` (bloque modelo berma) o `le`;
-    una escala o consecuencia vacía o ausente deja el chequeo «not_verifiable». `range_policy` sobrescribe la del
+    una escala o consecuencia vacía, ausente o fuera de la lista deja el chequeo «not_verifiable» (con la razón
+    «unknown scale» o «unknown consequence»). `range_policy` sobrescribe la del
     perfil. `return_periods`: {id_analisis: Tr en años}, solo para `pseudostatic_analysis_present`.
     """
     policy = profile.range_policy if range_policy is None else range_policy
@@ -243,8 +250,12 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
     objects += [("le", r.id_analisis, r) for r in le]
     for kind, oid, r in objects:
         scale, cons = assign((kind, oid))
+        unknown = _unknown(scale, cons)
         for rule in _KIND_RULES[kind]:
             if rule not in by_rule:
+                continue
+            if unknown:
+                out.append(_empty(kind, oid, r.order, rule, by_rule[rule], unknown))
                 continue
             hits = [i for i in by_rule[rule] if _matches(i, scale, cons)]
             if not hits:
@@ -347,3 +358,9 @@ def load_criteria_table(path, *, sheet: str = CRITERIA_SHEET,
     return NormativeProfile(profile_id="USER-TABLE", jurisdiction="user",
                             name={"es": "Tabla propia de criterios", "en": "User criteria table"},
                             instruments=("user table",), sources=sources, items=tuple(items))
+
+
+def profile_marks(profile: NormativeProfile) -> tuple[str, str]:
+    """(marcas, fuerzas) de los ítems del perfil, sin repetir y en su orden; varias se unen con «/» (V2, guide)."""
+    return ("/".join(dict.fromkeys(i.verification for i in profile.items)),
+            "/".join(dict.fromkeys(i.force for i in profile.items)))

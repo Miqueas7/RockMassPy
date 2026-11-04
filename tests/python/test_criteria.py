@@ -210,10 +210,17 @@ def test_missing_values_are_not_verifiable():
     assert by_rule(cs, "deformation_required").reason == "no pseudo-static analysis"
 
 
-def test_bad_assignment_raises_without_echo():
-    with pytest.raises(ValueError) as e:
-        one(RS, blocks=[blk(fs=2)], assignments={("block", f"B-{S}"): (f"x-{S}", "alta")})
-    assert "scale" in str(e.value) and S not in str(e.value)
+def test_unknown_scale_or_consequence_is_not_verifiable_without_echo():
+    cs = one(RS, blocks=[blk(fs=2, pof=0.01)], assignments={("block", f"B-{S}"): (f"x-{S}", "alta")})
+    assert [(c.rule, c.status, c.reason) for c in cs] == [("slope_fs_static", "not_verifiable", "unknown scale"),
+                                                          ("slope_pof", "not_verifiable", "unknown scale")]
+    assert not any(S in repr(c) or S in c.reason for c in cs)
+    (c,) = one(WA, blocks=[blk(fs=2)], assignments={("block", f"B-{S}"): ("banco", f"y-{S}")})
+    assert (c.status, c.reason) == ("not_verifiable", "unknown consequence")
+    (c,) = one(WA, blocks=[blk(fs=2)], assignments={("block", f"B-{S}"): (f"x-{S}", "seria")})
+    assert (c.status, c.reason) == ("not_verifiable", "unknown scale")  # aunque el ítem sea «*:seria»
+    with pytest.raises(ValueError, match="text"):
+        one(RS, blocks=[blk(fs=2)], assignments={("block", f"B-{S}"): (3, "alta")})
     with pytest.raises(ValueError, match="pair"):
         one(RS, blocks=[blk(fs=2)], assignments={("block", f"B-{S}"): "banco"})
 

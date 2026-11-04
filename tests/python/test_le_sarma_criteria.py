@@ -151,8 +151,20 @@ def test_escala_y_consecuencia_por_analisis(tmp_path):
 def test_escala_sin_lista_al_leer_la_valida_assess_criteria(tmp_path):
     (r,) = rm.assess_le(hojas(tmp_path, p4_data(escala="ZZSENT")))
     assert r.escala == "zzsent"
-    with pytest.raises(ValueError, match="unknown scale"):
-        assess_criteria(RS, le=[r], assignments=criteria_assignments(le=[r]))
+    cs = assess_criteria(RS, le=[r], assignments=criteria_assignments(le=[r]))
+    assert [(c.status, c.reason) for c in cs] == [("not_verifiable", "unknown scale")]
+    pe = assess_criteria(PE, le=[r], assignments=criteria_assignments(le=[r]), return_periods=return_periods([r]))
+    assert [(c.item_id, c.status, c.reason) for c in pe] == [("PE-264", "not_verifiable", "unknown scale")]
+
+
+def test_cli_verify_escala_mal_escrita_no_verificable(tmp_path, capsys):
+    x = libro(tmp_path, p4_data(kh=0.05, escala="glob-ZZSENT", periodo_retorno_anios=100))
+    assert main(["verify", "--profile", "PE-DS024-2016", "--as-of", "2026-11-04", "--le", str(x)]) == 0
+    cap = capsys.readouterr()
+    assert "error:" not in cap.err and "ZZSENT" not in cap.out + cap.err
+    assert "not verifiable by the library: " in cap.out
+    v = V.verify(PE, as_of="2026-11-04", le=rm.assess_le(x))
+    assert _pe264(v) == ("not_verifiable", "unknown scale")
 
 
 def test_bloques_ganan_escala_y_consecuencia():
