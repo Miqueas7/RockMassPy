@@ -92,8 +92,12 @@ using le_detail::Poly;
 constexpr std::size_t kTop = 10;
 constexpr double kDeg = le_detail::kPi / 180.0;
 
-/// Refleja x -> -x invirtiendo el orden (el núcleo lo hace con to_local sobre su origen).
-inline Poly mirror(const Poly& p) { return le_detail::to_local(p, {0.0, 0.0}, true); }
+/// x -> -x con el orden invertido (x sigue creciente). La tarea 1 movió su copia de le_detail a to_local.
+inline Poly mirror(const Poly& p) {
+    Poly q(p.rbegin(), p.rend());
+    for (auto& v : q) v.x = -v.x;
+    return q;
+}
 
 inline LeSection mirrored(LeSection s) {
     s.surface = mirror(s.surface);
