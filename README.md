@@ -303,8 +303,8 @@ Read this part twice:
 - **FS equal to 1 counts as failure** (with a 1e-9 margin), a lifted-off sample counts as failure, and the PoF is
   conditional on the block forming (`n` and `n_valid` are reported).
 - **The library never says "acceptable".** Only an FS below 1 and the warnings change the exit code. The PoF, the
-  berm reliability and the comparison with Ritchie are reported, not judged: the acceptance criteria are phase 3D, and
-  the analysis is 2D, per meter of slope.
+  berm reliability and the comparison with Ritchie are reported, not judged (only an acceptance criterion you choose judges
+  them, see below), and the analysis is 2D, per meter of slope.
 - **Privacy:** `id_bloque` and `id_talud` appear only in the report tables and in the results file, never in the
   console, the figures or an error message. Do not put labor or mine codes in `familia` names; they reach warnings.
 
@@ -371,7 +371,7 @@ Read this part twice:
 - **With seismic load, use Spencer or GLE.** Bishop does not balance horizontal forces, so a high kh separates it from
   the rigorous methods (Slide2 ACADS 1(d), kh 0.15: Bishop 1.016, Spencer 0.991).
 - **The library never says "acceptable".** Only an FS at or below 1 (1e-9 margin) and the warnings change the exit
-  code; FS, ky and the Newmark displacement are reported, not judged. The acceptance criteria are phase 3D.
+  code; FS, ky and the Newmark displacement are reported, not judged; see Acceptance criteria and Sarma.
 - **Privacy:** `id_seccion`, `id_analisis`, `material`, `registro` and the line names appear only in the report tables
   (the two ids also in the results file), never in the console, the figures or a message.
 
@@ -418,6 +418,109 @@ Run times: with Hoek-Brown, a 20×20×11 circular search takes about 10 to 15 s;
 to 5 times.
 
 See `examples/10-equilibrio-limite-newmark/`.
+
+## Acceptance criteria and Sarma
+
+`assess_criteria(...)` and `rockmass slope|le --criteria` compare each block (3B) and each limit-equilibrium analysis
+(3C) with an **acceptance criterion** chosen by you, and say per check **"meets", "fails" or "not verifiable"**, always
+with the criterion, its source, its force (law or guide) and its mark. The criteria are versioned data profiles:
+- `READ-STACEY-2009`: Read and Stacey (2009), table 9.9, minimum static FS and maximum PoF by scale (bench, inter-ramp,
+  overall) and consequence; mark V2 (read in Moffitt 2023, which reproduces it), without the dynamic column;
+- `NDEP-2021`: Nevada heap leach pads, static FS 1.30, pseudo-static 1.05 and, below 1.05, a deformation analysis;
+- `DMIRS-WA-2019`: Western Australia, FS by consequence;
+- `RYAN-PRYOR-2000`: catch bench reliability of 50 to 90 %;
+- your own table (sheet `Criterios`: `escala`, `consecuencia`, `fs_estatico_min`, `fs_seudoestatico_min`,
+  `pof_max_pct`, `confiabilidad_berma_min_pct`, `fuente`), read by `rm.load_criteria_table` as a guide with mark
+  `user`.
+
+Each row of `Bloques` and `Analisis_LE` takes `escala` (`banco`, `interrampa`, `global`, `pad`, `botadero`) and
+`consecuencia`; `Analisis_LE` also takes `periodo_retorno_anios`. The profile `PE-DS024-2016` checks **art. 264** of
+the DS 024 (a pseudo-static analysis of the overall pit slope with a 100-year return period; it sets no FS).
+
+**Sarma with non-vertical slices** (`superficie = sarma`, the base in `linea_superficie` and one interface angle per
+interior vertex in `sarma_angulos`, or `opt` to search them) splits the mass into rigid wedges with inclined
+interfaces and gives the FS and the critical acceleration Kc. It is the method for waste dumps sliding on an inclined
+weak base. It reproduces Slide's Sarma verification problem 4 (1.1970 against 1.198) and, with one wedge, Hoek's planar
+block. Hoek-Brown, ponded water and tension cracks are not supported.
+
+Read this part twice:
+
+- **The library never says "approved".** A "fails" asks for attention (exit code 2); a "not verifiable" is a note
+  with its reason (no scale, no criterion for that scale, no probabilistic analysis). It never counts as "meets".
+- **Ranges:** where a criterion is a range (PoF 25–50 % for a bench), the default policy is the conservative end (the
+  upper end for a minimum FS, the lower end for a maximum PoF); `range_policy=` or `--range-policy upper|lower` change
+  it, and the value used is reported. A value equal to the limit meets it.
+- **Privacy:** the ids appear only in the report tables and the results files, never in the console or a message.
+
+```python
+import csv
+import tempfile
+from pathlib import Path
+
+import rockmasspy as rm
+from rockmasspy.criteria import criteria_assignments
+
+# Slide Sarma verification, problem 4 (Hoek 1987): a dry waste pile on a sheared floor, in kN and m
+ground = [(-50, -2.97), (0, 0), (111.4, 76.5), (229.545, 13.6815), (250, 14.9)]
+floor = [(-50, -2.97), (0, 0), (250, 14.9)]
+base = [(0, 0), (108, 6.4), (130, 73.06)]             # two wedges, one interior vertex
+s = rm.LeSection()
+s.surface = [rm.Point2(x, y) for x, y in ground]
+top, bottom = rm.LeLayer(), rm.LeLayer()
+top.bottom, top.material = [rm.Point2(x, y) for x, y in floor], 0
+bottom.bottom, bottom.material = [], 1
+pile, sheared = rm.LeMaterial(), rm.LeMaterial()
+pile.unit_weight, pile.cohesion, pile.friction_deg = 15.7, 100, 42
+sheared.unit_weight, sheared.cohesion, sheared.friction_deg = 15.7, 10, 6
+s.layers, s.materials = [top, bottom], [pile, sheared]
+i = rm.SarmaInput()
+i.base, i.interface_angles_deg = [rm.Point2(x, y) for x, y in base], [116.5]  # from +x, counter-clockwise
+r = rm.sarma_fs(s, i)
+print(f"{r.factor_of_safety:.3f} {r.critical_acceleration:.4f}")  # 1.197 0.0540
+
+# The same section from sheets, judged (for illustration) as a heap leach pad against NDEP (2021)
+d = Path(tempfile.mkdtemp())
+def sheet(name, cols, rows):
+    with open(d / f"{name}.csv", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, cols, restval="")
+        w.writeheader()
+        w.writerows(rows)
+    return d / f"{name}.csv"
+src = {"Geometria": sheet("Geometria", rm.GEOMETRY_COLUMNS, [
+           dict(id_seccion="S", linea=n, x_m=x, y_m=y)
+           for n, pts in (("superficie", ground), ("piso", floor), ("falla", base)) for x, y in pts]),
+       "Estratos": sheet("Estratos", rm.LAYER_COLUMNS, [dict(id_seccion="S", orden=1, material="pila", linea_base="piso"),
+                                                       dict(id_seccion="S", orden=2, material="piso")]),
+       "Materiales_LE": sheet("Materiales_LE", rm.MATERIAL_COLUMNS, [
+           dict(material="pila", modelo="mohr_coulomb", peso_unitario_kn_m3=15.7, cohesion_kpa=100, friccion_grados=42),
+           dict(material="piso", modelo="mohr_coulomb", peso_unitario_kn_m3=15.7, cohesion_kpa=10, friccion_grados=6)]),
+       "Analisis_LE": sheet("Analisis_LE", rm.ANALYSIS_COLUMNS, [
+           dict(id_analisis="A", id_seccion="S", superficie="sarma", linea_superficie="falla", sarma_angulos="116.5",
+                base_modelo_m=-10, escala="pad", consecuencia="media")])}
+le = rm.assess_le(src)
+checks = rm.assess_criteria(rm.get_profile("NDEP-2021"), le=le, assignments=criteria_assignments(le=le))
+print(f"{le[0].sarma.factor_of_safety:.3f}")          # 1.197
+print(rm.criteria_counts(checks))                     # {'checks': 3, 'meets': 0, 'fails': 1, 'not_verifiable': 2}
+print([(c.item_id, c.status) for c in checks][0])     # ('NDEP-6-estatico', 'fails')
+print(checks[1].reason)                               # no pseudo-static analysis
+```
+
+`rm.save_criteria_results` writes one row per check (sheet `Criterios_resultados`), and
+`report.build_slope_report(..., criteria=..., criteria_profile=..., profile_checks=...)` builds the full slope report:
+executive summary, scope and criteria, kinematics, blocks, limit equilibrium and Sarma, criteria checks, regulation
+(art. 264), warnings and methods. From the command line:
+
+```bash
+rockmass le --geometry Geometria.csv --layers Estratos.csv --materials Materiales_LE.csv --analyses Analisis_LE.csv \
+    --records Sismos.csv --criteria READ-STACEY-2009 --profile PE-DS024-2016 --criteria-output criterios.csv
+rockmass slope --faces Taludes.csv --families Familias.csv --blocks Bloques.csv --criteria Criterios.csv
+```
+
+Options: `--criteria ID|CRITERIOS.csv|.xlsx`, `--criteria-output RES.csv|.xlsx`, `--range-policy
+conservative|upper|lower` (both need `--criteria`) and, in `rockmass le`, `--profile PE-DS024-2016`. The summary prints
+`meets: a, fails: b, not verifiable: c` and the fails grouped by rule, without ids.
+
+See `examples/11-criterios-sarma/`.
 
 ## Methods
 
