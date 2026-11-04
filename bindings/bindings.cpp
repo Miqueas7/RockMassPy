@@ -21,6 +21,7 @@
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 #include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/limit_equilibrium.hpp"
 #include "rockmasspy/planar.hpp"
 #include "rockmasspy/q_slope.hpp"
 #include "rockmasspy/smr.hpp"
@@ -591,4 +592,63 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("interramp_angle", &interramp_angle, nb::arg("bench_height_m"), nb::arg("berm_width_m"),
           nb::arg("face_angle_deg"));
     m.def("berm_reliability", &berm_reliability, nb::arg("widths_m"), nb::arg("required_width_m"));
+
+    // Equilibrio límite 2D por tajadas
+    nb::class_<Circle>(m, "Circle", "Circular slip surface: centre and radius.")
+        .def(nb::init<>())
+        .def("__init__", [](Circle* self, double xc, double yc, double radius) { new (self) Circle{xc, yc, radius}; },
+             nb::arg("xc"), nb::arg("yc"), nb::arg("radius"))
+        .def_rw("xc", &Circle::xc).def_rw("yc", &Circle::yc).def_rw("radius", &Circle::radius);
+    nb::enum_<StrengthModel>(m, "StrengthModel", "Shear strength model of a limit equilibrium material.")
+        .value("MohrCoulomb", StrengthModel::MohrCoulomb).value("HoekBrown", StrengthModel::HoekBrown);
+    nb::class_<LeMaterial>(m, "LeMaterial", "Limit equilibrium material: unit weight, strength and ru.")
+        .def(nb::init<>())
+        .def_rw("unit_weight", &LeMaterial::unit_weight).def_rw("model", &LeMaterial::model)
+        .def_rw("cohesion", &LeMaterial::cohesion).def_rw("friction_deg", &LeMaterial::friction_deg)
+        .def_rw("hb", &LeMaterial::hb).def_rw("sigma_ci", &LeMaterial::sigma_ci).def_rw("ru", &LeMaterial::ru);
+    nb::class_<LeLayer>(m, "LeLayer", "Layer from the top down: its bottom line (empty only in the last) and material index.")
+        .def(nb::init<>())
+        .def_rw("bottom", &LeLayer::bottom).def_rw("material", &LeLayer::material);
+    nb::class_<LeTensionCrack>(m, "LeTensionCrack", "Vertical tension crack of fixed depth below the surface.")
+        .def(nb::init<>())
+        .def_rw("depth_m", &LeTensionCrack::depth_m).def_rw("water_fill", &LeTensionCrack::water_fill);
+    nb::class_<LeSection>(m, "LeSection", "2D section: ground surface, layers, materials, water and kh.")
+        .def(nb::init<>())
+        .def_rw("surface", &LeSection::surface).def_rw("layers", &LeSection::layers)
+        .def_rw("materials", &LeSection::materials).def_rw("model_base_y", &LeSection::model_base_y)
+        .def_rw("piezometric", &LeSection::piezometric).def_rw("water_unit_weight", &LeSection::water_unit_weight)
+        .def_rw("kh", &LeSection::kh).def_rw("crack", &LeSection::crack);
+    nb::class_<SlipSurface>(m, "SlipSurface", "Slip surface: exactly one of circle and polyline.")
+        .def(nb::init<>())
+        .def_rw("circle", &SlipSurface::circle).def_rw("polyline", &SlipSurface::polyline);
+    nb::enum_<LeMethod>(m, "LeMethod", "Limit equilibrium method.")
+        .value("Ordinary", LeMethod::Ordinary).value("Bishop", LeMethod::Bishop)
+        .value("JanbuSimplified", LeMethod::JanbuSimplified).value("JanbuCorrected", LeMethod::JanbuCorrected)
+        .value("Spencer", LeMethod::Spencer).value("MorgensternPrice", LeMethod::MorgensternPrice);
+    nb::enum_<InterSliceFunction>(m, "InterSliceFunction", "Interslice force function of Morgenstern-Price.")
+        .value("Constant", InterSliceFunction::Constant).value("HalfSine", InterSliceFunction::HalfSine)
+        .value("Points", InterSliceFunction::Points);
+    nb::class_<LeOptions>(m, "LeOptions", "Number of slices, tolerance, iteration limit and interslice function.")
+        .def(nb::init<>())
+        .def_rw("n_slices", &LeOptions::n_slices).def_rw("tolerance", &LeOptions::tolerance)
+        .def_rw("max_iterations", &LeOptions::max_iterations).def_rw("function", &LeOptions::function)
+        .def_rw("function_points", &LeOptions::function_points);
+    nb::class_<LeSlice>(m, "LeSlice", "One slice, left to right: geometry, weight, pore pressure, strength and forces.")
+        .def_ro("x_left", &LeSlice::x_left).def_ro("x_right", &LeSlice::x_right)
+        .def_ro("base_y_left", &LeSlice::base_y_left).def_ro("base_y_right", &LeSlice::base_y_right)
+        .def_ro("alpha_deg", &LeSlice::alpha_deg).def_ro("base_length", &LeSlice::base_length)
+        .def_ro("weight", &LeSlice::weight).def_ro("pore_pressure", &LeSlice::pore_pressure)
+        .def_ro("cohesion", &LeSlice::cohesion).def_ro("friction_deg", &LeSlice::friction_deg)
+        .def_ro("normal_force", &LeSlice::normal_force).def_ro("shear_strength", &LeSlice::shear_strength)
+        .def_ro("interslice_normal_right", &LeSlice::interslice_normal_right)
+        .def_ro("interslice_shear_right", &LeSlice::interslice_shear_right).def_ro("material", &LeSlice::material);
+    nb::class_<LeResult>(m, "LeResult", "Factor of safety (None if not found), lambda, convergence and slices.")
+        .def_ro("factor_of_safety", &LeResult::factor_of_safety).def_ro("method", &LeResult::method)
+        .def_ro("lambda_", &LeResult::lambda).def_ro("iterations", &LeResult::iterations)
+        .def_ro("converged", &LeResult::converged).def_ro("slices", &LeResult::slices)
+        .def_ro("sliding_mass_area", &LeResult::sliding_mass_area).def_ro("info", &LeResult::info)
+        .def_ro("warnings", &LeResult::warnings).def_ro("notes", &LeResult::notes);
+    m.def("make_slices", &make_slices, nb::arg("section"), nb::arg("surface"), nb::arg("n_slices"));
+    m.def("le_factor_of_safety", &le_factor_of_safety, nb::arg("section"), nb::arg("surface"), nb::arg("method"),
+          nb::arg("options") = LeOptions());
 }
