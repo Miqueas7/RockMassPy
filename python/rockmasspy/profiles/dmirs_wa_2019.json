@@ -1,0 +1,87 @@
+{
+ "schema": 1,
+ "profile_id": "DMIRS-WA-2019",
+ "jurisdiction": "AU-WA",
+ "name": {
+  "es": "Australia Occidental (DMIRS/WorkSafe, 2019, act. 2025): FS por consecuencia, tabla 3.2",
+  "en": "Western Australia (DMIRS/WorkSafe, 2019, updated 2025): FoS by consequence, Table 3.2"
+ },
+ "instruments": [
+  "DMIRS (2019) Ground control management in Western Australian mining operations: Guideline"
+ ],
+ "not_applicable": [
+  "no_seria"
+ ],
+ "sources": {
+  "dmirs2019": {
+   "title": "Department of Mines, Industry Regulation and Safety (2019, act. 2025). Ground control management in Western Australian mining operations: Guideline",
+   "url": "https://worksafe.wa.gov.au/system/files/documents/2025-02/MSH_GL_GroundControl.pdf",
+   "url_note": "versión vigente (2025); no releída, R6"
+  }
+ },
+ "items": [
+  {
+   "id": "WA-3.2-moderada",
+   "instrument": "DMIRS (2019) Ground control management in Western Australian mining operations: Guideline",
+   "article": "tabla 3.2",
+   "page": "no anotada",
+   "source": "dmirs2019",
+   "force": "guide",
+   "verification": "V1",
+   "effective_from": "2019-01-01",
+   "check": "slope_fs_static",
+   "unit": "FS",
+   "comparison": ">=",
+   "value": 1.2,
+   "applies_to": [
+    "*:moderada"
+   ],
+   "summary": {
+    "es": "FS mínimo con consecuencia moderadamente seria (la consecuencia no seria no tiene criterio).",
+    "en": "Minimum FoS for a moderately serious consequence (a not serious consequence has no criterion)."
+   }
+  },
+  {
+   "id": "WA-3.2-seria",
+   "instrument": "DMIRS (2019) Ground control management in Western Australian mining operations: Guideline",
+   "article": "tabla 3.2",
+   "page": "no anotada",
+   "source": "dmirs2019",
+   "force": "guide",
+   "verification": "V1",
+   "effective_from": "2019-01-01",
+   "check": "slope_fs_static",
+   "unit": "FS",
+   "comparison": ">=",
+   "value": 1.5,
+   "applies_to": [
+    "*:seria"
+   ],
+   "summary": {
+    "es": "FS mínimo con consecuencia seria o de largo plazo (depósito de relaves, rampa principal, falla grande hacia zonas de trabajo).",
+    "en": "Minimum FoS for a serious or long-term consequence (tailings storage, main ramp, large failure towards work areas)."
+   }
+  },
+  {
+   "id": "WA-3.2-extrema",
+   "instrument": "DMIRS (2019) Ground control management in Western Australian mining operations: Guideline",
+   "article": "tabla 3.2",
+   "page": "no anotada",
+   "source": "dmirs2019",
+   "force": "guide",
+   "verification": "V1",
+   "effective_from": "2019-01-01",
+   "check": "slope_fs_static",
+   "unit": "FS",
+   "comparison": ">=",
+   "value": 2.0,
+   "applies_to": [
+    "*:extrema"
+   ],
+   "summary": {
+    "es": "FS mínimo con consecuencia extrema o de largo plazo (taludes permanentes que afectan infraestructura pública después del cierre).",
+    "en": "Minimum FoS for an extreme or long-term consequence (permanent slopes affecting public infrastructure after closure)."
+   }
+  }
+ ]
+}

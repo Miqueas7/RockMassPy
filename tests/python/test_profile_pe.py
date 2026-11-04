@@ -32,7 +32,7 @@ TABLE = [
     ("PE-A19-area", "Anexo 19, num. 2.1 y 2.2", "237", LAW, "refuge_area_per_person", 1.5, ">=", "m2/person", (), D17),
     ("PE-A19-inspeccion", "Anexo 19, num. 9.1", "238", LAW, "none", 3, None, "months", (), D17),
     ("PE-A19-servicios", "Anexo 19, num. 2 a 8, 9.2 y 10", "237–238", LAW, "none", None, None, "", (), D17),
-    ("PE-264", "art. 264", "128", LAW, "none", 100, None, "years", (), D16),
+    ("PE-264", "art. 264", "128", LAW, "pseudostatic_analysis_present", 100, ">=", "years", ("global:*",), D16),
     ("OSI-autosoporte-20h", "§8.4", "80 / 81", GUIDE, "standup_time", 20, "<=", "h", (), OSI),
     ("OSI-fs-corto", "Tabla 5-1", "47 / 48", GUIDE, "fs_minimum", 1.1, ">=", "FS", ("corto",), OSI),
     ("OSI-fs-mediano", "Tabla 5-1", "47 / 48", GUIDE, "fs_minimum", 1.3, ">=", "FS", ("mediano",), OSI),

@@ -1,7 +1,7 @@
 import math
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import assume, given, strategies as st
 
 import rockmasspy as rm
 
@@ -191,10 +191,24 @@ def test_fisher_errores():
 _line = st.builds(rm.LineOrientation, st.floats(0, 359.9), st.floats(0, 90))
 
 
+def _vec(t, p):
+    t, p = math.radians(t), math.radians(p)
+    return (math.cos(p) * math.cos(t), math.cos(p) * math.sin(t), math.sin(p))
+
+
+def _eig_gap(lines):
+    """Brecha entre los dos autovalores mayores de T = Σ u uᵀ, sobre n (0: media de ejes no definida)."""
+    np = pytest.importorskip("numpy")
+    U = np.array([_vec(x.trend_deg, x.plunge_deg) for x in lines])
+    w = np.linalg.eigvalsh(U.T @ U)
+    return (w[2] - w[1]) / len(lines)
+
+
 @given(st.lists(_line, min_size=2, max_size=8), st.lists(st.floats(0, 359.9), min_size=1, max_size=4))
 def test_fisher_invertir_polo_horizontal_no_cambia(poles, trends):
     # un polo horizontal en t y en t + 180 es el mismo eje: media y kappa no cambian
     flat = [rm.LineOrientation(t, 0) for t in trends]
+    assume(_eig_gap(poles + flat) > 1e-6)  # con los dos autovalores mayores iguales la media no está definida
     flipped = [rm.LineOrientation((t + 180) % 360, 0) for t in trends]
     a, b = rm.fisher_stats(poles + flat), rm.fisher_stats(poles + flipped)
     assert a.resultant_length == pytest.approx(b.resultant_length, abs=1e-9)
@@ -252,3 +266,36 @@ def test_fisher_media_horizontal_no_depende_del_orden():
     a = rm.fisher_stats([rm.LineOrientation(t, 0) for t in (10, 190, 20)])
     b = rm.fisher_stats([rm.LineOrientation(t, 0) for t in (190, 10, 20)])
     assert a.mean.trend_deg == pytest.approx(b.mean.trend_deg, abs=1e-9) and a.mean.trend_deg < 180
+
+
+def fisher_dispersed_families(seed=5, count=1000):
+    """Familias dispersas (30 o 45° alrededor de un polo casi horizontal) con 1 o 2 polos horizontales: cada una como
+    (polos, la misma en otro orden y con los horizontales volteados)."""
+    import random
+
+    rng = random.Random(seed)
+
+    def line(v):
+        if v[2] < 0:
+            v = tuple(-c for c in v)
+        return rm.LineOrientation(math.degrees(math.atan2(v[1], v[0])) % 360, math.degrees(math.asin(min(1.0, v[2]))))
+
+    out = []
+    for k in range(count):
+        spread = 30 if k % 2 else 45
+        t0 = rng.uniform(0, 360)
+        poles = [line(_vec(t0 + rng.gauss(0, spread), rng.gauss(0, spread))) for _ in range(rng.randint(3, 8))]
+        flat = [rng.uniform(0, 360) for _ in range(rng.randint(1, 2))]
+        a = poles + [rm.LineOrientation(t, 0) for t in flat]
+        b = list(reversed(poles)) + [rm.LineOrientation((t + 180) % 360, 0) for t in reversed(flat)]
+        rng.shuffle(b)
+        out.append((a, b))
+    return out
+
+
+def test_fisher_familias_dispersas_no_dependen_del_orden_ni_del_volteo():
+    # con dos pasadas desde el primer polo, entre 211 y 497 de cada 1000 cambiaban (saltos de hasta 90°)
+    for a, b in fisher_dispersed_families():
+        fa, fb = rm.fisher_stats(a), rm.fisher_stats(b)
+        assert fa.resultant_length == pytest.approx(fb.resultant_length, abs=1e-9)
+        assert rm.angle_between(fa.mean, fb.mean) < 1e-6

@@ -29,6 +29,7 @@
 #include "rockmasspy/stereonet.hpp"
 #include "rockmasspy/wedge.hpp"
 #include "rockmasspy/yield_coefficient.hpp"
+#include "rockmasspy/sarma.hpp"
 #include "rockmasspy/toppling.hpp"
 #include "rockmasspy/bench.hpp"
 #include "rockmasspy/newmark.hpp"
@@ -651,6 +652,33 @@ NB_MODULE(_rockmasspy_core, m) {
             return le_yield_coefficient(s, f, method, o.value_or(LeOptions{}));
         },
         nb::arg("section"), nb::arg("surface"), nb::arg("method"), nb::arg("options") = nb::none());
+
+    // Sarma con tajadas no verticales (cuñas rígidas, equilibrio de fuerzas)
+    nb::class_<SarmaInput>(m, "SarmaInput",
+                           "Sarma slip surface (polyline, x increasing) and one interface angle per interior vertex "
+                           "(degrees counterclockwise from +x in the section's coordinates; 90 = vertical).")
+        .def(nb::init<>())
+        .def_rw("base", &SarmaInput::base).def_rw("interface_angles_deg", &SarmaInput::interface_angles_deg);
+    nb::class_<SarmaOptions>(m, "SarmaOptions", "Tolerance, iteration limit and optional pattern search of the angles.")
+        .def(nb::init<>())
+        .def_rw("tolerance", &SarmaOptions::tolerance).def_rw("max_iterations", &SarmaOptions::max_iterations)
+        .def_rw("optimize_angles", &SarmaOptions::optimize_angles)
+        .def_rw("angle_min_deg", &SarmaOptions::angle_min_deg).def_rw("angle_max_deg", &SarmaOptions::angle_max_deg);
+    nb::class_<SarmaWedge>(m, "SarmaWedge",
+                           "One wedge, left to right: area, weight, base forces and the forces on its right interface.")
+        .def_ro("area", &SarmaWedge::area).def_ro("weight", &SarmaWedge::weight)
+        .def_ro("base_normal", &SarmaWedge::base_normal).def_ro("base_shear_strength", &SarmaWedge::base_shear_strength)
+        .def_ro("interface_normal_right", &SarmaWedge::interface_normal_right)
+        .def_ro("interface_shear_right", &SarmaWedge::interface_shear_right)
+        .def_ro("base_material", &SarmaWedge::base_material);
+    nb::class_<SarmaResult>(m, "SarmaResult",
+                            "Sarma factor of safety and critical acceleration Kc (None if not found), angles and wedges.")
+        .def_ro("factor_of_safety", &SarmaResult::factor_of_safety)
+        .def_ro("critical_acceleration", &SarmaResult::critical_acceleration)
+        .def_ro("interface_angles_deg", &SarmaResult::interface_angles_deg).def_ro("wedges", &SarmaResult::wedges)
+        .def_ro("info", &SarmaResult::info).def_ro("warnings", &SarmaResult::warnings)
+        .def_ro("notes", &SarmaResult::notes);
+    m.def("sarma_fs", &sarma_fs, nb::arg("section"), nb::arg("input"), nb::arg("options") = SarmaOptions());
 
     // Equilibrio límite 2D por tajadas
     nb::class_<Circle>(m, "Circle", "Circular slip surface: centre and radius.")

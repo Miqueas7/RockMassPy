@@ -152,3 +152,18 @@ def test_readme_limit_equilibrium_example(archivo, titulo):
     with contextlib.redirect_stdout(salida):
         exec(compile(codigo[0], archivo, "exec"), {})
     assert salida.getvalue().splitlines() == esperado
+
+
+CSECCION = [("README.md", "## Acceptance criteria and Sarma"), ("README.es.md", "## Criterios de aceptación y Sarma")]
+
+
+@pytest.mark.parametrize("archivo,titulo", CSECCION)
+def test_readme_criteria_sarma_example(archivo, titulo):
+    codigo = bloques(archivo, titulo)
+    assert len(codigo) == 1, f"{archivo}: expected one python block under {titulo!r}"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[0].splitlines() if ln.startswith("print(") and "#" in ln]
+    assert esperado[0] == "1.197 0.0540" and "('NDEP-6-estatico', 'fails')" in esperado
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        exec(compile(codigo[0], archivo, "exec"), {})
+    assert salida.getvalue().splitlines() == esperado

@@ -76,6 +76,41 @@ inline LineOrientation line_of(Vec v, bool canonical_axis = false) {  // v unita
     if (canonical_axis && h < 1e-12) return {0.0, 90.0};  // vertical: tendencia indiferente, se fija en 0
     return {wrap(deg(std::atan2(v[1], v[0]))), deg(std::atan2(z, h))};
 }
+
+/// Autovector unitario del mayor autovalor de una 3x3 simétrica, por Jacobi cíclico (Numerical Recipes §11.1).
+inline Vec principal_axis(std::array<Vec, 3> a) {
+    std::array<Vec, 3> V{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    for (int sweep = 0; sweep < 50; ++sweep) {
+        const double off = std::fabs(a[0][1]) + std::fabs(a[0][2]) + std::fabs(a[1][2]);
+        if (off <= 1e-15 * (std::fabs(a[0][0]) + std::fabs(a[1][1]) + std::fabs(a[2][2]))) break;
+        for (int p = 0; p < 2; ++p)
+            for (int q = p + 1; q < 3; ++q) {
+                if (a[p][q] == 0.0) continue;
+                const double th = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                const double t = (th >= 0.0 ? 1.0 : -1.0) / (std::fabs(th) + std::sqrt(th * th + 1.0));
+                const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+                for (int k = 0; k < 3; ++k) {  // A P, luego Pᵀ (A P), y V P
+                    const double x = a[k][p], y = a[k][q];
+                    a[k][p] = c * x - s * y;
+                    a[k][q] = s * x + c * y;
+                }
+                for (int k = 0; k < 3; ++k) {
+                    const double x = a[p][k], y = a[q][k];
+                    a[p][k] = c * x - s * y;
+                    a[q][k] = s * x + c * y;
+                }
+                for (int k = 0; k < 3; ++k) {
+                    const double x = V[k][p], y = V[k][q];
+                    V[k][p] = c * x - s * y;
+                    V[k][q] = s * x + c * y;
+                }
+            }
+    }
+    int b = 0;
+    for (int i = 1; i < 3; ++i)
+        if (a[i][i] > a[b][b]) b = i;
+    return {V[0][b], V[1][b], V[2][b]};
+}
 }  // namespace stereonet_detail
 
 /// Polo de un plano: tendencia = dirección + 180, inmersión = 90 - buzamiento.
@@ -178,19 +213,31 @@ inline FisherStats fisher_stats(const std::vector<LineOrientation>& poles) {
         v.push_back(vec(p));
     }
     const auto dot = [](const Vec& a, const Vec& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
-    const auto sum = [&](const Vec& ref) {  // suma con cada polo en el hemisferio de ref
-        Vec s{0, 0, 0};
-        for (const auto& u : v) {
-            const double sg = dot(u, ref) < 0.0 ? -1.0 : 1.0;
-            for (int i = 0; i < 3; ++i) s[i] += sg * u[i];
-        }
-        return s;
-    };
     const auto norm = [](const Vec& a) { return std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); };
-    Vec s = sum(v[0]);
-    s = sum(s);  // realinea a la media y recalcula
-    const double r = norm(s);  // R >= 1: el primer polo tiene producto punto >= 0 con cada otro tras alinear, y la 2.ª pasada solo lo aumenta
-    Vec m{s[0] / r, s[1] / r, s[2] / r};
+    // los signos se alinean con el autovector principal del tensor de orientación T = Σ u uᵀ (no depende del orden ni
+    // del sentido de cada polo) y luego con la media, hasta que no cambian
+    std::array<Vec, 3> T{};
+    for (const auto& u : v)
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) T[i][j] += u[i] * u[j];
+    Vec ref = principal_axis(T), s{};
+    std::vector<char> flip(v.size(), 2);  // 2: sin asignar
+    for (int it = 0; it < 100; ++it) {
+        bool changed = false;
+        s = {0, 0, 0};
+        for (std::size_t k = 0; k < v.size(); ++k) {
+            const char f = dot(v[k], ref) < 0.0;
+            changed = changed || f != flip[k];
+            flip[k] = f;
+            for (int i = 0; i < 3; ++i) s[i] += (f ? -1.0 : 1.0) * v[k][i];
+        }
+        // |s| > 0: s·ref = Σ |u·ref| y, en la 1.ª pasada, Σ (u·ref)² es el mayor autovalor (>= n/3); después R no baja
+        const double rs = norm(s);
+        ref = {s[0] / rs, s[1] / rs, s[2] / rs};
+        if (!changed) break;
+    }
+    const double r = norm(s);
+    Vec m = ref;
     if (m[2] < 0.0) m = {-m[0], -m[1], -m[2]};
     const int n = static_cast<int>(poles.size());
     FisherStats out{line_of(m, true), n, r, std::nullopt, std::nullopt,

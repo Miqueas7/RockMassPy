@@ -1,0 +1,83 @@
+{
+ "schema": 1,
+ "profile_id": "NDEP-2021",
+ "jurisdiction": "US-NV",
+ "name": {
+  "es": "Nevada (NDEP, 2021): requisitos de estabilidad de pads de lixiviación",
+  "en": "Nevada (NDEP, 2021): stability requirements for heap leach pads"
+ },
+ "instruments": [
+  "NDEP (2021) Stability requirements for heap leach pads"
+ ],
+ "sources": {
+  "ndep2021": {
+   "title": "Nevada Division of Environmental Protection, Bureau of Mining Regulation and Reclamation (2021). Stability requirements for heap leach pads",
+   "url": "https://www.ndep.nv.gov/uploads/land-mining-regs-guidance-docs/20210308_StabilityReq_HLPs_ADA.pdf"
+  }
+ },
+ "items": [
+  {
+   "id": "NDEP-6-estatico",
+   "instrument": "NDEP (2021) Stability requirements for heap leach pads",
+   "page": "1",
+   "source": "ndep2021",
+   "force": "guide",
+   "verification": "V1",
+   "effective_from": "2021-03-08",
+   "applies_to": [
+    "pad:*"
+   ],
+   "article": "ítem 6",
+   "check": "slope_fs_static",
+   "value": 1.3,
+   "unit": "FS",
+   "comparison": ">=",
+   "summary": {
+    "es": "FS estático mínimo recomendado del pad; modos infinito, rotacional y traslacional (ítem 5).",
+    "en": "Minimum recommended static FoS of the pad; infinite, rotational and translational modes (item 5)."
+   }
+  },
+  {
+   "id": "NDEP-6-seudoestatico",
+   "instrument": "NDEP (2021) Stability requirements for heap leach pads",
+   "page": "1",
+   "source": "ndep2021",
+   "force": "guide",
+   "verification": "V1",
+   "effective_from": "2021-03-08",
+   "applies_to": [
+    "pad:*"
+   ],
+   "article": "ítem 6; PGA del ítem 3",
+   "check": "slope_fs_pseudostatic",
+   "value": 1.05,
+   "unit": "FS",
+   "comparison": ">=",
+   "summary": {
+    "es": "FS seudoestático mínimo recomendado, con la PGA de 10 % de excedencia en 50 años (ítem 3); el kh lo da el usuario.",
+    "en": "Minimum recommended pseudo-static FoS, with the PGA of 10% exceedance in 50 years (item 3); the user gives kh."
+   }
+  },
+  {
+   "id": "NDEP-7-deformacion",
+   "instrument": "NDEP (2021) Stability requirements for heap leach pads",
+   "page": "1",
+   "source": "ndep2021",
+   "force": "guide",
+   "verification": "V1",
+   "effective_from": "2021-03-08",
+   "applies_to": [
+    "pad:*"
+   ],
+   "article": "ítem 7",
+   "check": "deformation_required",
+   "value": 1.05,
+   "unit": "FS",
+   "comparison": "<",
+   "summary": {
+    "es": "Con FS seudoestático menor que 1.05 se exige un análisis de deformación (Newmark) con la PGA completa; el caso de PGA reducida no se revisa.",
+    "en": "A pseudo-static FoS below 1.05 requires a deformation (Newmark) analysis with the full PGA; the reduced-PGA case is not checked."
+   }
+  }
+ ]
+}

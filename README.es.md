@@ -217,7 +217,7 @@ from rockmasspy.verify import verify
 # una estación de refugio inventada: RMR 55 sin sostenimiento declarado, a 400 m del frente, 30 m2 para 20 personas
 st = RefugeStation("E1", "roca", rmr=55, distancia_frente_m=400, area_m2=30, aforo=20)
 v = verify(rm.get_profile("PE-DS024-2016"), as_of="2026-11-02", design=DesignInputs(refuge_stations=(st,)))
-print(sorted(rm.available_profiles()))                  # ['PE-DS024-2016']
+print("PE-DS024-2016" in rm.available_profiles())        # True
 print(v.counts())                                       # {'complies': 2, 'does_not_comply': 1, 'attention': 0, 'note': 0, 'not_checked': 12, 'not_verifiable': 9}
 print(v.exit_code)                                      # 2
 ```
@@ -306,8 +306,8 @@ Lee esto dos veces:
 - **El FS igual a 1 cuenta como falla** (con holgura de 1e-9), una muestra con despegue cuenta como falla y la PoF es
   condicional a que el bloque se forme (se informan `n` y `n_valid`).
 - **La librería nunca dice «aceptable».** Solo un FS menor que 1 y los avisos cambian el código de salida. La PoF, la
-  confiabilidad de la berma y la comparación con Ritchie se informan y no se juzgan: los criterios de aceptación son
-  de la fase 3D, y el análisis es 2D, por metro de talud.
+  confiabilidad de la berma y la comparación con Ritchie se informan y no se juzgan (solo los juzga un criterio de
+  aceptación que tú eliges, más abajo), y el análisis es 2D, por metro de talud.
 - **Privacidad:** `id_bloque` e `id_talud` salen solo en las tablas del informe y en el archivo de resultados, nunca
   en la consola, las figuras ni un mensaje de error. No pongas códigos de labor ni de mina en los nombres de `familia`:
   llegan a los avisos.
@@ -376,8 +376,8 @@ Lee esto dos veces:
 - **Con sismo, usa Spencer o GLE.** Bishop no equilibra fuerzas horizontales, así que un kh alto lo separa de los
   métodos rigurosos (ACADS 1(d) en Slide2, kh 0.15: Bishop 1.016, Spencer 0.991).
 - **La librería nunca dice «aceptable».** Solo un FS igual o menor que 1 (con holgura de 1e-9) y los avisos cambian el
-  código de salida; el FS, ky y el desplazamiento de Newmark se informan y no se juzgan. Los criterios de aceptación
-  son de la fase 3D.
+  código de salida; el FS, ky y el desplazamiento de Newmark se informan y no se juzgan; mira Criterios de aceptación y
+  Sarma.
 - **Privacidad:** `id_seccion`, `id_analisis`, `material`, `registro` y los nombres de línea salen solo en las tablas
   del informe (los dos ids también en el archivo de resultados), nunca en la consola, las figuras ni un mensaje.
 
@@ -424,6 +424,111 @@ Tiempos: con Hoek-Brown, una búsqueda circular de 20×20×11 tarda unos 10 a 15
 repetirla hasta 5 veces.
 
 Mira `examples/10-equilibrio-limite-newmark/`.
+
+## Criterios de aceptación y Sarma
+
+`assess_criteria(...)` y `rockmass slope|le --criteria` comparan cada bloque (3B) y cada análisis de equilibrio límite
+(3C) con un **criterio de aceptación** que tú eliges, y dicen por chequeo **«cumple», «no cumple» o «no verificable»**,
+siempre con el criterio, su fuente, su fuerza (ley o guía) y su marca. Los criterios son perfiles de datos versionados:
+- `READ-STACEY-2009`: Read y Stacey (2009), tabla 9.9, FS estático mínimo y PoF máxima por escala (banco, interrampa,
+  global) y consecuencia; marca V2 (leída en Moffitt 2023, que la reproduce), sin la columna dinámica;
+- `NDEP-2021`: pads de lixiviación de Nevada, FS estático 1.30, seudoestático 1.05 y, bajo 1.05, un análisis de
+  deformación;
+- `DMIRS-WA-2019`: Australia Occidental, FS por consecuencia;
+- `RYAN-PRYOR-2000`: confiabilidad de berma de 50 a 90 %;
+- tu tabla propia (hoja `Criterios`: `escala`, `consecuencia`, `fs_estatico_min`, `fs_seudoestatico_min`,
+  `pof_max_pct`, `confiabilidad_berma_min_pct`, `fuente`), que `rm.load_criteria_table` lee como guía con la marca
+  `user`.
+
+Cada fila de `Bloques` y de `Analisis_LE` lleva `escala` (`banco`, `interrampa`, `global`, `pad`, `botadero`) y
+`consecuencia`; `Analisis_LE` lleva además `periodo_retorno_anios`. El perfil `PE-DS024-2016` verifica el **art. 264**
+del DS 024 (análisis seudoestático de la pendiente general del tajo con período de retorno de 100 años; no fija FS).
+
+**Sarma con tajadas no verticales** (`superficie = sarma`, la base en `linea_superficie` y un ángulo de interfaz por
+vértice interior en `sarma_angulos`, u `opt` para buscarlos) divide la masa en cuñas rígidas con interfaces inclinadas
+y entrega el FS y la aceleración crítica Kc. Es el método para botaderos que deslizan sobre una base débil inclinada.
+Reproduce el problema 4 del manual de verificación de Sarma de Slide (1.1970 frente a 1.198) y, con una sola cuña, el
+bloque planar de Hoek. No acepta Hoek-Brown, agua encharcada ni grieta de tracción.
+
+Lee esto dos veces:
+
+- **La librería nunca dice «aprobado».** Un «no cumple» pide atención (código 2); un «no verificable» es una nota con
+  su razón (sin escala, sin criterio para esa escala, sin análisis probabilístico). Nunca cuenta como «cumple».
+- **Rangos:** cuando un criterio es un rango (PoF de 25 a 50 % en un banco), la política por defecto es el extremo
+  conservador (el alto para un FS mínimo, el bajo para una PoF máxima); `range_policy=` o `--range-policy upper|lower`
+  la cambian, y el valor usado se informa. Un valor igual al límite lo cumple.
+- **Privacidad:** los ids salen solo en las tablas del informe y en los archivos de resultados, nunca en la consola
+  ni en un mensaje.
+
+```python
+import csv
+import tempfile
+from pathlib import Path
+
+import rockmasspy as rm
+from rockmasspy.criteria import criteria_assignments
+
+# Verificación de Sarma de Slide, problema 4 (Hoek 1987): pila de desmonte seca sobre piso cizallado, kN y m
+ground = [(-50, -2.97), (0, 0), (111.4, 76.5), (229.545, 13.6815), (250, 14.9)]
+floor = [(-50, -2.97), (0, 0), (250, 14.9)]
+base = [(0, 0), (108, 6.4), (130, 73.06)]             # dos cuñas, un vértice interior
+s = rm.LeSection()
+s.surface = [rm.Point2(x, y) for x, y in ground]
+top, bottom = rm.LeLayer(), rm.LeLayer()
+top.bottom, top.material = [rm.Point2(x, y) for x, y in floor], 0
+bottom.bottom, bottom.material = [], 1
+pile, sheared = rm.LeMaterial(), rm.LeMaterial()
+pile.unit_weight, pile.cohesion, pile.friction_deg = 15.7, 100, 42
+sheared.unit_weight, sheared.cohesion, sheared.friction_deg = 15.7, 10, 6
+s.layers, s.materials = [top, bottom], [pile, sheared]
+i = rm.SarmaInput()
+i.base, i.interface_angles_deg = [rm.Point2(x, y) for x, y in base], [116.5]  # desde +x, antihorario
+r = rm.sarma_fs(s, i)
+print(f"{r.factor_of_safety:.3f} {r.critical_acceleration:.4f}")  # 1.197 0.0540
+
+# La misma sección desde hojas, juzgada (solo para ilustrar) como un pad frente a NDEP (2021)
+d = Path(tempfile.mkdtemp())
+def sheet(name, cols, rows):
+    with open(d / f"{name}.csv", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, cols, restval="")
+        w.writeheader()
+        w.writerows(rows)
+    return d / f"{name}.csv"
+src = {"Geometria": sheet("Geometria", rm.GEOMETRY_COLUMNS, [
+           dict(id_seccion="S", linea=n, x_m=x, y_m=y)
+           for n, pts in (("superficie", ground), ("piso", floor), ("falla", base)) for x, y in pts]),
+       "Estratos": sheet("Estratos", rm.LAYER_COLUMNS, [dict(id_seccion="S", orden=1, material="pila", linea_base="piso"),
+                                                       dict(id_seccion="S", orden=2, material="piso")]),
+       "Materiales_LE": sheet("Materiales_LE", rm.MATERIAL_COLUMNS, [
+           dict(material="pila", modelo="mohr_coulomb", peso_unitario_kn_m3=15.7, cohesion_kpa=100, friccion_grados=42),
+           dict(material="piso", modelo="mohr_coulomb", peso_unitario_kn_m3=15.7, cohesion_kpa=10, friccion_grados=6)]),
+       "Analisis_LE": sheet("Analisis_LE", rm.ANALYSIS_COLUMNS, [
+           dict(id_analisis="A", id_seccion="S", superficie="sarma", linea_superficie="falla", sarma_angulos="116.5",
+                base_modelo_m=-10, escala="pad", consecuencia="media")])}
+le = rm.assess_le(src)
+checks = rm.assess_criteria(rm.get_profile("NDEP-2021"), le=le, assignments=criteria_assignments(le=le))
+print(f"{le[0].sarma.factor_of_safety:.3f}")          # 1.197
+print(rm.criteria_counts(checks))                     # {'checks': 3, 'meets': 0, 'fails': 1, 'not_verifiable': 2}
+print([(c.item_id, c.status) for c in checks][0])     # ('NDEP-6-estatico', 'fails')
+print(checks[1].reason)                               # no pseudo-static analysis
+```
+
+`rm.save_criteria_results` escribe un chequeo por fila (hoja `Criterios_resultados`) y
+`report.build_slope_report(..., criteria=..., criteria_profile=..., profile_checks=...)` arma el informe de taludes
+completo: resumen ejecutivo, alcance y criterios, cinemática, bloques, equilibrio límite y Sarma, verificación de
+criterios, normativa (art. 264), avisos y métodos. Desde la consola:
+
+```bash
+rockmass le --geometry Geometria.csv --layers Estratos.csv --materials Materiales_LE.csv --analyses Analisis_LE.csv \
+    --records Sismos.csv --criteria READ-STACEY-2009 --profile PE-DS024-2016 --criteria-output criterios.csv
+rockmass slope --faces Taludes.csv --families Familias.csv --blocks Bloques.csv --criteria Criterios.csv
+```
+
+Opciones: `--criteria ID|CRITERIOS.csv|.xlsx`, `--criteria-output RES.csv|.xlsx`, `--range-policy
+conservative|upper|lower` (las dos piden `--criteria`) y, en `rockmass le`, `--profile PE-DS024-2016`. El resumen
+imprime `meets: a, fails: b, not verifiable: c` y los «no cumple» agrupados por regla, sin ids.
+
+Mira `examples/11-criterios-sarma/`.
 
 ## Métodos
 

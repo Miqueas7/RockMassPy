@@ -77,6 +77,8 @@ class BlockRow:
     ancho_berma_m: float | None
     ancho_requerido_m: float | None
     retroanalisis: str | None
+    escala: str | None
+    consecuencia: str | None
     fila: int
     hoja: str = field(default=BLOCKS_SHEET, repr=False, compare=False)
 
@@ -103,7 +105,8 @@ class DistributionRow:
 
 BLOCK_COLUMNS = tuple(f.name for f in fields(BlockRow) if f.name not in ("fila", "hoja"))
 DISTRIBUTION_COLUMNS = tuple(f.name for f in fields(DistributionRow) if f.name not in ("fila", "hoja"))
-_BLOCK_TEXT = {"id_bloque", "id_talud", "modelo", "familia_1", "familia_2", "perno_tipo", "retroanalisis"}
+_BLOCK_TEXT = {"id_bloque", "id_talud", "modelo", "familia_1", "familia_2", "perno_tipo", "retroanalisis", "escala",
+               "consecuencia"}
 _DIST_TEXT = {"id_bloque", "variable", "distribucion"}
 
 _INF = math.inf
@@ -271,6 +274,9 @@ def _block(vals, n, sheet):
             vals[c] = _word(vals[c])
             if vals[c] not in allowed:
                 bad(c, f"must be one of {', '.join(allowed)}")
+    for c in ("escala", "consecuencia"):  # se validan contra el perfil en assess_criteria, no aquí
+        if vals[c] is not None:
+            vals[c] = _word(vals[c]) or None
     return BlockRow(**vals, fila=n, hoja=sheet)
 
 
@@ -358,6 +364,9 @@ class BlockResult:
     warnings: tuple[str, ...]
     notes: tuple[str, ...]
     methods: tuple[rm.MethodInfo, ...]
+    escala: str | None = field(default=None, repr=False)
+    consecuencia: str | None = field(default=None, repr=False)
+    kh: float = 0.0  # el de la fila (0 si no lo trae): con kh > 0 el FS es seudoestático (criterios, 3D)
 
     @property
     def fs(self) -> float | None:
@@ -513,7 +522,7 @@ def _assess_one(order, r: BlockRow, s: SlopeResult, dists, iterations, sampling,
                 warnings.insert(0, _LATERAL_WARNING)
     uniq = {m.method_id: m for m in methods}
     return BlockResult(r.id_bloque, r.id_talud, order, model, det, back, prob, berm, _unique(warnings),
-                       _unique(notes), tuple(uniq.values()))
+                       _unique(notes), tuple(uniq.values()), escala=r.escala, consecuencia=r.consecuencia, kh=r.kh or 0.0)
 
 
 def _int_arg(v, name, lo):

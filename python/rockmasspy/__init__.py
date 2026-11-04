@@ -75,3 +75,7 @@ from .limit_equilibrium import (ANALYSIS_COLUMNS, GEOMETRY_COLUMNS, LAYER_COLUMN
                                 MATERIAL_COLUMNS, RECORD_COLUMNS, Accelerogram, AnalysisRow, GeometryRow, LayerRow,
                                 LeAnalysisResult, LeInputs, MaterialRow, RecordRow, assess_le, le_attention, le_counts,
                                 le_warning_counts, load_le_inputs, read_accelerogram, save_le_results)
+from .normative import CONSEQUENCES, RANGE_POLICIES, SCALES  # noqa: E402,F401
+from .criteria import (CRITERIA_COLUMNS, CRITERIA_RESULT_COLUMNS, CRITERIA_STATUSES, CriterionCheck,  # noqa: E402,F401
+                       assess_criteria, criteria_attention, criteria_counts, load_criteria_table,
+                       save_criteria_results)

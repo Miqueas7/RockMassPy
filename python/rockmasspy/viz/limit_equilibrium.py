@@ -48,13 +48,65 @@ def _critical_trace(result):
     return ([s.x_left for s in sl] + [sl[-1].x_right], [s.base_y_left for s in sl] + [sl[-1].base_y_right])
 
 
+def _ray_hit(v, angle_deg, surf):
+    """Primer corte con el terreno de la interfaz que sube desde el vértice `v` con su ángulo (como el núcleo)."""
+    dx, dy = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+    best = None
+    for p, q in zip(surf, surf[1:]):
+        ex, ey = q.x - p.x, q.y - p.y
+        den = dx * ey - dy * ex
+        if abs(den) < 1e-12:
+            continue
+        t = ((p.x - v.x) * ey - (p.y - v.y) * ex) / den
+        s = ((p.x - v.x) * dy - (p.y - v.y) * dx) / den
+        if t > 1e-9 and -1e-9 <= s <= 1 + 1e-9 and (best is None or t < best):
+            best = t
+    return None if best is None else (v.x + best * dx, v.y + best * dy)
+
+
+def _centroid(poly):
+    a = cx = cy = 0.0
+    for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+        w = x0 * y1 - x1 * y0
+        a, cx, cy = a + w, cx + (x0 + x1) * w, cy + (y0 + y1) * w
+    if abs(a) < 1e-12:
+        return sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly)
+    return cx / (3 * a), cy / (3 * a)
+
+
+def _sarma_wedges(ax, result, surf, handles, style):
+    """Interfaces de Sarma desde cada vértice interior hasta el terreno y el número de cada cuña en su centroide."""
+    from matplotlib.lines import Line2D
+
+    base = list(result.surface.polyline)
+    tops = [(base[0].x, base[0].y)]
+    for v, ang in zip(base[1:-1], result.sarma.interface_angles_deg):
+        top = _ray_hit(v, ang, surf)
+        if top is not None:
+            ax.plot([v.x, top[0]], [v.y, top[1]], color=_CRITICAL, lw=1.4, zorder=6)
+        tops.append(top or (v.x, v.y))
+    tops.append((base[-1].x, base[-1].y))
+    if len(base) > 2:
+        handles.append(Line2D([], [], color=_CRITICAL, lw=1.4, label=text("le_sarma_interfaces", style.lang)))
+    for k in range(len(base) - 1):  # una cuña por tramo de base
+        (xa, ya), (xb, yb) = tops[k], tops[k + 1]
+        lo, hi = sorted((xa, xb))
+        ground = sorted(((p.x, p.y) for p in surf if lo < p.x < hi), reverse=True)
+        poly = [(base[k].x, base[k].y), (base[k + 1].x, base[k + 1].y), (xb, yb), *ground, (xa, ya)]
+        x, y = _centroid(poly)
+        ax.text(x, y, str(k + 1), ha="center", va="center", fontsize=style.font_size + 1, fontweight="bold",
+                zorder=8, bbox=dict(boxstyle="circle", facecolor="white", edgecolor=_CRITICAL, linewidth=1.0))
+
+
 def plot_le_section(result, *, title: str = "", style: Style = Style()):
-    """Sección con estratos, línea piezométrica, superficie crítica, las 10 mejores en gris, centro y FS por método."""
+    """Sección con estratos, línea piezométrica, superficie crítica, las 10 mejores en gris, centro y FS por método.
+
+    En Sarma dibuja la base, las interfaces y el número de cada cuña, y pone en el recuadro el FS y Kc."""
     import numpy as np
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
 
-    lang, sec = style.lang, result.section
+    lang, sec, sarma = style.lang, result.section, result.sarma
     if sec is None:
         raise ValueError("result has no section: use a result from assess_le")
     fig = new_figure(style)
@@ -104,8 +156,10 @@ def plot_le_section(result, *, title: str = "", style: Style = Style()):
     if result.surface is not None:
         x, y = crit or _slip_trace(result.surface, xs, ground)
         ax.plot(x, y, color=_CRITICAL, lw=2.4, zorder=6)
-        key = "le_given" if result.surface_type == "given" else "le_critical"
+        key = {"given": "le_given", "sarma": "le_sarma_base"}.get(result.surface_type, "le_critical")
         handles.append(Line2D([], [], color=_CRITICAL, lw=2.4, label=text(key, lang)))
+        if sarma is not None:
+            _sarma_wedges(ax, result, surf, handles, style)
         c = result.surface.circle
         if c is not None:
             ax.scatter([c.xc], [c.yc], marker="o", c="white", edgecolors="black", linewidths=1.2, s=60, zorder=7)
@@ -117,8 +171,17 @@ def plot_le_section(result, *, title: str = "", style: Style = Style()):
 
     fs_lines = [f"{_method_name(r.method, lang)}: " + (text("le_no_fs", lang) if r.factor_of_safety is None
                                                        else f"FS = {r.factor_of_safety:.3f}") for r in result.results]
+    if sarma is not None:
+        fs = sarma.factor_of_safety
+        fs_lines.append(f"{text('le_method_sarma', lang)}: " + (text("le_no_fs", lang) if fs is None
+                                                               else f"FS = {fs:.3f}"))
+        st = result.sarma_static
+        if st is not None and st.factor_of_safety is not None:
+            fs_lines.append(text("le_fs_static", lang).format(fs=st.factor_of_safety))
     if sec.kh > 0:
         fs_lines.append(f"kh = {sec.kh:g}")
+    if sarma is not None and sarma.critical_acceleration is not None:
+        fs_lines.append(f"Kc = {sarma.critical_acceleration:.3f}")
     if result.yield_ is not None and result.yield_.ky is not None:  # ky de otra superficie (R17): se dice
         ky = result.yield_.ky
         fs_lines.append(f"ky = {ky:.3f}" if result.ky_on_critical else text("le_ky_other", lang).format(ky=ky))
