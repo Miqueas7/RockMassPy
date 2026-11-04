@@ -270,6 +270,25 @@ TEST(SlipSearch, DiscardsAndCounts) {
     EXPECT_EQ(q.evaluated, 0);
 }
 
+// Una piezométrica que no cubre la superficie descartaba en silencio cada superficie que la cruza (revisión, sondeo
+// p9: F&K con la piezométrica desde x = 100 daba FS 33.4 con 5306 de 5605 descartadas). Ahora lanza.
+TEST(SlipSearch, PiezometricMustCoverTheSurface) {
+    LeSection s;
+    s.surface = {{0, 60}, {60, 60}, {140, 20}, {180, 20}};
+    s.layers = {LeLayer{{}, 0}};
+    s.materials = {mc(120, 600, 20)};
+    s.model_base_y = 0;
+    s.water_unit_weight = 62.4;
+    s.piezometric = std::vector<Point2>{{100, 30}, {180, 20}};
+    const std::string e = error_of([&] { search_circular(s, grid(110, 130, 80, 100)); });
+    EXPECT_NE(e.find("piezometric"), std::string::npos) << e;
+    BlockSearch b;
+    b.weak_line = {{0, 30}, {180, 30}};
+    EXPECT_NE(error_of([&] { search_block(s, b); }).find("piezometric"), std::string::npos);
+    s.piezometric = std::vector<Point2>{{0, 30}, {100, 30}, {180, 20}};  // completa: busca
+    EXPECT_TRUE(search_circular(s, grid(110, 130, 80, 100, 4, 4, 5)).best.factor_of_safety.has_value());
+}
+
 TEST(SlipSearch, InvalidInputsNameTheField) {
     const auto s = acads1a();
     const auto g = acads1a_grid();

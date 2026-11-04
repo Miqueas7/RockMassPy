@@ -36,7 +36,8 @@
  *
  * Se descartan, y se cuentan en `discarded`, las superficies que no forman masa, las de masa menor que min_mass_area,
  * las que no convergen o dan FS vacío y las que traen el aviso «m-alpha below 0.2» (estas también en
- * `discarded_malpha`, con una nota). Si el centro crítico final no queda dentro de la malla (en su borde o fuera),
+ * `discarded_malpha`, con una nota). Las bases de estratos y la piezométrica deben cubrir el rango x de la
+ * superficie (si no, lanza con su nombre: si no, descartarían en silencio cada superficie que las cruce). Si el centro crítico final no queda dentro de la malla (en su borde o fuera),
  * aviso «critical centre on the edge of the search grid». Los avisos de la crítica se copian a los de la búsqueda.
  * `top` guarda las 10 mejores de la malla o del bloque (y la afinada delante si mejora), en orden de FS. Todo es
  * determinista: mismo orden de evaluación, sin azar ni hilos.
@@ -119,10 +120,12 @@ inline void validate(const LeSection& s, const SearchOptions& o) {
     probe.circle = Circle{0.0, 0.0, 1.0};  // solo para validar la sección y las opciones
     le_detail::validate(s, probe, o.le);
     validation::require_non_negative(o.min_mass_area, "min_mass_area");
-    // un estrato corto descartaría en silencio cada superficie que lo cruce
+    // un estrato o una piezométrica cortos descartarían en silencio cada superficie que los cruce
     for (std::size_t k = 0; k < s.layers.size(); ++k)
         if (!s.layers[k].bottom.empty() && !le_detail::covers(s.layers[k].bottom, s.surface.front().x, s.surface.back().x))
             le_detail::fail(le_detail::at("layers", k) + ".bottom", "must cover the x range of the ground surface");
+    if (s.piezometric && !le_detail::covers(*s.piezometric, s.surface.front().x, s.surface.back().x))
+        le_detail::fail("piezometric", "must cover the x range of the ground surface");
 }
 
 inline bool has_malpha(const LeResult& r) {

@@ -21,12 +21,22 @@
  * Agua (R11): con línea piezométrica, u = γw·max(y_piezo - y_base, 0) en el punto medio de la base y el ru de los
  * materiales se ignora (nota); sin ella, u = ru·W/b con el ru del material de la base. Los vértices de la piezométrica
  * y sus cortes con la superficie de falla son bordes de tajada.
+ * Agua encharcada (R16): donde la piezométrica queda sobre el terreno (lago de tajo, poza), la presión
+ * p = γw·max(y_piezo - y_terreno, 0) actúa normal al terreno hacia la masa. Por tajada: peso p_med·b hacia abajo y
+ * empuje p_med·b·(pendiente del terreno) hacia la masa, en el centroide del trapecio de presiones sobre el tramo de
+ * terreno (los cortes piezométrica-terreno son bordes, así p es lineal en cada tajada). Entra como carga externa en
+ * todos los métodos: en N' y en la fuerza motora (Ordinario, Janbu, R y T de Spencer/M-P), en el momento respecto del
+ * centro (Bishop) y en la ecuación de momentos de Zhu con su brazo desde el medio de la base. Nota «ponded water...».
+ * Talud sumergido: Bishop y Janbu dan el FS del talud con peso γ - γw; la suma de fuerzas sobre las bases no cierra el
+ * agua entre tajadas, así que con agua encharcada Spencer y M-P deciden «hacia atrás» también con la fuerza horizontal
+ * de Janbu, y el Ordinario sin fuerza motora da FS vacío con su nota (no «does not move towards the face»).
  * Grieta de tracción (R8): vertical, de profundidad fija zc bajo la superficie. La superficie de falla se corta donde
  * la línea a zc bajo el terreno la encuentra por primera vez desde la cresta; la masa termina ahí en una cara
  * vertical. Con llenado f, el agua es una fuerza horizontal P = ½γw(f·zc)² hacia el pie, a f·zc/3 sobre el fondo de la
  * grieta, aplicada a la tajada de la grieta como fuerza externa: momento en Bishop, fuerza horizontal en Janbu, R y T
  * de esa tajada y su momento en Spencer/M-P (equivale a la E de borde sin cortante), y en el Ordinario proyectada sobre
- * la base de esa tajada como kh·W (nota). Si la línea a zc no corta la superficie de falla, la grieta no actúa (nota).
+ * la base de esa tajada como kh·W (nota). Si la línea a zc no corta la superficie de falla, la grieta no actúa (nota);
+ * tampoco si el corte del lado de la cresta queda a menos de 1e-9 del borde de la masa (grieta casi nula, nota).
  * Janbu corregido (R4): FS = f0·FS_Janbu, f0 = 1 + b1 (d/L - 1.4 (d/L)²); d es la mayor distancia de la superficie de
  * falla a la cuerda entre sus extremos y L el largo de la cuerda; b1 = 0.69 si todas las bases tienen c > 0 y φ > 0,
  * 0.50 si todas tienen c = 0, 0.31 si todas tienen φ = 0, y 0.69 con nota si se mezclan. Fuente secundaria (Abramson
@@ -240,6 +250,29 @@ inline void sort_unique(std::vector<double>& xs) {
     xs = out;
 }
 
+/// x donde dos polilíneas se cortan o se tocan, en su rango x común.
+inline std::vector<double> poly_cuts(const Poly& p, const Poly& s) {
+    std::vector<double> xs;
+    const double lo = std::max(p.front().x, s.front().x), hi = std::min(p.back().x, s.back().x);
+    std::vector<double> v{lo, hi};
+    for (const auto& q : p)
+        if (q.x > lo && q.x < hi) v.push_back(q.x);
+    for (const auto& q : s)
+        if (q.x > lo && q.x < hi) v.push_back(q.x);
+    sort_unique(v);
+    auto d = [&](double x) { return interp(p, x) - interp(s, x); };
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        const double di = d(v[i]);
+        if (std::fabs(di) <= kTol) xs.push_back(v[i]);
+        if (i + 1 < v.size()) {
+            const double dj = d(v[i + 1]);
+            if ((di > kTol && dj < -kTol) || (di < -kTol && dj > kTol)) xs.push_back(v[i] + (v[i + 1] - v[i]) * di / (di - dj));
+        }
+    }
+    sort_unique(xs);
+    return xs;
+}
+
 /// x donde la superficie de falla corta o toca la polilínea p (rama inferior del círculo).
 inline std::vector<double> slip_cuts(const Geo& g, const Poly& p) {
     std::vector<double> xs;
@@ -258,23 +291,7 @@ inline std::vector<double> slip_cuts(const Geo& g, const Poly& p) {
             }
         }
     } else {
-        const Poly& s = *g.polyline;
-        const double lo = std::max(p.front().x, s.front().x), hi = std::min(p.back().x, s.back().x);
-        std::vector<double> v{lo, hi};
-        for (const auto& q : p)
-            if (q.x > lo && q.x < hi) v.push_back(q.x);
-        for (const auto& q : s)
-            if (q.x > lo && q.x < hi) v.push_back(q.x);
-        sort_unique(v);
-        auto d = [&](double x) { return interp(p, x) - interp(s, x); };
-        for (std::size_t i = 0; i < v.size(); ++i) {
-            const double di = d(v[i]);
-            if (std::fabs(di) <= kTol) xs.push_back(v[i]);
-            if (i + 1 < v.size()) {
-                const double dj = d(v[i + 1]);
-                if ((di > kTol && dj < -kTol) || (di < -kTol && dj > kTol)) xs.push_back(v[i] + (v[i + 1] - v[i]) * di / (di - dj));
-            }
-        }
+        xs = poly_cuts(p, *g.polyline);
     }
     sort_unique(xs);
     return xs;
@@ -337,6 +354,8 @@ struct Slice {
     std::optional<double> tangent_at;  // σn' donde se tomó la última tangente de Hoek-Brown
     double Np = 0.0, E = 0.0, X = 0.0;
     double Px = 0.0, Py = 0.0;  // fuerza horizontal externa hacia el pie (agua de la grieta) y la cota de su línea
+    // agua encharcada sobre el terreno (R16): peso Qv hacia abajo y empuje Qh (+x hacia el pie), aplicados en (qx, qy)
+    double Qv = 0.0, Qh = 0.0, qx = 0.0, qy = 0.0;
 };
 
 /// Pesos, centroide y material de la base de la tajada [xa, xb].
@@ -417,6 +436,19 @@ inline Slice build_slice(const Geo& g, const LeSection& s, double xa, double xb)
         t.mat = t.cand.front();
         if (g.piezo) {
             t.u = s.water_unit_weight * std::max(interp(*g.piezo, xm) - ym, 0.0);
+            // p = γw·(y_piezo - y_terreno)⁺ es lineal en la tajada (los cortes piezométrica-terreno son bordes): la
+            // resultante p_med·b por la normal del terreno va en el centroide del trapecio de presiones
+            auto p = [&](double x) {
+                const double d = interp(*g.piezo, x) - interp(g.ground, x);
+                return d > kTol ? s.water_unit_weight * d : 0.0;
+            };
+            const double pa = p(xa), pb = p(xb);
+            if (pa + pb > 0.0) {
+                t.Qv = 0.5 * (pa + pb) * t.b;
+                t.Qh = t.Qv * (interp(g.ground, xb) - interp(g.ground, xa)) / t.b;  // pendiente < 0 en la cara: hacia la masa
+                t.qx = xa + t.b * (pa + 2.0 * pb) / (3.0 * (pa + pb));
+                t.qy = interp(g.ground, t.qx);
+            }
         } else {
             double ru = 0.0;
             for (int m : t.cand) ru = std::max(ru, s.materials[m].ru);
@@ -618,8 +650,11 @@ inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
         double xk = std::numeric_limits<double>::infinity();
         if (zc > 0.0)
             for (double x : slip_cuts(g, line))
-                if (x > xl + kTol && x < xr - kTol) xk = std::min(xk, x);
-        if (std::isfinite(xk)) {
+                if (x > xl - kTol && x < xr - kTol) xk = std::min(xk, x);
+        if (std::isfinite(xk) && xk <= xl + kTol) {
+            // grieta casi nula: el corte del lado de la cresta cae sobre xl y el siguiente sería el del pie
+            out.notes.push_back("tension crack too shallow to cut the slip surface inside the mass: crack ignored");
+        } else if (std::isfinite(xk)) {
             xl = xk;
             const double hw = s.crack->water_fill * zc;
             crack_force = 0.5 * s.water_unit_weight * hw * hw;
@@ -653,6 +688,9 @@ inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
         for (double x : slip_cuts(g, *p))
             if (inside(x)) xs.push_back(x);
     }
+    if (g.piezo)  // donde la piezométrica sale sobre el terreno empieza el agua encharcada
+        for (double x : poly_cuts(*g.piezo, g.ground))
+            if (inside(x)) xs.push_back(x);
     if (g.polyline)
         for (const auto& q : *g.polyline)
             if (inside(q.x)) xs.push_back(q.x);
@@ -769,14 +807,21 @@ struct Solve {
     std::vector<std::string> notes;
 };
 
+/// Cargas de la tajada: vertical (peso más agua encharcada) y horizontal hacia el pie (sismo, grieta y empuje del agua).
+inline double vertical_load(const Slice& t) { return t.W + t.Qv; }
+inline double horizontal_load(const Slice& t, double kh) { return kh * t.W + t.Px + t.Qh; }
+/// Fuerza motora a lo largo de la base sin fuerzas entre tajadas.
+inline double driving_force(const Slice& t, double kh) {
+    return vertical_load(t) * t.sa + horizontal_load(t, kh) * t.ca;
+}
 /// N' de la base por equilibrio vertical sin cortante entre tajadas (Bishop y Janbu).
 inline double vertical_normal(const Slice& t, double F) {
     const double ma = t.ca + t.sa * t.tf / F;
-    return (t.W - t.u * t.b - t.c * t.l * t.sa / F) / ma;
+    return (vertical_load(t) - t.u * t.b - t.c * t.l * t.sa / F) / ma;
 }
-/// N' sin fuerzas entre tajadas (la del Ordinario): peso, sismo y fuerza externa proyectados sobre la normal.
+/// N' sin fuerzas entre tajadas (la del Ordinario): peso, sismo y fuerzas externas proyectados sobre la normal.
 inline double ordinary_normal(const Slice& t, double kh) {
-    return t.W * t.ca - kh * t.W * t.sa - t.Px * t.sa - t.u * t.l;
+    return vertical_load(t) * t.ca - horizontal_load(t, kh) * t.sa - t.u * t.l;
 }
 inline void ordinary_normals(std::vector<Slice>& sl, double kh) {
     for (auto& t : sl) t.Np = std::max(0.0, ordinary_normal(t, kh));
@@ -809,10 +854,17 @@ inline Solve ordinary(std::vector<Slice>& sl, const LeSection& s) {
     int clipped = 0;
     for (const auto& t : sl) {
         num += t.c * t.l + t.Np * t.tf;
-        den += t.W * t.sa + s.kh * t.W * t.ca + t.Px * t.ca;
+        den += driving_force(t, s.kh);
         clipped += t.mat >= 0 && ordinary_normal(t, s.kh) < 0.0;
     }
-    if (!(den > 0.0)) return backward();
+    if (!(den > 0.0)) {
+        if (std::none_of(sl.begin(), sl.end(), [](const Slice& t) { return t.Qv > 0.0; })) return backward();
+        Solve r;  // talud sumergido: la suma sobre las bases ignora el agua entre tajadas
+        r.explained = true;
+        r.notes.push_back("Ordinary: no driving force along the bases with the ponded water load (the method neglects "
+                          "the water between slices)");
+        return r;
+    }
     Solve r;
     if (sl.front().Px > 0.0)
         r.notes.push_back("Ordinary: the crack water force acts on the crack slice, projected on its base like the "
@@ -866,10 +918,11 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
             const double mx = 0.5 * (t.xa + t.xb) - O->x, my = 0.5 * (t.ya + t.yb) - O->y;
             aS[i] = -(mx * t.sa + my * t.ca);
             aN[i] = mx * t.ca - my * t.sa;
-            driving += t.W * (O->x - t.xg) + kh * t.W * (O->y - t.yg) + t.Px * (O->y - t.Py);
+            driving += t.W * (O->x - t.xg) + kh * t.W * (O->y - t.yg) + t.Px * (O->y - t.Py) +
+                       t.Qv * (O->x - t.qx) + t.Qh * (O->y - t.qy);
         }
     } else {
-        for (const auto& t : sl) driving += t.W * t.sa / t.ca + kh * t.W + t.Px;
+        for (const auto& t : sl) driving += vertical_load(t) * t.sa / t.ca + horizontal_load(t, kh);
     }
     if (!(driving > 0.0)) return backward();
     if (bishop && g.polyline)
@@ -888,7 +941,7 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
     double F = 1.0, on = 0.0, od = 0.0;
     for (const auto& t : sl) {
         on += t.c * t.l + t.Np * t.tf;
-        od += t.W * t.sa + kh * t.W * t.ca;
+        od += driving_force(t, kh);
     }
     if (od > 0.0 && on / od > 0.0 && std::isfinite(on / od)) F = on / od;
     std::vector<double> prev = normal_stresses(sl);
@@ -949,8 +1002,16 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         for (std::size_t i = 0; i < n; ++i) sl[i].Np = (*seed)[i].Np;
     choose(sl, s);
     double driving = 0.0;
-    for (const auto& t : sl) driving += t.W * t.sa + kh * t.W * t.ca + t.Px * t.ca;
-    if (!(driving > 0.0)) return backward();
+    double horizontal = 0.0;  // fuerza motora horizontal de Janbu: ahí el agua entre tajadas se cancela
+    bool pond = false;
+    for (const auto& t : sl) {
+        driving += driving_force(t, kh);
+        horizontal += vertical_load(t) * t.sa / t.ca + horizontal_load(t, kh);
+        pond = pond || t.Qv > 0.0;
+    }
+    // con agua encharcada la suma sobre las bases no cierra el agua entre tajadas (talud sumergido: < 0 con la masa
+    // empujada hacia la cara); se decide con la horizontal
+    if (!(driving > 0.0) && !(pond && horizontal > 0.0)) return backward();
     if (no_strength(sl)) {
         for (auto& t : sl) t.Np = ordinary_normal(t, kh);
         r.F = 0.0;
@@ -1074,8 +1135,9 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         for (std::size_t i = 0; i < n; ++i) {
             const auto& t = sl[i];
             const double El = i ? sl[i - 1].E : 0.0, fl = i ? fb[i - 1] : 0.0;
-            const double ym = 0.5 * (t.ya + t.yb), hc = t.yg - ym;  // centroide sobre el punto medio de la base
-            num += t.b * (t.E + El) * std::tan(t.alpha) + 2.0 * kh * t.W * hc + 2.0 * t.Px * (t.Py - ym);
+            const double xm = 0.5 * (t.xa + t.xb), ym = 0.5 * (t.ya + t.yb), hc = t.yg - ym;  // brazos desde el medio de la base
+            num += t.b * (t.E + El) * std::tan(t.alpha) + 2.0 * kh * t.W * hc + 2.0 * t.Px * (t.Py - ym) +
+                   2.0 * t.Qv * (t.qx - xm) + 2.0 * t.Qh * (t.qy - ym);
             den += t.b * (fb[i] * t.E + fl * El);
         }
         return lam * den - num;
@@ -1127,7 +1189,7 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         for (std::size_t i = 0; i < n; ++i) {
             const auto& t = sl[i];
             R[i] = ordinary_normal(t, kh) * t.tf + t.c * t.l;
-            T[i] = t.W * t.sa + kh * t.W * t.ca + t.Px * t.ca;
+            T[i] = driving_force(t, kh);
         }
         const auto p0 = eval(0.0, F0);
         if (!p0) return fail();
@@ -1325,6 +1387,8 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
                 out.notes.push_back("piezometric line given: the ru of the materials is ignored");
                 break;
             }
+    if (std::any_of(sl.begin(), sl.end(), [](const Slice& t) { return t.Qv > 0.0; }))
+        out.notes.push_back("ponded water above the ground surface modelled as a surface load");
     if (b.air)
         out.warnings.push_back("slip surface crosses the ground surface more than twice: the mass is taken between "
                                "the first and the last cut");

@@ -584,3 +584,13 @@ def test_hoek_brown_constants_validation():
         rm.hb_params_from_constants(-1.0, 0.1, 0.5)
     with pytest.raises(ValueError, match="'a'"):
         rm.hb_params_from_constants(1.0, 0.1, 1.5)
+
+
+def test_agua_encharcada_como_carga():
+    # R16: lago a y = 40 sobre F&K; Bishop independiente del revisor 2.177 (antes 1.356, sin la carga)
+    s = section([(0, 60), (60, 60), (140, 20), (180, 20)], [layer([], 0)], [mc(120, 600, 20)])
+    s.water_unit_weight = 62.4
+    s.piezometric = pts([(0, 40), (180, 40)])
+    r = rm.le_factor_of_safety(s, circle(120, 90, 80), M.Bishop)
+    assert r.factor_of_safety == pytest.approx(2.177, rel=0.005)
+    assert "ponded water above the ground surface modelled as a surface load" in r.notes
