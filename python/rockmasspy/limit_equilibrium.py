@@ -13,6 +13,7 @@ ni a un repr; el archivo de resultados lleva solo `id_analisis` e `id_seccion`. 
 
 import math
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -22,7 +23,7 @@ from .batch import write_table
 from .blocks import _floats, _word, _yes
 from .csv_io import _CsvSource
 from .excel_io import _open, _where
-from .probabilistic import is_failure
+from .probabilistic import _norm, is_failure
 from .slopes import _leer, _rango, _unique
 
 GEOMETRY_SHEET = "Geometria"
@@ -440,6 +441,7 @@ class LeAnalysisResult:
     methods: tuple
     surface: "rm.SlipSurface | None" = field(default=None, repr=False)  # la crítica (para la figura)
     section: "rm.LeSection | None" = field(default=None, repr=False)
+    record: "Accelerogram | None" = field(default=None, repr=False)  # el registro escalado que usó Newmark
 
     @property
     def fs_min(self) -> float | None:
@@ -545,7 +547,7 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
         notes += [f"{_METHOD_WORD[m]}: {t}" for t in r.notes if t not in notes]
         methods.append(r.info)
 
-    yld = nm = None
+    yld = nm = record = None
     if kh > 0 or a.registro is not None:
         static, ysurf = sec, surface  # le_yield_coefficient reemplaza el kh de la sección
         if kh > 0 and search is not None:  # ky sobre la crítica estática: se busca otra vez sin sismo
@@ -572,12 +574,13 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
             ni.scale = 1.0 if a.escala_registro is None else a.escala_registro
             ni.both_directions = True
             nm = rm.newmark_rigid_block(ni)
+            record = Accelerogram(acc.dt_s, tuple(ni.scale * x for x in acc.acceleration_g))
             warnings += [f"newmark: {w}" for w in nm.warnings]
             notes += [f"newmark: {t}" for t in nm.notes]
             methods.append(nm.info)
     uniq = {m.method_id: m for m in methods}
     return LeAnalysisResult(a.id_analisis, a.id_seccion, order, _SURFACES[a.superficie], results, search, yld, nm,
-                            _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec)
+                            _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record)
 
 
 # nombres del núcleo que pueden salir en un error -> columna de Analisis_LE
@@ -626,6 +629,11 @@ def le_counts(results: Iterable[LeAnalysisResult]) -> dict[str, int]:
         out["warnings"] += len(r.warnings)
         out["notes"] += len(r.notes)
     return out
+
+
+def le_warning_counts(results: Iterable[LeAnalysisResult]) -> Counter:
+    """Avisos agrupados entre análisis (sin el conteo del núcleo), para la CLI y el informe."""
+    return Counter(w for r in results for w in {_norm(x) for x in r.warnings})
 
 
 RESULT_COLUMNS = ("id_analisis", "id_seccion", "superficie", "metodo", "fs", "fs_menor_o_igual_1", "lambda",

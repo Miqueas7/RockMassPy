@@ -694,27 +694,84 @@ def _block_blocks(blocks, lang: str, figures: bool) -> tuple:
     return tuple(out)
 
 
+def le_figure(r, lang: str):
+    """Sección de equilibrio límite de un análisis; el título lleva su número de orden, nunca el id."""
+    from ..viz import plot_le_section
+    from ..viz.style import Style
+
+    return plot_le_section(r, title=t("fig_le_section", lang).format(n=r.order), style=Style(lang=lang))
+
+
+def newmark_figure(r, lang: str):
+    """Registro escalado, ky y desplazamiento acumulado de un análisis con Newmark."""
+    from ..viz import plot_newmark
+    from ..viz.style import Style
+
+    return plot_newmark(r.newmark, r.record, r.yield_.ky, title=t("fig_newmark", lang).format(n=r.order),
+                        style=Style(lang=lang))
+
+
+def _le_blocks(le, lang: str, figures: bool) -> tuple:
+    """Tabla «Equilibrio límite» (una fila por método, como el archivo), la de la superficie crítica y las figuras."""
+    from ..limit_equilibrium import _points
+    from ..probabilistic import is_failure
+    from ..viz.style import text
+
+    rows, surf = [], []
+    for r in le:
+        ky = None if r.yield_ is None else r.yield_.ky
+        nm = None if r.newmark is None else r.newmark.displacement_m
+        for x in r.results:
+            fs = x.factor_of_safety
+            rows.append((r.id_analisis, r.id_seccion, t(f"le_surf_{r.surface_type}", lang),
+                         text(f"le_method_{x.method.name}", lang), _num(fs),
+                         "-" if fs is None else t("sl_yes" if is_failure(fs) else "sl_no", lang),
+                         _num(x.lambda_), _num(ky), _num(nm)))
+        c = None if r.surface is None else r.surface.circle
+        s = r.search
+        surf.append((r.id_analisis, t(f"le_surf_{r.surface_type}", lang),
+                     *(("-",) * 3 if c is None else (_num(c.xc, ".2f"), _num(c.yc, ".2f"), _num(c.radius, ".2f"))),
+                     _points(r.surface) or "-", "-" if s is None else str(s.evaluated),
+                     "-" if s is None else str(s.discarded)))
+    out = [Table(t("cap_le", lang), ("id_analisis", "id_seccion", t("h_le_surface", lang), t("h_le_method", lang),
+                                     t("h_fs", lang), t("h_fs_le1", lang), t("h_lambda", lang), t("h_ky", lang),
+                                     t("h_newmark", lang)), tuple(rows)),
+           Table(t("cap_le_surface", lang), ("id_analisis", t("h_le_surface", lang), "xc (m)", "yc (m)", "R (m)",
+                                             t("h_points", lang), t("h_evaluated", lang), t("h_discarded", lang)),
+                 tuple(surf))]
+    for r in le:
+        out.append(_fig(t("fig_le_section", lang).format(n=r.order), lambda r=r: le_figure(r, lang), lang, figures))
+        if r.newmark is not None and r.record is not None:
+            out.append(_fig(t("fig_newmark", lang).format(n=r.order), lambda r=r: newmark_figure(r, lang), lang,
+                            figures))
+    return tuple(out)
+
+
 def _count_table(key, head_key, counts, lang) -> Table:
     return Table(t(key, lang), (t("h_warning", lang), t(head_key, lang)),
                  tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))))
 
 
 def build_slope_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
-                       figures: bool = True, projection: str = "equal_area", blocks=()) -> Report:
-    """Informe de taludes: alcance, métodos, resultados, avisos y nota. `blocks` (de `assess_blocks`) suma la 3B."""
+                       figures: bool = True, projection: str = "equal_area", blocks=(), le=()) -> Report:
+    """Informe de taludes: alcance, métodos, resultados, avisos y nota. `blocks` (de `assess_blocks`) suma la 3B y
+    `le` (de `assess_le`) el equilibrio límite de la 3C; con `le`, `results` puede ir vacío."""
     from ..blocks import block_attention, warning_counts
+    from ..limit_equilibrium import le_attention, le_warning_counts
 
     _check_lang(lang)
-    results, blocks = list(results), list(blocks)
-    if not results:
+    results, blocks, le = list(results), list(blocks), list(le)
+    if not results and not le:
         raise ValueError("results is empty: nothing to report")
     methods = tuple({(m.method_id, m.source): MethodRef(m.method_id, m.verification.name, m.source)
-                     for r in (*results, *blocks) for m in r.methods}.values())
+                     for r in (*results, *blocks, *le) for m in r.methods}.values())
     counts = Counter(w for r in results for w in set(r.warnings))
     bcounts = warning_counts(blocks)
-    notes = dict.fromkeys(n for r in (*results, *blocks) for n in r.notes)
+    lcounts = le_warning_counts(le)
+    notes = dict.fromkeys(n for r in (*results, *blocks, *le) for n in r.notes)
     s4 = ((_count_table("cap_sl_warnings", "h_slopes", counts, lang),) if counts else ())
     s4 += ((_count_table("cap_bl_warnings", "h_blocks", bcounts, lang),) if bcounts else ())
+    s4 += ((_count_table("cap_le_warnings", "h_analyses", lcounts, lang),) if lcounts else ())
     s4 = s4 or (Paragraph(t("no_warnings", lang)),)
     why = Counter(x for r in results for x in _attention(r))
     n_att = sum(r.needs_attention for r in results)
@@ -726,15 +783,23 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     if b_att:
         s4 += (Paragraph(t("bl_attention", lang).format(n=b_att, m=len(blocks), why=", ".join(
             f"{t(k, lang)} ({v})" for k, v in bwhy.items()))),)
+    lwhy = Counter(x for r in le for x in le_attention(r))  # la misma regla que el código de salida de `rockmass le`
+    l_att = sum(bool(le_attention(r)) for r in le)
+    if l_att:
+        s4 += (Paragraph(t("le_attention", lang).format(n=l_att, m=len(le), why=", ".join(
+            f"{t(k, lang)} ({v})" for k, v in lwhy.items()))),)
     if notes:
         s4 += (Paragraph(t("h_notes", lang) + ":"), *(Paragraph(n) for n in notes))
     sections = (
-        Section("1", t("sl_s1", lang), (Paragraph(t("sl_scope", lang)),)),
+        Section("1", t("sl_s1", lang), (Paragraph(t("sl_scope", lang)),)
+                + ((Paragraph(t("le_scope", lang)),) if le else ())),
         Section("2", t("sl_s2", lang), (Table(
             t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
             tuple((m.method_id, m.verification, m.source) for m in methods)),)),
-        Section("3", t("sl_s3", lang), _slope_blocks(results, lang, figures, projection)
-                + (_block_blocks(blocks, lang, figures) if blocks else ())),
+        Section("3", t("sl_s3", lang), (_slope_blocks(results, lang, figures, projection) if results
+                                        else (Paragraph(t("sl_no_slopes", lang)),))
+                + (_block_blocks(blocks, lang, figures) if blocks else ())
+                + (_le_blocks(le, lang, figures) if le else ())),
         Section("4", t("sl_s4", lang), s4),
         Section("5", t("sl_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
     )

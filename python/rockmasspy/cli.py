@@ -362,6 +362,71 @@ def _slope(a) -> int:
     return 2 if any(r.needs_attention for r in rs) or any(bk.block_attention(r) for r in bs) else 0
 
 
+def _analyses(n: int) -> str:
+    return f"{n} analys" + ("is" if n == 1 else "es")
+
+
+_LE_CSV = (("geometry", "--geometry", "Geometria"), ("layers", "--layers", "Estratos"),
+           ("materials", "--materials", "Materiales_LE"), ("analyses", "--analyses", "Analisis_LE"))
+
+
+def _le_source(a):
+    """--workbook o los CSV por hoja; todo se valida antes de leer archivos."""
+    given = [flag for attr, flag, _ in _LE_CSV if getattr(a, attr)]
+    if a.workbook:
+        if given or a.records:
+            raise ValueError(f"--workbook goes alone; drop {(given or ['--records'])[0]}")
+        return a.workbook
+    if len(given) != len(_LE_CSV):
+        missing = [flag for attr, flag, _ in _LE_CSV if not getattr(a, attr)]
+        raise ValueError(f"give --workbook, or --geometry, --layers, --materials and --analyses (missing {missing[0]})")
+    src = {sheet: getattr(a, attr) for attr, _, sheet in _LE_CSV}
+    if a.records:
+        src["Sismos"] = a.records
+    return src
+
+
+def _le(a) -> int:
+    from . import limit_equilibrium as le
+    from . import report as rp
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    if a.output and Path(a.output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--output must end in .csv or .xlsx")
+    rs = le.assess_le(_le_source(a))  # antes del primer print: un error deja stdout vacío
+    if not rs:
+        raise ValueError("no analyses in Analisis_LE")
+    c = le.le_counts(rs)
+    print(f"analyses: {c['analyses']} (circular {c['circular']}, block {c['block']}, given {c['given']})")
+    print(f"FS at or below 1: {c['fs_below_1']} of {c['with_fs']}")
+    low = min(((x.factor_of_safety, x.info.method_id) for r in rs for x in r.results
+               if x.factor_of_safety is not None), default=None)
+    print("lowest FS: none" if low is None else f"lowest FS: {low[0]:.3f} ({low[1]})")
+    print(f"Newmark: {_analyses(c['with_newmark'])}")
+    print(f"warnings: {c['warnings']} in {_analyses(sum(1 for r in rs if r.warnings))}")
+    for w, n in sorted(le.le_warning_counts(rs).items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"warning: {w} ({_analyses(n)})")
+    print(f"notes: {c['notes']}")
+    if a.output:
+        print(f"results: {le.save_le_results(rs, a.output)}")
+    if a.charts:
+        from .viz import save_figure
+
+        for r in rs:  # nombres por número de orden: nunca un id
+            print(f"chart: {save_figure(rp.le_figure(r, a.lang), Path(a.charts) / f'seccion_le_{r.order}.png')}")
+            if r.newmark is not None and r.record is not None:
+                print(f"chart: {save_figure(rp.newmark_figure(r, a.lang), Path(a.charts) / f'newmark_{r.order}.png')}")
+    if a.report:
+        rep = rp.build_slope_report([], title=a.title or t("slope_title", a.lang), lang=a.lang, author=a.author or "",
+                                    figures=not a.no_figures, le=rs)
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if any(le.le_attention(r) for r in rs) else 0  # una sola regla (R14)
+
+
 def _snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name.rstrip("_")).lower()
 
@@ -572,6 +637,22 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--seed", type=int, help="default 1")
     c.add_argument("--blocks-output", metavar="RES.csv|.xlsx")
     c.set_defaults(fn=_slope)
+    c = sub.add_parser("le", help="2D limit equilibrium, critical slip surface, ky and Newmark")
+    c.add_argument("--workbook", metavar="LIBRO.xlsx", help="workbook with the sheets Geometria, Estratos, "
+                   "Materiales_LE, Analisis_LE and Sismos")
+    c.add_argument("--geometry", metavar="GEOMETRIA.csv")
+    c.add_argument("--layers", metavar="ESTRATOS.csv")
+    c.add_argument("--materials", metavar="MATERIALES.csv")
+    c.add_argument("--analyses", metavar="ANALISIS.csv")
+    c.add_argument("--records", metavar="SISMOS.csv", help="acceleration records for Newmark (with the CSV files)")
+    c.add_argument("-o", "--output", metavar="RES.csv|.xlsx")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--charts", metavar="DIR")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.add_argument("--no-figures", action="store_true")
+    c.set_defaults(fn=_le)
     return p
 
 
