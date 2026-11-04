@@ -145,3 +145,24 @@ def test_invalid_block_names_the_field():
     blk.left_angle_min = 45.0
     with pytest.raises(ValueError, match="left_angle_min"):
         rm.search_block(acads3(), blk)
+
+
+def test_short_layer_bottom_raises():
+    s = section(ACADS1A, [layer([(20, 30), (45, 30)], 0), layer([], 0)], [mc(20, 3, 19.6)], base=20)
+    with pytest.raises(ValueError, match=r"layers\[0\]\.bottom"):
+        rm.search_circular(s, grid(*GRID1A))
+
+
+def test_malpha_discards_are_counted():
+    # caso sintético de la revisión: pies casi verticales dan mα < 0.2 con Bishop
+    s = section([(-27, 0), (0, 0), (27.4, 17.7), (54.4, 17.7)],
+                [layer([(-27, -1.8), (54.4, -1.8)], 0), layer([(-27, -3.3), (54.4, -3.3)], 1), layer([], 0)],
+                [mc(18.2, 35.5, 33.8), mc(22.4, 4.5, 9.4)], base=-8.3)
+    s.kh = 0.105
+    blk = rm.BlockSearch()
+    blk.weak_line = pts([(-27, -2.55), (54.4, -2.55)])
+    blk.left_angle_min, blk.left_angle_max = 95.0, 175.0
+    r = rm.search_block(s, blk, opts(M.Bishop, refine=False))
+    assert 0 < r.discarded_malpha <= r.discarded
+    assert any("m-alpha" in n for n in r.notes)
+    assert not any("m-alpha" in w for w in r.best.warnings)

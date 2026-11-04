@@ -72,6 +72,20 @@ TEST(Newmark, RegistroQueTerminaDeslizandoAvisa) {
     EXPECT_NE(r.warnings[0].find("still sliding"), std::string::npos);
 }
 
+// Revisión M1: el bloque se detiene justo en la última muestra; la raíz sale L(1 + ε) por redondeo y no debe avisar
+TEST(Newmark, ParadaEnLaUltimaMuestraNoAvisa) {
+    const auto r = newmark_rigid_block(make({0.25, 0.25, 0.05, 0.05}, 0.01, 0.15));
+    EXPECT_TRUE(r.warnings.empty());
+    EXPECT_GT(r.displacement_m, 0.0);
+}
+
+// Revisión M2: lo finito se valida después de multiplicar por scale
+TEST(Newmark, EscalaQueDesbordaLanza) {
+    auto in = make({0.0, 1e300}, 0.01, 0.1);
+    in.scale = 1e10;
+    EXPECT_NE(error_of([&] { newmark_rigid_block(in); }).find("scale * acceleration_g[1]"), std::string::npos);
+}
+
 TEST(Newmark, EscalaIgualARegistroMultiplicado) {
     auto in = make(rect(0.15, 0.5, 1e-3, 2.0), 1e-3, 0.1);
     in.scale = 2.0;

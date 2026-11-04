@@ -80,6 +80,30 @@ LeSection acads3() {
     s.model_base_y = 20;
     return s;
 }
+// Casos sintéticos de la revisión independiente (repro_circ.py, repro_block_malpha.py): tres estratos, la cara mira a
+// la izquierda
+LeSection review(std::vector<Point2> surf, std::vector<std::vector<Point2>> bots, std::vector<LeMaterial> mats, double base,
+                 double kh) {
+    LeSection s;
+    s.surface = std::move(surf);
+    for (std::size_t k = 0; k < bots.size(); ++k) s.layers.push_back(LeLayer{bots[k], static_cast<int>(k)});
+    s.layers.push_back(LeLayer{{}, static_cast<int>(bots.size())});
+    s.materials = std::move(mats);
+    s.model_base_y = base;
+    s.kh = kh;
+    return s;
+}
+LeSection review_block() {
+    LeSection s;
+    s.surface = {{-27, 0}, {0, 0}, {27.4, 17.7}, {54.4, 17.7}};
+    s.layers = {LeLayer{{{-27, -1.8}, {54.4, -1.8}}, 0}, LeLayer{{{-27, -3.3}, {54.4, -3.3}}, 1}, LeLayer{{}, 0}};
+    s.materials = {mc(18.2, 35.5, 33.8), mc(22.4, 4.5, 9.4)};
+    s.model_base_y = -8.3;
+    s.kh = 0.105;
+    return s;
+}
+double deg(const Point2& a, const Point2& b) { return std::atan2(a.y - b.y, a.x - b.x) * 180.0 / le_detail::kPi; }
+
 BlockSearch acads3a_block() {
     BlockSearch b;
     b.weak_line = {{20, 26.75}, {84, 26.75}};
@@ -94,8 +118,11 @@ TEST(SlipSearch, Acads1aBishop) {
     EXPECT_NEAR(f, 0.987, 0.01 * 0.987);
     EXPECT_NEAR(f, 0.9857, 2e-3);
     ASSERT_TRUE(r.surface.circle.has_value());
-    EXPECT_NEAR(r.surface.circle->xc, 30.16, 1.0);
-    EXPECT_NEAR(r.surface.circle->yc, 51.9, 1.0);
+    // el valle es largo en la diagonal (centro, radio): el centro no se fija al metro, pero la búsqueda no queda por
+    // encima del círculo del prototipo
+    SlipSurface proto;
+    proto.circle = Circle{30.16, 51.9, 26.9};
+    EXPECT_LE(f, *le_factor_of_safety(acads1a(), proto, LeMethod::Bishop).factor_of_safety + 1e-9);
     EXPECT_FALSE(has(r.warnings, "edge"));
     EXPECT_EQ(r.best.method, LeMethod::Bishop);
     EXPECT_EQ(r.info.verification, Verification::Secondary);
@@ -280,4 +307,74 @@ TEST(SlipSearch, InvalidInputsNameTheField) {
     b = acads3a_block();
     b.n_points = 1;
     EXPECT_NE(error_of([&] { search_block(acads3(), b); }).find("n_points"), std::string::npos);
+}
+
+// Revisión I1: un valle diagonal en (yc, R) atascaba al afinado solo por ejes (1.4803); fuerza bruta 1.4650 (+0.5 %)
+TEST(SlipSearch, ReviewDiagonalValley) {
+    const auto A = review({{-60, 0}, {0, 0}, {57.41, 37.52}, {117.41, 37.52}},
+                          {{{-60, 26.88}, {117.41, 28.10}}, {{-60, 10.24}, {117.41, 8.98}}},
+                          {mc(21.69, 17.31, 34.15), mc(18.41, 25.06, 36.43), mc(21.77, 14.21, 31.39)}, -18.61, 0.007);
+    EXPECT_LE(fs(search_circular(A, grid(-22.51, 64.92, 39.39, 93.79), opts(LeMethod::Bishop))), 1.4723);
+}
+
+// Revisión I2: mínimo somero que la malla con radios uniformes y un solo arranque no veía (0.7643); el círculo
+// (0.276, 27.289, 21.342) da 0.7160 con Bishop (+0.5 %: 0.7196). El centro final es interior: sin aviso de borde.
+TEST(SlipSearch, ReviewShallowMinimum) {
+    const auto B = review({{-31.07, 0}, {0, 0}, {27.23, 25.86}, {73.4, 25.86}},
+                          {{{-31.07, 18.95}, {73.4, 18.86}}, {{-31.07, 7.61}, {73.4, 6.79}}},
+                          {mc(18.9, 29.67, 16.93), mc(20.47, 2.91, 31.51), mc(19.76, 19.77, 22.16)}, -21.83, 0.157);
+    const auto r = search_circular(B, grid(-15.52, 32.4, 27.16, 64.66), opts(LeMethod::Bishop));
+    EXPECT_LE(fs(r), 0.7196);
+    const auto& c = *r.surface.circle;
+    ASSERT_TRUE(c.xc > -15.52 && c.xc < 32.4 && c.yc > 27.16 && c.yc < 64.66);
+    EXPECT_FALSE(has(r.warnings, "edge"));
+}
+
+// Revisión I3: el afinado del bloque salía de los ángulos y caía en una masa de pie empinado con mα < 0.2 (Bishop 0.673,
+// área 53). Ahora respeta los ángulos y no trae el aviso. El afinado sí baja la base al piso de la capa débil (-3.3),
+// como en ACADS 3(a): la cota de comparación es la malla sin afinar con la línea débil en y = -3.28 (Bishop 1.1179).
+TEST(SlipSearch, ReviewBlockRefinementKeepsAnglesAndMalpha) {
+    BlockSearch b;
+    b.weak_line = {{-27, -2.55}, {54.4, -2.55}};
+    for (LeMethod m : {LeMethod::Bishop, LeMethod::JanbuSimplified, LeMethod::Spencer}) {
+        const auto r = search_block(review_block(), b, opts(m));
+        const auto& p = *r.surface.polyline;
+        EXPECT_GE(deg(p[0], p[1]), b.left_angle_min - 1e-6) << le_detail::name(m);
+        EXPECT_LE(deg(p[0], p[1]), b.left_angle_max + 1e-6) << le_detail::name(m);
+        EXPECT_GE(deg(p.back(), p[p.size() - 2]), b.right_angle_min - 1e-6) << le_detail::name(m);
+        EXPECT_LE(deg(p.back(), p[p.size() - 2]), b.right_angle_max + 1e-6) << le_detail::name(m);
+        EXPECT_FALSE(has(r.best.warnings, "m-alpha")) << le_detail::name(m);
+        EXPECT_FALSE(has(r.warnings, "m-alpha")) << le_detail::name(m);
+        const double grid_fs = fs(search_block(review_block(), b, opts(m, false)));
+        EXPECT_GT(r.best.sliding_mass_area, 300.0) << le_detail::name(m);
+        if (m == LeMethod::Bishop) {
+            auto deep = b;
+            deep.weak_line = {{-27, -3.28}, {54.4, -3.28}};
+            const double deep_fs = fs(search_block(review_block(), deep, opts(m, false)));
+            EXPECT_GE(fs(r), 0.98 * deep_fs);
+            EXPECT_LE(fs(r), grid_fs);
+        }
+    }
+}
+
+// Revisión I3 (b) y (c): las superficies con el aviso de mα se descartan y se cuentan aparte, con nota; los avisos de
+// la crítica pasan a la búsqueda
+TEST(SlipSearch, MalphaDiscardedAndCounted) {
+    BlockSearch b;
+    b.weak_line = {{-27, -2.55}, {54.4, -2.55}};
+    b.left_angle_min = 95;  // pies casi verticales: mα bajo con Bishop
+    b.left_angle_max = 175;
+    const auto r = search_block(review_block(), b, opts(LeMethod::Bishop, false));
+    EXPECT_GT(r.discarded_malpha, 0);
+    EXPECT_LE(r.discarded_malpha, r.discarded);
+    EXPECT_TRUE(has(r.notes, "discarded for m-alpha below 0.2"));
+    EXPECT_EQ(r.warnings, r.best.warnings);
+}
+
+// Revisión I4: un estrato que no cubre la sección se rechaza al validar, no se descarta superficie por superficie
+TEST(SlipSearch, ShortLayerBottomThrows) {
+    auto s = acads1a();
+    s.layers = {LeLayer{{{20, 30}, {45, 30}}, 0}, LeLayer{{}, 0}};
+    EXPECT_NE(error_of([&] { search_circular(s, acads1a_grid()); }).find("layers[0].bottom"), std::string::npos);
+    EXPECT_NE(error_of([&] { search_block(s, acads3a_block()); }).find("layers[0].bottom"), std::string::npos);
 }

@@ -632,6 +632,7 @@ NB_MODULE(_rockmasspy_core, m) {
     nb::class_<SearchResult>(m, "SearchResult", "Critical slip surface, its result, counts and the 10 best surfaces.")
         .def_ro("best", &SearchResult::best).def_ro("surface", &SearchResult::surface)
         .def_ro("evaluated", &SearchResult::evaluated).def_ro("discarded", &SearchResult::discarded)
+        .def_ro("discarded_malpha", &SearchResult::discarded_malpha)
         .def_ro("top", &SearchResult::top).def_ro("info", &SearchResult::info)
         .def_ro("warnings", &SearchResult::warnings).def_ro("notes", &SearchResult::notes);
     m.def("search_circular", &search_circular, nb::arg("section"), nb::arg("grid"),

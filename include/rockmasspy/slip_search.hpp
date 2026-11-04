@@ -10,9 +10,13 @@
  * y devuelve todo en las coordenadas del usuario; si los extremos están a la misma cota, no refleja. Así una sección
  * reflejada (con su malla o su línea débil reflejadas y los mismos ángulos) da el mismo FS bit a bit.
  *
- * Circular: centros en (nx + 1)(ny + 1) nudos; por centro, n_radii radios repartidos entre el mayor de (tangente a la
- * cota más alta de la superficie menos 0.5) y (distancia del centro a la superficie, el primero que la toca), y el
- * tangente a model_base_y (o a la cota más baja de la superficie si no hay base).
+ * Circular: centros en (nx + 1)(ny + 1) nudos; por centro, n_radii radios entre r_lo, el mayor de (tangente a la cota
+ * más alta de la superficie menos 0.5) y (distancia del centro a la superficie, el primero que la toca), y r_hi, el
+ * tangente a model_base_y (o a la cota más baja de la superficie si no hay base). Reparto por profundidad cuadrático,
+ * r_k = r_lo + (r_hi - r_lo)(k / (n_radii - 1))²: la mitad de los radios cae en el primer cuarto del rango, para no
+ * perder los mínimos someros. Multiarranque: semilla = el mejor círculo de cada centro; en orden de FS se eligen hasta
+ * 5, saltando la que tenga el centro vecino de malla (8 vecinos) de una ya elegida o el radio a menos de un paso de
+ * radio (el mayor de los dos contiguos) de una ya elegida; se afina cada una y manda la mejor.
  *
  * Bloque, convención de ángulos (la de Slide, antihorario desde +x, en el marco con la cara hacia -x): se toman dos
  * puntos de la línea débil (n_points posiciones igualmente espaciadas en x; el izquierdo antes que el derecho); desde
@@ -22,16 +26,20 @@
  * es (corte del pie, punto izquierdo, vértices de la línea débil entre ambos, punto derecho, corte de la cresta). Si la
  * cara mira a +x, «izquierdo» y «derecho» se leen en la sección reflejada: el izquierdo sigue siendo el lado del pie.
  *
- * Afinado: búsqueda de patrón por coordenadas con pasos 1, 0.25, 0.05 y 0.01 de la escala h (circular: el mayor paso de
- * la malla, sobre xc, yc y R; bloque: el espaciado de las posiciones, sobre los vértices interiores en x e y y los
- * extremos en x, deslizando sobre la superficie). Acepta una dirección si baja el FS en más de 1e-9. El paso 0.01 se
- * agregó al 1-0.25-0.05 del plan: con 20 posiciones en ACADS 3(a), 0.05 h = 0.17 m no deja bajar la base hasta el piso
- * de la capa débil de 0.5 m (Spencer 1.2609 en vez de 1.2540).
+ * Afinado: búsqueda de patrón con pasos 1, 0.25, 0.05 y 0.01 de la escala h (circular: el mayor paso de la malla, sobre
+ * xc, yc y R; bloque: el espaciado de las posiciones, sobre los vértices interiores en x e y y los extremos en x,
+ * deslizando sobre la superficie). Direcciones: con hasta 3 parámetros, las 26 de {-1, 0, 1}³ sin el origen; con más,
+ * los ejes y las diagonales de cada par de parámetros (los valles diagonales atascan a una búsqueda solo por ejes).
+ * Acepta una dirección si baja el FS en más de 1e-9. El paso 0.01 se agregó al 1-0.25-0.05 del plan: con 20 posiciones
+ * en ACADS 3(a), 0.05 h = 0.17 m no deja bajar la base hasta el piso de la capa débil de 0.5 m. En el bloque, el afinado
+ * descarta las polilíneas cuyos tramos extremos salen de los ángulos dados de su lado.
  *
- * Se descartan, y se cuentan, las superficies que no forman masa, las de masa menor que min_mass_area y las que no
- * convergen o dan FS vacío. Si el mínimo de la malla cae en su borde (o el afinado sale de ella), aviso
- * «critical centre on the edge of the search grid». `top` guarda las 10 mejores de la malla o del bloque (y la afinada
- * delante si mejora), en orden de FS. Todo es determinista: mismo orden de evaluación, sin azar ni hilos.
+ * Se descartan, y se cuentan en `discarded`, las superficies que no forman masa, las de masa menor que min_mass_area,
+ * las que no convergen o dan FS vacío y las que traen el aviso «m-alpha below 0.2» (estas también en
+ * `discarded_malpha`, con una nota). Si el centro crítico final no queda dentro de la malla (en su borde o fuera),
+ * aviso «critical centre on the edge of the search grid». Los avisos de la crítica se copian a los de la búsqueda.
+ * `top` guarda las 10 mejores de la malla o del bloque (y la afinada delante si mejora), en orden de FS. Todo es
+ * determinista: mismo orden de evaluación, sin azar ni hilos.
  */
 
 #pragma once
@@ -73,7 +81,7 @@ struct SearchOptions {
 struct SearchResult {
     LeResult best;        // FS vacío si ninguna superficie sirvió
     SlipSurface surface;  // la crítica, en coordenadas del usuario
-    int evaluated = 0, discarded = 0;
+    int evaluated = 0, discarded = 0, discarded_malpha = 0;  // discarded_malpha está incluido en discarded
     std::vector<std::pair<SlipSurface, double>> top;
     MethodInfo info;
     std::vector<std::string> warnings, notes;
@@ -104,20 +112,38 @@ inline void validate(const LeSection& s, const SearchOptions& o) {
     probe.circle = Circle{0.0, 0.0, 1.0};  // solo para validar la sección y las opciones
     le_detail::validate(s, probe, o.le);
     validation::require_non_negative(o.min_mass_area, "min_mass_area");
+    // un estrato corto descartaría en silencio cada superficie que lo cruce
+    for (std::size_t k = 0; k < s.layers.size(); ++k)
+        if (!s.layers[k].bottom.empty() && !le_detail::covers(s.layers[k].bottom, s.surface.front().x, s.surface.back().x))
+            le_detail::fail(le_detail::at("layers", k) + ".bottom", "must cover the x range of the ground surface");
+}
+
+inline bool has_malpha(const LeResult& r) {
+    for (const auto& w : r.warnings)
+        if (w.find("m-alpha") != std::string::npos) return true;
+    return false;
 }
 
 /// FS de una superficie, o vacío si se descarta. Los errores de geometría descartan; los de «not implemented», no.
 struct Evaluator {
     const LeSection& section;
     const SearchOptions& options;
-    int evaluated = 0, discarded = 0;
+    int evaluated = 0, discarded = 0, discarded_malpha = 0;
+
+    std::optional<double> reject() {
+        ++evaluated;
+        ++discarded;
+        return std::nullopt;
+    }
 
     std::optional<double> operator()(const SlipSurface& f) {
         ++evaluated;
         try {
             const LeResult r = le_factor_of_safety(section, f, options.method, options.le);
-            if (r.factor_of_safety && r.converged && r.sliding_mass_area >= options.min_mass_area)
-                return r.factor_of_safety;
+            if (r.factor_of_safety && r.converged && r.sliding_mass_area >= options.min_mass_area) {
+                if (!has_malpha(r)) return r.factor_of_safety;
+                ++discarded_malpha;
+            }
         } catch (const std::invalid_argument& e) {
             if (std::string(e.what()).find("not implemented") != std::string::npos) throw;
         }
@@ -134,24 +160,55 @@ inline void keep(Top& top, const SlipSurface& f, double F) {
     if (top.size() > kTop) top.pop_back();
 }
 
-/// Búsqueda de patrón por coordenadas: en cada paso recorre +d, -d de cada parámetro y acepta la primera mejora.
+/// Direcciones de la búsqueda de patrón: {-1, 0, 1}^n sin el origen si n <= 3; si no, ejes y diagonales por pares.
+inline std::vector<std::vector<double>> directions(std::size_t n) {
+    std::vector<std::vector<double>> out;
+    if (n <= 3) {
+        int total = 1;
+        for (std::size_t i = 0; i < n; ++i) total *= 3;
+        for (int code = 0; code < total; ++code) {
+            std::vector<double> d(n);
+            for (std::size_t i = 0, c = code; i < n; ++i, c /= 3) d[i] = static_cast<double>(c % 3) - 1.0;
+            if (std::any_of(d.begin(), d.end(), [](double v) { return v != 0.0; })) out.push_back(d);
+        }
+        return out;
+    }
+    for (std::size_t i = 0; i < n; ++i)
+        for (double s : {1.0, -1.0}) {
+            std::vector<double> d(n, 0.0);
+            d[i] = s;
+            out.push_back(d);
+        }
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = i + 1; j < n; ++j)
+            for (double si : {1.0, -1.0})
+                for (double sj : {1.0, -1.0}) {
+                    std::vector<double> d(n, 0.0);
+                    d[i] = si;
+                    d[j] = sj;
+                    out.push_back(d);
+                }
+    return out;
+}
+
+/// Búsqueda de patrón: en cada paso recorre las direcciones y acepta la primera mejora, hasta que ninguna mejora.
 template <class Eval>
 std::vector<double> pattern_search(std::vector<double> p, double& best, double h, Eval&& eval) {
+    const auto dirs = directions(p.size());
     for (double step : {1.0, 0.25, 0.05, 0.01}) {
         bool improved = true;
         for (int it = 0; improved && it < 1000; ++it) {  // tope solo por seguridad
             improved = false;
-            for (std::size_t d = 0; d < p.size(); ++d)
-                for (double sign : {1.0, -1.0}) {
-                    auto q = p;
-                    q[d] += sign * step * h;
-                    const auto F = eval(q);
-                    if (F && *F < best - 1e-9) {
-                        best = *F;
-                        p = std::move(q);
-                        improved = true;
-                    }
+            for (const auto& d : dirs) {
+                auto q = p;
+                for (std::size_t i = 0; i < q.size(); ++i) q[i] += d[i] * step * h;
+                const auto F = eval(q);
+                if (F && *F < best - 1e-9) {
+                    best = *F;
+                    p = std::move(q);
+                    improved = true;
                 }
+            }
         }
     }
     return p;
@@ -212,11 +269,15 @@ inline SearchResult finish(const LeSection& user, bool mirror, const SearchOptio
     SearchResult out;
     out.evaluated = ev.evaluated;
     out.discarded = ev.discarded;
+    out.discarded_malpha = ev.discarded_malpha;
     out.info = std::move(info);
+    if (ev.discarded_malpha > 0)
+        out.notes.push_back(std::to_string(ev.discarded_malpha) + " slip surfaces discarded for m-alpha below 0.2");
     for (const auto& [f, F] : top) out.top.emplace_back(mirror ? mirrored(f) : f, F);
     if (best) {
         out.surface = mirror ? mirrored(*best) : *best;
         out.best = le_factor_of_safety(user, out.surface, o.method, o.le);
+        out.warnings = out.best.warnings;
     } else {
         out.best = LeResult{std::nullopt, o.method, std::nullopt, 0, false, {}, 0.0, le_detail::info(o.method), {}, {}};
         out.warnings.push_back("no valid slip surface found");
@@ -252,45 +313,73 @@ inline SearchResult search_circular(const LeSection& section, const CircularGrid
     }
     if (s.model_base_y) ylow = *s.model_base_y;
 
+    struct Seed {
+        double F, xc, yc, r, dr;
+        int i, j;
+    };
     Evaluator ev{s, options};
     Top top;
-    std::optional<Circle> best;
-    double bestF = std::numeric_limits<double>::infinity();
-    bool edge = false;
+    std::vector<Seed> seeds;  // el mejor círculo de cada centro
     for (int i = 0; i <= grid.nx; ++i)
         for (int j = 0; j <= grid.ny; ++j) {
             const double xc = x0 + (x1 - x0) * i / grid.nx, yc = y0 + (y1 - y0) * j / grid.ny;
             const double r_lo = std::max(yc - (ytop - 0.5), distance_to(g, xc, yc)), r_hi = yc - ylow;
             if (!(r_hi > r_lo)) continue;
-            for (double r : spread(r_lo, r_hi, grid.n_radii)) {
-                const SlipSurface f = circle_of(xc, yc, r);
+            std::vector<double> radii;
+            for (int k = 0; k < grid.n_radii; ++k) {
+                const double t = static_cast<double>(k) / (grid.n_radii - 1);
+                radii.push_back(r_lo + (r_hi - r_lo) * t * t);
+            }
+            std::optional<Seed> sd;
+            for (std::size_t k = 0; k < radii.size(); ++k) {
+                const SlipSurface f = circle_of(xc, yc, radii[k]);
                 const auto F = ev(f);
                 if (!F) continue;
                 keep(top, f, *F);
-                if (*F < bestF) {
-                    bestF = *F;
-                    best = Circle{xc, yc, r};
-                    edge = i == 0 || i == grid.nx || j == 0 || j == grid.ny;
+                if (!sd || *F < sd->F) {
+                    const double dr = std::max(k > 0 ? radii[k] - radii[k - 1] : 0.0,
+                                               k + 1 < radii.size() ? radii[k + 1] - radii[k] : 0.0);
+                    sd = Seed{*F, xc, yc, radii[k], dr, i, j};
                 }
             }
+            if (sd) seeds.push_back(*sd);
         }
-    if (best && options.refine) {
+    std::stable_sort(seeds.begin(), seeds.end(), [](const Seed& a, const Seed& b) { return a.F < b.F; });
+    std::optional<Circle> best;
+    double bestF = std::numeric_limits<double>::infinity();
+    if (!seeds.empty()) {
+        best = Circle{seeds[0].xc, seeds[0].yc, seeds[0].r};
+        bestF = seeds[0].F;
+    }
+    if (options.refine) {
+        std::vector<Seed> chosen;
+        for (const auto& c : seeds) {
+            if (chosen.size() == 5) break;
+            const bool near = std::any_of(chosen.begin(), chosen.end(), [&](const Seed& o) {
+                return (std::abs(c.i - o.i) <= 1 && std::abs(c.j - o.j) <= 1) || std::fabs(c.r - o.r) <= o.dr;
+            });
+            if (!near) chosen.push_back(c);
+        }
         const double h = std::max((x1 - x0) / grid.nx, (y1 - y0) / grid.ny), F0 = bestF;
-        const auto p = pattern_search({best->xc, best->yc, best->radius}, bestF, h,
-                                      [&](const std::vector<double>& q) { return ev(circle_of(q[0], q[1], q[2])); });
-        if (bestF < F0) {
-            best = Circle{p[0], p[1], p[2]};
-            keep(top, circle_of(p[0], p[1], p[2]), bestF);
-            edge = edge || p[0] < x0 || p[0] > x1 || p[1] < y0 || p[1] > y1;
+        for (const auto& c : chosen) {
+            double F = c.F;
+            const auto p = pattern_search({c.xc, c.yc, c.r}, F, h,
+                                          [&](const std::vector<double>& q) { return ev(circle_of(q[0], q[1], q[2])); });
+            if (F < bestF) {
+                bestF = F;
+                best = Circle{p[0], p[1], p[2]};
+            }
         }
+        if (bestF < F0) keep(top, circle_of(best->xc, best->yc, best->radius), bestF);
     }
     std::optional<SlipSurface> bs;
     if (best) bs = circle_of(best->xc, best->yc, best->radius);
     auto out = finish(section, mir, options, ev, bs, top,
                       {"Circular-Grid-Search", Verification::Secondary,
                        "Slide2 Verification Manual (2022) problems 1, 3, 4: grid of centres with radii; "
-                       "pattern-search refinement"});
-    if (edge) out.warnings.push_back("critical centre on the edge of the search grid");
+                       "multistart pattern-search refinement"});
+    if (best && !(best->xc > x0 && best->xc < x1 && best->yc > y0 && best->yc < y1))
+        out.warnings.push_back("critical centre on the edge of the search grid");
     return out;
 }
 
@@ -334,8 +423,7 @@ inline SearchResult search_block(const LeSection& section, const BlockSearch& bl
                 for (double b : right) {
                     const auto hl = ray_hit(g, pts[i], a), hr = ray_hit(g, pts[j], b);
                     if (!hl || !hr) {  // sin corte con la superficie no hay masa: se cuenta como descartada
-                        ++ev.evaluated;
-                        ++ev.discarded;
+                        ev.reject();
                         continue;
                     }
                     std::vector<double> p{hl->x, pts[i].x, pts[i].y};
@@ -356,7 +444,18 @@ inline SearchResult search_block(const LeSection& section, const BlockSearch& bl
                 }
     if (!best.empty() && options.refine) {
         const double h = (weak.back().x - weak.front().x) / (block.n_points - 1), F0 = bestF;
-        const auto p = pattern_search(best, bestF, h, [&](const std::vector<double>& q) { return ev(polyline_of(g, q)); });
+        // los tramos extremos no salen de los ángulos dados (si no, el afinado cae en masas de pie empinado y mα bajo)
+        auto in_angles = [&](const Poly& q) {
+            const std::size_t n = q.size();
+            const double toe = std::atan2(q[0].y - q[1].y, q[0].x - q[1].x) / kDeg,
+                         crest = std::atan2(q[n - 1].y - q[n - 2].y, q[n - 1].x - q[n - 2].x) / kDeg;
+            return toe >= block.left_angle_min - 1e-9 && toe <= block.left_angle_max + 1e-9 &&
+                   crest >= block.right_angle_min - 1e-9 && crest <= block.right_angle_max + 1e-9;
+        };
+        const auto p = pattern_search(best, bestF, h, [&](const std::vector<double>& q) {
+            const SlipSurface f = polyline_of(g, q);
+            return in_angles(*f.polyline) ? ev(f) : ev.reject();
+        });
         if (bestF < F0) {
             best = p;
             keep(top, polyline_of(g, p), bestF);

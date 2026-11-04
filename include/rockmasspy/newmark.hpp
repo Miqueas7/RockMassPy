@@ -63,10 +63,11 @@ inline double first_stop(double v, double b, double c, double L) {
         r1 = q / c;
         r2 = (q != 0.0) ? v / q : -1.0;
     }
+    // una parada justo al final del paso puede salir L(1 + ε) por redondeo: se toma como parada en L
     double best = -1.0;
     for (double r : {r1, r2})
-        if (r > 0.0 && r <= L && (best < 0.0 || r < best)) best = r;
-    return best;
+        if (r > 0.0 && r <= L * (1.0 + 1e-12) && (best < 0.0 || r < best)) best = r;
+    return best < 0.0 ? best : std::min(best, L);
 }
 
 struct Run {
@@ -127,6 +128,7 @@ inline NewmarkResult newmark_rigid_block(const NewmarkInput& in) {
     for (std::size_t i = 0; i < acc.size(); ++i) {
         validation::require_finite(in.acceleration_g[i], "acceleration_g[" + std::to_string(i) + "]");
         acc[i] = in.scale * in.acceleration_g[i];
+        validation::require_finite(acc[i], "scale * acceleration_g[" + std::to_string(i) + "]");
         peak = std::max(peak, acc[i]);
         trough = std::min(trough, acc[i]);
     }
