@@ -54,7 +54,8 @@ inline RqdResult rqd_priest_hudson(double lambda_per_m, double threshold_m = 0.1
     validation::require_non_negative(lambda_per_m, "lambda_per_m");
     validation::require_positive(threshold_m, "threshold_m");
     const double tl = threshold_m * lambda_per_m;
-    return {100.0 * std::exp(-tl) * (tl + 1.0),
+    // e^(-x)(x + 1) <= 1 exacto; con x diminuto el redondeo da 100.00000000000001
+    return {std::min(100.0, 100.0 * std::exp(-tl) * (tl + 1.0)),
             {"RQD-PH1976", Verification::Primary,
              "Priest & Hudson (1976), as given in Hoek, Carter & Diederichs (2013)"},
             {}};

@@ -794,6 +794,139 @@ TEST(LimitEquilibrium, SpencerGlobalEquilibriumWithWaterFilledCrack) {
     EXPECT_GT(P / W, 1e-3);
 }
 
+// --- Revisión 3C: agua encharcada (R16) y grieta casi nula ---
+
+namespace {
+// F&K con un lago horizontal a la cota y: la piezométrica queda sobre el terreno en la cara baja y en el pie
+LeSection fk_lake(double y) {
+    auto s = fk();
+    s.water_unit_weight = 62.4;
+    s.piezometric = std::vector<Point2>{{0, y}, {180, y}};
+    return s;
+}
+double fk_ground(double x) { return x <= 60 ? 60 : x >= 140 ? 20 : 60 - 0.5 * (x - 60); }
+bool has_note(const LeResult& r, const std::string& n) {
+    return std::find(r.notes.begin(), r.notes.end(), n) != r.notes.end();
+}
+const char* kPondNote = "ponded water above the ground surface modelled as a surface load";
+}  // namespace
+
+// Bishop con el agua encharcada como carga contra la implementación independiente del revisor (sondeo p3b: 200
+// tajadas, peso y empuje en el medio del tramo de terreno): 2.177 con el lago en y = 40 y 1.954 en y = 30. Antes de la
+// R16 el núcleo daba 1.356 y 1.661 sin aviso (u en la base sin la carga que la equilibra).
+TEST(LimitEquilibrium, PondedWaterBishopIndependent) {
+    for (const auto& [y, ref] : {std::pair{40.0, 2.177}, std::pair{30.0, 1.954}}) {
+        const auto r = run(fk_lake(y), fk_circle(), LeMethod::Bishop);
+        ASSERT_TRUE(r.factor_of_safety.has_value()) << y;
+        EXPECT_NEAR(*r.factor_of_safety, ref, 0.005 * ref) << y;
+        EXPECT_TRUE(has_note(r, kPondNote));
+        for (LeMethod m : kAllMethods) EXPECT_TRUE(run(fk_lake(y), fk_circle(), m).factor_of_safety) << le_detail::name(m);
+    }
+}
+
+// Spencer con el lago: la masa queda en equilibrio de fuerzas y de momentos desde la tabla de tajadas (W por el punto
+// medio de la base, como en Zhu et al. 2005) más el agua encharcada calculada aquí aparte: p lineal en la tajada,
+// resultante p_med·b normal al terreno en el centroide del trapecio de presiones.
+TEST(LimitEquilibrium, SpencerGlobalEquilibriumWithPondedWater) {
+    const auto s = fk_lake(40.0);
+    LeOptions o = opts(200);
+    o.tolerance = 1e-12;
+    const auto r = le_factor_of_safety(s, fk_circle(), LeMethod::Spencer, o);
+    ASSERT_TRUE(r.factor_of_safety.has_value());
+    const double F = *r.factor_of_safety, ox = 77.0, oy = 33.0;
+    double H = 0, V = 0, M = 0, W = 0, scale = 0, Vw = 0;
+    int at100 = 0;
+    for (const auto& t : r.slices) {
+        const double a = t.alpha_deg * le_detail::kPi / 180.0;
+        const double N = t.normal_force + t.pore_pressure * t.base_length, S = t.shear_strength / F;
+        const double fx = N * std::sin(a) - S * std::cos(a), fy = N * std::cos(a) + S * std::sin(a);
+        const double mx = 0.5 * (t.x_left + t.x_right), my = 0.5 * (t.base_y_left + t.base_y_right);
+        H += fx;
+        V += fy - t.weight;
+        M += (mx - ox) * fy - (my - oy) * fx - (mx - ox) * t.weight;
+        W += t.weight;
+        scale += t.weight * std::fabs(mx - ox);
+        const double b = t.x_right - t.x_left;
+        const double pa = 62.4 * std::max(40.0 - fk_ground(t.x_left), 0.0), pb = 62.4 * std::max(40.0 - fk_ground(t.x_right), 0.0);
+        if (pa + pb > 0.0) {
+            const double Qv = 0.5 * (pa + pb) * b, Qh = Qv * (fk_ground(t.x_right) - fk_ground(t.x_left)) / b;
+            const double qx = t.x_left + b * (pa + 2.0 * pb) / (3.0 * (pa + pb)), qy = fk_ground(qx);
+            H += Qh;
+            V -= Qv;
+            M += (qx - ox) * (-Qv) - (qy - oy) * Qh;
+            Vw += Qv;
+        }
+        at100 += std::fabs(t.x_left - 100.0) < 1e-9;  // el lago empieza en x = 100: borde de tajada
+    }
+    EXPECT_EQ(at100, 1);
+    EXPECT_GT(Vw / W, 0.05);  // el agua pesa en el balance: sin ella no cerraría
+    EXPECT_NEAR(H / W, 0.0, 1e-8);
+    EXPECT_NEAR(V / W, 0.0, 1e-8);
+    EXPECT_NEAR(M / scale, 0.0, 1e-8);
+}
+
+// Con la piezométrica bajo el terreno (o tocándolo en el pie) no hay carga: el FS es el de antes de la R16 (fase-3c,
+// 53c1365, 50 tajadas).
+TEST(LimitEquilibrium, PiezometricBelowGroundUnchanged) {
+    const std::vector<Point2> piezos[] = {{{0, 50}, {60, 45}, {140, 15}, {180, 15}}, {{0, 50}, {60, 45}, {140, 20}, {180, 20}}};
+    const double before[2][6] = {
+        {1.595155584331892, 1.7420709735369986, 1.5903337598442362, 1.7594808038777057, 1.741632329980768, 1.7407040941073466},
+        {1.520277002696464, 1.6603001211376471, 1.5238699097781523, 1.685947894437027, 1.660518711582712, 1.6594973307375793}};
+    for (int i = 0; i < 2; ++i)
+        for (int k = 0; k < 6; ++k) {
+            auto s = fk();
+            s.water_unit_weight = 62.4;
+            s.piezometric = piezos[i];
+            const auto r = run(s, fk_circle(), kAllMethods[k]);
+            ASSERT_TRUE(r.factor_of_safety.has_value()) << le_detail::name(kAllMethods[k]);
+            EXPECT_NEAR(*r.factor_of_safety, before[i][k], 1e-12 * before[i][k]) << i << " " << le_detail::name(kAllMethods[k]);
+            EXPECT_FALSE(has_note(r, kPondNote));
+        }
+}
+
+// Talud sumergido por completo (lago sobre la cresta): Bishop y Janbu, sin cortante entre tajadas, dan lo mismo que el
+// talud seco con el peso sumergido γ - γw (el agua sobre la masa y en su base cierra la flotación); Spencer y M-P
+// quedan cerca (su X = λ f E toma la E total, con el agua) y el Ordinario, que ignora el agua entre tajadas, no da FS.
+TEST(LimitEquilibrium, SubmergedSlopeMatchesBuoyantWeight) {
+    const auto wet = fk_lake(100.0);
+    const auto dry = one_layer({{0, 60}, {60, 60}, {140, 20}, {180, 20}}, mc(120 - 62.4, 600, 20));
+    EXPECT_NEAR(fs(wet, fk_circle(), LeMethod::Bishop, 200) / fs(dry, fk_circle(), LeMethod::Bishop, 200), 1.0, 1e-4);
+    EXPECT_NEAR(fs(wet, fk_circle(), LeMethod::JanbuSimplified, 200) /
+                    fs(dry, fk_circle(), LeMethod::JanbuSimplified, 200), 1.0, 1e-6);
+    for (LeMethod m : {LeMethod::Spencer, LeMethod::MorgensternPrice})
+        EXPECT_NEAR(fs(wet, fk_circle(), m, 200) / fs(dry, fk_circle(), m, 200), 1.0, 5e-3) << le_detail::name(m);
+    const auto o = run(wet, fk_circle(), LeMethod::Ordinary);
+    EXPECT_FALSE(o.factor_of_safety.has_value());
+    EXPECT_TRUE(o.warnings.empty());
+    EXPECT_TRUE(has_note(o, "Ordinary: no driving force along the bases with the ponded water load (the method "
+                            "neglects the water between slices)"));
+}
+
+TEST(LimitEquilibrium, PondedWaterReflected) {
+    const auto a = fk_lake(40.0);
+    auto b = mirrored(a);
+    b.piezometric = mirror(*a.piezometric);
+    for (LeMethod m : kAllMethods) {
+        const auto ra = run(a, fk_circle(), m), rb = run(b, circle(-120, 90, 80), m);
+        ASSERT_TRUE(ra.factor_of_safety && rb.factor_of_safety) << le_detail::name(m);
+        EXPECT_NEAR(*rb.factor_of_safety, *ra.factor_of_safety, 1e-9 * *ra.factor_of_safety) << le_detail::name(m);
+        if (ra.lambda) EXPECT_NEAR(*rb.lambda, *ra.lambda, 1e-9 * std::fabs(*ra.lambda));
+    }
+}
+
+// Grieta de 1e-9: el corte del lado de la cresta cae sobre el borde de la masa; antes se tomaba el del pie y la masa
+// quedaba en una tajada (FS vacío, «does not move towards the face»). Ahora la grieta se ignora con nota.
+TEST(LimitEquilibrium, NearZeroCrackIgnored) {
+    for (LeMethod m : kAllMethods) {
+        auto s = fk();
+        s.crack = LeTensionCrack{1e-9, 0.0};
+        const auto r = run(s, fk_circle(), m);
+        ASSERT_TRUE(r.factor_of_safety.has_value()) << le_detail::name(m);
+        EXPECT_EQ(*r.factor_of_safety, fs(fk(), fk_circle(), m)) << le_detail::name(m);
+        EXPECT_TRUE(has_note(r, "tension crack too shallow to cut the slip surface inside the mass: crack ignored"));
+    }
+}
+
 // --- Tarea 3: Hoek-Brown no lineal ---
 
 namespace {

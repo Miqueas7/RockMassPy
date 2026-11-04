@@ -446,3 +446,98 @@ def test_paridad_de_la_atencion(tmp_path):
     assert not _fake(1.5, notes=("a note",)).needs_attention
     assert le.le_attention(_fake(0.5, warnings=("w",))) == ["att_le_fs_below_1", "att_le_warnings"]
     assert le.le_attention(_fake(1.5, warnings=("w",))) == ["att_le_warnings"]
+
+
+# ---------------------------------------------------------------- revisión 3C: cobertura, ky por vueltas, mensajes
+
+
+def _corta(d, pts):
+    d["Geometria"] = d["Geometria"] + G("SFK-ZZSENT", "piezometrica", pts)
+    return d
+
+
+def test_piezometrica_corta_lanza_en_la_busqueda_y_en_la_hoja(tmp_path):
+    # sondeo p9 del revisor: con la piezométrica desde x = 100 la búsqueda descartaba en silencio (FS 33.4)
+    s = rm.LeSection()
+    s.surface = [rm.Point2(x, y) for x, y in FK_SURFACE]
+    lay = rm.LeLayer()
+    lay.material = 0
+    m = rm.LeMaterial()
+    m.unit_weight, m.cohesion, m.friction_deg = 120, 600, 20
+    s.layers, s.materials, s.model_base_y, s.water_unit_weight = [lay], [m], 0.0, 62.4
+    s.piezometric = [rm.Point2(100, 30), rm.Point2(180, 20)]
+    g = rm.CircularGrid()
+    g.x_min, g.x_max, g.y_min, g.y_max = 110, 130, 80, 100
+    with pytest.raises(ValueError, match="piezometric"):
+        rm.search_circular(s, g, rm.SearchOptions())
+    b = rm.BlockSearch()
+    b.weak_line = [rm.Point2(0, 30), rm.Point2(180, 30)]
+    with pytest.raises(ValueError, match="piezometric"):
+        rm.search_block(s, b, rm.SearchOptions())
+    # por la hoja: Geometria, la fila del extremo que no cubre (superficie en 2-5, piezométrica en 6-7), sin el valor
+    m = _err(tmp_path, _corta(fk_data(), [(100, 30), (180, 20)]))
+    assert m.startswith("sheet 'Geometria', row 6, column 'linea': "), m
+    assert "ZZSENT" not in m and "100" not in m
+    m = _err(tmp_path, _corta(fk_data(), [(0, 30), (150, 20)]))
+    assert m.startswith("sheet 'Geometria', row 7, column 'linea': "), m
+
+
+def test_ky_por_vueltas_hasta_el_menor(tmp_path):
+    # sondeo p8c: MC sobre HB con piezométrica; con la crítica estática ky = 0.37273, por vueltas 0.36105
+    # (el revisor encontró 0.3611)
+    sec = "SKY-ZZSENT"
+    d = {"Geometria": G(sec, "superficie", FK_SURFACE) + G(sec, "piezometrica", [(0, 50), (60, 45), (140, 20), (180, 20)])
+         + G(sec, "B-ZZSENT", [(0, 40), (180, 40)]),
+         "Estratos": [L(sec, 1, "MA-ZZSENT", "B-ZZSENT"), L(sec, 2, "MB-ZZSENT")],
+         "Materiales_LE": [mat(material="MA-ZZSENT", modelo="mohr_coulomb", peso_unitario_kn_m3=20, cohesion_kpa=30,
+                               friccion_grados=28),
+                           mat(material="MB-ZZSENT", modelo="hoek_brown", peso_unitario_kn_m3=20, sigma_ci_mpa=5,
+                               mb=0.8, s=0.0005, a=0.52)],
+         "Analisis_LE": [ana(id_analisis="AKY-ZZSENT", id_seccion=sec, metodos="bishop", superficie="circular",
+                             malla_x_min=110, malla_x_max=130, malla_y_min=80, malla_y_max=100, base_modelo_m=0,
+                             registro="R-ZZSENT")],
+         "Sismos": seno(amp=0.5, total=2.0)}
+    (r,) = rm.assess_le(hojas(tmp_path, d))
+    ky = r.yield_.ky
+    assert ky <= 0.3612 + 1e-3
+    assert any("up to 4 rounds" in n for n in r.notes)
+    # el ky informado es el de su superficie y es menor que el de la crítica estática
+    static = r.section
+    assert rm.le_yield_coefficient(static, r.yield_surface, M.Bishop).ky == ky
+    assert rm.le_yield_coefficient(static, r.surface, M.Bishop).ky > ky + 0.005
+    # Newmark corre con ese ky
+    acc = le.read_accelerogram(hojas(tmp_path, {"Sismos": seno(amp=0.5, total=2.0)})["Sismos"])["R-ZZSENT"]
+    ni = rm.NewmarkInput()
+    ni.dt_s, ni.acceleration_g, ni.ky, ni.both_directions = acc.dt_s, list(acc.acceleration_g), ky, True
+    assert r.newmark.displacement_m == rm.newmark_rigid_block(ni).displacement_m > 0
+
+
+def test_acelerograma_vacio_o_de_una_muestra(tmp_path):
+    p = tmp_path / "vacio.csv"
+    p.write_text("t_s,a_g\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no samples"):
+        le.read_accelerogram(p)
+    q = tmp_path / "vacio_reg.csv"
+    q.write_text("registro,t_s,a_g\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no samples"):
+        le.read_accelerogram(q)
+    u = tmp_path / "una.csv"
+    u.write_text("t_s,a_g\n0,0.1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"^sheet 'una', row 2, column 't_s': a record needs at least two samples"):
+        le.read_accelerogram(u)
+
+
+def test_mensajes_sin_doble_prefijo_ni_repetidos(tmp_path):
+    d = fk_data()
+    d["Analisis_LE"] = [ana(id_analisis="AFK-ZZSENT", id_seccion="SFK-ZZSENT", metodos="bishop;ordinario",
+                            superficie="circular", malla_x_min=110, malla_x_max=130, malla_y_min=80, malla_y_max=100,
+                            base_modelo_m=10, grieta_m=12, grieta_llenado=1)]
+    (r,) = rm.assess_le(hojas(tmp_path, d))
+    assert any(n.startswith("ordinario: the crack water force") for n in r.notes), r.notes
+    assert not any("Ordinary:" in n or "Janbu corrected:" in n for n in r.notes + r.warnings)
+    out = ["m-alpha below 0.2 in 3 slices"]  # de la búsqueda, sin prefijo
+    le._add_messages(out, "bishop", ["m-alpha below 0.2 in 3 slices", "Bishop did not converge"])
+    le._add_messages(out, "janbu_corregido", ["Janbu corrected: the bases mix", "Bishop did not converge"])
+    le._add_messages(out, "spencer", ["the bases mix"])
+    assert out == ["m-alpha below 0.2 in 3 slices", "bishop: Bishop did not converge",
+                   "janbu_corregido: the bases mix"]

@@ -4,8 +4,12 @@ por hoja), evaluación por análisis y resultados (3C, tarea 6).
 Cada fila de `Analisis_LE` es un análisis sobre una sección. La superficie crítica sale de `search_circular` (malla de la
 fila, 20 × 20 intervalos y 11 radios), de `search_block` (sobre `linea_debil`) o es la polilínea `linea_superficie`
 (`dada`); el primer método de `metodos` busca y los demás se evalúan sobre esa superficie. Con `kh` > 0 o con `registro`
-se calcula ky con el primer método sobre la superficie crítica estática (kh = 0; si la fila trae kh > 0 se busca otra
-vez sin sismo) y, con `registro`, el Newmark de bloque rígido en los dos sentidos. Hoek-Brown: `sigma_ci_mpa` pasa a
+se calcula ky con el primer método por vueltas (R17): búsqueda con kh = 0 y su ky, búsqueda con kh = ese ky y su ky,
+hasta 4 vueltas o hasta que ky cambie menos de 1e-4; se informa el menor ky con su superficie (`yield_surface`) y los
+avisos de cada búsqueda. Con superficie `dada`, ky sobre ella. Con `registro`, el Newmark de bloque rígido en los dos
+sentidos con ese ky. Una piezométrica que no cubre la superficie lanza (hoja `Geometria`, columna `linea`) si el
+análisis busca. Los mensajes de cada método llevan la palabra de la hoja («ordinario: ...») sin el prefijo del núcleo
+y no se repiten entre métodos. Hoek-Brown: `sigma_ci_mpa` pasa a
 kPa (× 1000), porque la sección va en kN y m. Una sola regla de atención (R14): FS < 1 + 1e-9 o algún aviso.
 Privacidad: `id_seccion`, `id_analisis`, `material`, `registro` y los nombres de línea nunca van a un mensaje, a un aviso
 ni a un repr; el archivo de resultados lleva solo `id_analisis` e `id_seccion`. Las columnas ajenas no se leen.
@@ -267,8 +271,11 @@ def _group(rows, key):
     return out
 
 
-def _accelerograms(records) -> dict[str, Accelerogram]:
-    """Un registro por id, en el orden de las filas: t empieza en 0, crece y con paso constante (1e-6·dt)."""
+def _accelerograms(records, count_column: str = "registro") -> dict[str, Accelerogram]:
+    """Un registro por id, en el orden de las filas: t empieza en 0, crece y con paso constante (1e-6·dt).
+
+    `count_column` es la columna del error «at least two samples» (`t_s` en un CSV de dos columnas, sin `registro`).
+    """
     out = {}
     for name, rows in _group(records, lambda r: r.registro).items():
         def bad(r, c, motivo):
@@ -277,7 +284,7 @@ def _accelerograms(records) -> dict[str, Accelerogram]:
         if rows[0].t_s != 0:
             bad(rows[0], "t_s", "the first time of a record must be 0")
         if len(rows) < 2:
-            bad(rows[0], "registro", "a record needs at least two samples")
+            bad(rows[0], count_column, "a record needs at least two samples")
         dt = rows[1].t_s - rows[0].t_s
         for prev, r in zip(rows, rows[1:]):
             step = r.t_s - prev.t_s
@@ -292,6 +299,7 @@ def _accelerograms(records) -> dict[str, Accelerogram]:
 @dataclass
 class _Section:
     lines: dict  # nombre -> [Point2]
+    rows: dict = field(default_factory=dict)  # nombre -> filas de Geometria (para los errores)
     ground: str | None = None
     piezometric: str | None = None
     layers: list = field(default_factory=list)
@@ -308,6 +316,7 @@ def _index(inp: LeInputs):
                 raise ValueError(f"{_where(r.hoja, r.fila, 'x_m')}: x must increase along the line")
         s = sections.setdefault(sec, _Section({}))
         s.lines[name] = [rm.Point2(r.x_m, r.y_m) for r in rows]
+        s.rows[name] = rows
         word = _word(name)
         if word == _GROUND:
             s.ground = name
@@ -348,6 +357,14 @@ def _index(inp: LeInputs):
                 bad(c, "no line with this name in Geometria for this id_seccion")
         if a.registro is not None and a.registro not in accs:
             bad("registro", "no record with this id in Sismos")
+        if a.superficie != "dada" and s.piezometric is not None:
+            # una piezométrica corta descartaría en silencio las superficies que la cruzan (como en el núcleo)
+            g, p = s.lines[s.ground], s.lines[s.piezometric]
+            short_start = p[0].x > g[0].x + 1e-9
+            if short_start or p[-1].x < g[-1].x - 1e-9:
+                r = s.rows[s.piezometric][0 if short_start else -1]
+                raise ValueError(f"{_where(r.hoja, r.fila, 'linea')}: the piezometric line must cover the x range of "
+                                 "the ground surface for a slip surface search")
     return sections, materials, accs
 
 
@@ -403,8 +420,14 @@ def load_le_inputs(source, *, sheets: Mapping[str, str] | None = None) -> LeInpu
 def read_accelerogram(path, *, sheet: str = RECORDS_SHEET) -> dict[str, Accelerogram]:
     """Registros de `Sismos` ({registro: Accelerogram}) de un .xlsx o un .csv.
 
-    Un .csv sin columna `registro` (solo `t_s` y `a_g`) es un único registro con el nombre del archivo sin .csv.
+    Un .csv sin columna `registro` (solo `t_s` y `a_g`) es un único registro con el nombre del archivo sin .csv. Una
+    hoja sin muestras (solo la cabecera) lanza.
     """
+    def some(out, name):
+        if not out:
+            raise ValueError(f"sheet '{name}': no samples (only the header)")
+        return out
+
     p = Path(path)
     if p.suffix.lower() == ".csv":
         src = _CsvSource({p.stem: p})
@@ -412,13 +435,15 @@ def read_accelerogram(path, *, sheet: str = RECORDS_SHEET) -> dict[str, Accelero
         if "registro" not in head:
             rows = _leer(src, p.stem, None, ("t_s", "a_g"), set(), ("t_s", "a_g"), None,
                          lambda v, n, s: _record({"registro": p.stem, **v}, n, s))
-            return _accelerograms(rows)
-        return _accelerograms(_leer(src, p.stem, None, RECORD_COLUMNS, _REC_TEXT, RECORD_COLUMNS, None, _record))
+            return some(_accelerograms(rows, count_column="t_s"), p.stem)
+        return some(_accelerograms(_leer(src, p.stem, None, RECORD_COLUMNS, _REC_TEXT, RECORD_COLUMNS, None, _record)),
+                    p.stem)
     if p.suffix.lower() != ".xlsx":
         raise ValueError(f"{p.name}: unsupported file type '{p.suffix}'; save it as .xlsx or .csv")
     wb = _open(p)
     try:
-        return _accelerograms(_leer(wb, sheet, None, RECORD_COLUMNS, _REC_TEXT, RECORD_COLUMNS, None, _record))
+        return some(_accelerograms(_leer(wb, sheet, None, RECORD_COLUMNS, _REC_TEXT, RECORD_COLUMNS, None, _record)),
+                    sheet)
     finally:
         wb.wb.close()
 
@@ -442,6 +467,7 @@ class LeAnalysisResult:
     surface: "rm.SlipSurface | None" = field(default=None, repr=False)  # la crítica (para la figura)
     section: "rm.LeSection | None" = field(default=None, repr=False)
     record: "Accelerogram | None" = field(default=None, repr=False)  # el registro escalado que usó Newmark
+    yield_surface: "rm.SlipSurface | None" = field(default=None, repr=False)  # la de ky (R17), si se calculó
 
     @property
     def fs_min(self) -> float | None:
@@ -516,6 +542,53 @@ def _has_surface(f) -> bool:
     return f is not None and (f.circle is not None or f.polyline is not None)
 
 
+# prefijos de método: el del núcleo («Ordinary: ...») y el de la hoja («ordinario: ...»)
+_CORE_PREFIX = re.compile(r"^(Ordinary|Bishop|Janbu simplified|Janbu corrected|Spencer|Morgenstern-Price): ")
+_WORD_PREFIX = re.compile(rf"^({'|'.join(_METHODS)}): ")
+
+
+def _add_messages(out: list, word: str, messages) -> None:
+    """Agrega «<método>: mensaje» sin el prefijo del núcleo, si el mensaje sin prefijo no está ya (de otro método o de
+    la búsqueda)."""
+    seen = {_WORD_PREFIX.sub("", x) for x in out}
+    for m in messages:
+        m = _CORE_PREFIX.sub("", m)
+        if m not in seen:
+            out.append(f"{word}: {m}")
+            seen.add(m)
+
+
+_KY_ROUNDS, _KY_CHANGE = 4, 1e-4
+_KY_ROUNDS_NOTE = ("ky: up to 4 rounds, searching first with kh = 0 and then with kh = the last ky, until ky changes "
+                   "by less than 1e-4; the lowest ky found and its slip surface are reported")
+
+
+def _yield_rounds(a, s, materials, static, so, opts, method, surface, warnings, *, searched):
+    """ky por vueltas (R17): la crítica estática no es la de menor ky, así que se busca con kh = 0, se calcula ky, se
+    busca otra vez con kh = ky y se recalcula, hasta 4 vueltas o hasta que ky cambie menos de 1e-4. Devuelve el menor ky
+    con su superficie. `surface` es la crítica con kh = 0 si `searched` (la búsqueda principal ya fue sin sismo)."""
+    def search(kh):
+        found = _search(a, s, _section(s, a, materials, kh, [], []) if kh else static, so)
+        warnings.extend(f"ky search: {w}" for w in found.warnings)
+        return found.surface if _has_surface(found.surface) else None
+
+    best = best_surface = prev = None
+    kh = 0.0
+    for k in range(_KY_ROUNDS):
+        if k or not searched:
+            surface = search(kh)
+        if surface is None:
+            break
+        y = rm.le_yield_coefficient(static, surface, method, opts)
+        warnings.extend(f"ky: {w}" for w in y.warnings)
+        if best is None or (y.ky is not None and (best.ky is None or y.ky < best.ky)):
+            best, best_surface = y, surface
+        if y.ky is None or y.ky <= 0 or (prev is not None and abs(y.ky - prev) < _KY_CHANGE):
+            break
+        prev = kh = y.ky
+    return best, best_surface
+
+
 def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
     methods_le = [_METHODS[w] for w in a.metodos.split(";")]
     first = methods_le[0]
@@ -543,23 +616,23 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
     else:
         results = tuple(rm.le_factor_of_safety(sec, surface, m, opts) for m in methods_le)
     for m, r in zip(methods_le, results):
-        warnings += [f"{_METHOD_WORD[m]}: {w}" for w in r.warnings if w not in warnings]
-        notes += [f"{_METHOD_WORD[m]}: {t}" for t in r.notes if t not in notes]
+        _add_messages(warnings, _METHOD_WORD[m], r.warnings)
+        _add_messages(notes, _METHOD_WORD[m], r.notes)
         methods.append(r.info)
 
-    yld = nm = record = None
+    yld = nm = record = ysurf = None
     if kh > 0 or a.registro is not None:
-        static, ysurf = sec, surface  # le_yield_coefficient reemplaza el kh de la sección
-        if kh > 0 and search is not None:  # ky sobre la crítica estática: se busca otra vez sin sismo
-            static = _section(s, a, materials, 0.0, [], [])
-            found = _search(a, s, static, so).surface
-            ysurf = found if _has_surface(found) else None
-            notes.append("ky on the static critical surface (searched again with kh = 0)")
-        if ysurf is None:
+        static = _section(s, a, materials, 0.0, [], [])  # le_yield_coefficient reemplaza el kh de la sección
+        if search is None:  # superficie dada: ky sobre ella
+            ysurf = surface
+            yld = rm.le_yield_coefficient(static, surface, first, opts)
+            warnings += [f"ky: {w}" for w in yld.warnings]
+        else:
+            yld, ysurf = _yield_rounds(a, s, materials, static, so, opts, first, surface, warnings, searched=kh == 0)
+            notes.append(_KY_ROUNDS_NOTE)
+        if yld is None:
             notes.append("ky not computed: no valid static slip surface")
         else:
-            yld = rm.le_yield_coefficient(static, ysurf, first, opts)
-            warnings += [f"ky: {w}" for w in yld.warnings]
             notes += [f"ky: {t}" for t in yld.notes]
             methods.append(yld.info)
     if a.registro is not None:
@@ -580,7 +653,7 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
             methods.append(nm.info)
     uniq = {m.method_id: m for m in methods}
     return LeAnalysisResult(a.id_analisis, a.id_seccion, order, _SURFACES[a.superficie], results, search, yld, nm,
-                            _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record)
+                            _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record, ysurf)
 
 
 # nombres del núcleo que pueden salir en un error -> columna de Analisis_LE
