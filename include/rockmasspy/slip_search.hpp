@@ -92,16 +92,19 @@ using le_detail::Poly;
 constexpr std::size_t kTop = 10;
 constexpr double kDeg = le_detail::kPi / 180.0;
 
+/// Refleja x -> -x invirtiendo el orden (el núcleo lo hace con to_local sobre su origen).
+inline Poly mirror(const Poly& p) { return le_detail::to_local(p, {0.0, 0.0}, true); }
+
 inline LeSection mirrored(LeSection s) {
-    s.surface = le_detail::mirror(s.surface);
+    s.surface = mirror(s.surface);
     for (auto& l : s.layers)
-        if (!l.bottom.empty()) l.bottom = le_detail::mirror(l.bottom);
-    if (s.piezometric) s.piezometric = le_detail::mirror(*s.piezometric);
+        if (!l.bottom.empty()) l.bottom = mirror(l.bottom);
+    if (s.piezometric) s.piezometric = mirror(*s.piezometric);
     return s;
 }
 inline SlipSurface mirrored(SlipSurface f) {
     if (f.circle) f.circle->xc = -f.circle->xc;
-    if (f.polyline) f.polyline = le_detail::mirror(*f.polyline);
+    if (f.polyline) f.polyline = mirror(*f.polyline);
     return f;
 }
 /// La cara mira a +x: hay que reflejar para llegar al marco de la búsqueda.
@@ -120,7 +123,7 @@ inline void validate(const LeSection& s, const SearchOptions& o) {
 
 inline bool has_malpha(const LeResult& r) {
     for (const auto& w : r.warnings)
-        if (w.find("m-alpha") != std::string::npos) return true;
+        if (w.find("m-alpha below 0.2") != std::string::npos) return true;
     return false;
 }
 
@@ -404,7 +407,7 @@ inline SearchResult search_block(const LeSection& section, const BlockSearch& bl
     const bool mir = faces_plus_x(section);
     const LeSection s = mir ? mirrored(section) : section;
     const Poly& g = s.surface;
-    const Poly weak = mir ? le_detail::mirror(block.weak_line) : block.weak_line;
+    const Poly weak = mir ? mirror(block.weak_line) : block.weak_line;
     std::vector<Point2> pts;  // posiciones de la línea débil bajo la superficie
     for (double x : spread(weak.front().x, weak.back().x, block.n_points)) {
         const Point2 p{x, le_detail::interp(weak, x)};
