@@ -25,12 +25,18 @@
  * Cinemática: la cuña del pie se mueve a lo largo de su base hacia el pie; las demás, a lo largo de su base con la
  * velocidad relativa paralela a la interfaz. Una velocidad <= 0 lanza «inadmissible mechanism at interface k».
  * El cortante de la base se opone al movimiento de la cuña; el de cada interfaz, al movimiento relativo.
- * Solución: para F fijo, sistema lineal 2n x 2n en N', E' y K (fuerza horizontal K·W hacia la cara). K baja con F;
- * el FS es el F con K = kh, por bisección en 1/F con intervalo; Kc = K con F = 1 (si sale <= 0, Kc = 0 con aviso).
+ * Solución: para F fijo, sistema lineal 2n x 2n en N', E' y K (fuerza horizontal K·W hacia la cara). K(phi), con
+ * phi = 1/F, es racional y tiene polos donde el determinante se anula; la rama física es la que sale de phi = 0
+ * (F infinito). Se marcha en phi desde 0 (paso 0.002 hasta phi = 1, 0.2 % de phi después) vigilando el signo del
+ * determinante (de los pivotes): el FS es el primer K = kh antes de cualquier cambio de signo, por bisección dentro de
+ * ese paso; si el signo cambia antes, FS vacío con aviso «no admissible solution». Kc = K con F = 1 solo si no hay
+ * polo en [0, 1] y la solución con F = 1 no tiene N' ni E' negativas (si no, Kc vacío con aviso, porque Newmark lo
+ * usa como ky); si sale <= 0, Kc = 0 con aviso.
  * N' < 0 en una base o E' < 0 en una interfaz da un aviso agregado. Sin resistencia, FS = 0; si con resistencia nula
  * K >= kh, la masa no se mueve hacia la cara (FS vacío, nota). Sin convergencia: FS vacío y aviso.
  * Optimización (opcional): búsqueda de patrón sobre los ángulos, dentro de [angle_min_deg, angle_max_deg] en las
- * coordenadas del usuario, que minimiza el FS; los ángulos que dan una geometría o cinemática inválida se descartan.
+ * coordenadas del usuario, que minimiza el FS; los ángulos que dan una geometría o cinemática inválida, o ninguna
+ * solución admisible, se descartan.
  * El Kc se da con los ángulos del FS mínimo.
  * Fuerzas de cada cuña: base_shear_strength es la resistencia disponible c l + N' tan φ; interface_shear_right es el
  * cortante movilizado (c L + E' tan φ) / FS de la interfaz del lado derecho (en x del usuario).
@@ -230,7 +236,13 @@ inline Model make_model(const LeSection& s, const SarmaInput& in) {
     using namespace le_detail;
     SlipSurface f;
     f.polyline = in.base;
+    check_poly(in.base, "base");  // los errores de la base dicen «base», no el «polyline» de la 3C
     validate(s, f, LeOptions{});
+    const Poly& gs = s.surface;
+    if (!covers(gs, in.base.front().x, in.base.back().x)) fail("base", "must lie within the x range of the ground surface");
+    if (interp(gs, in.base.front().x) - in.base.front().y > kTol || interp(gs, in.base.back().x) - in.base.back().y > kTol)
+        fail("base", "must start and end on or above the ground surface: extend the end segment until it reaches the "
+                     "ground surface");
     for (std::size_t i = 0; i < s.materials.size(); ++i)
         if (s.materials[i].model == StrengthModel::HoekBrown)
             fail(at("materials", i) + ".model", "Hoek-Brown is not supported in Sarma");
@@ -415,9 +427,13 @@ inline Mechanism make_mechanism(const Model& m, const std::vector<double>& angle
     return mech;
 }
 
-/// Eliminación gaussiana con pivoteo parcial; vacío si la matriz es singular.
-inline std::optional<std::vector<double>> solve_linear(std::vector<std::vector<double>> A, std::vector<double> b) {
+/// Eliminación gaussiana con pivoteo parcial; vacío si la matriz es singular. det_sign recibe el signo del
+/// determinante (de los pivotes y los intercambios), 0 si es singular.
+inline std::optional<std::vector<double>> solve_linear(std::vector<std::vector<double>> A, std::vector<double> b,
+                                                       int* det_sign = nullptr) {
     const std::size_t n = b.size();
+    int sign = 1;
+    if (det_sign) *det_sign = 0;
     double scale = 0.0;
     for (const auto& row : A)
         for (double v : row) scale = std::max(scale, std::fabs(v));
@@ -427,6 +443,8 @@ inline std::optional<std::vector<double>> solve_linear(std::vector<std::vector<d
         for (std::size_t r = c + 1; r < n; ++r)
             if (std::fabs(A[r][c]) > std::fabs(A[p][c])) p = r;
         if (!(std::fabs(A[p][c]) > 1e-13 * scale)) return std::nullopt;
+        if (p != c) sign = -sign;
+        if (A[p][c] < 0.0) sign = -sign;
         std::swap(A[p], A[c]);
         std::swap(b[p], b[c]);
         for (std::size_t r = c + 1; r < n; ++r) {
@@ -443,11 +461,13 @@ inline std::optional<std::vector<double>> solve_linear(std::vector<std::vector<d
     }
     for (double v : x)
         if (!std::isfinite(v)) return std::nullopt;
+    if (det_sign) *det_sign = sign;
     return x;
 }
 
-/// N'_0..N'_{n-1}, E'_0..E'_{n-2} y K con resistencias divididas por F = 1/phi.
-inline std::optional<std::vector<double>> solve_at(Mechanism& me, const LeSection& s, double phi) {
+/// N'_0..N'_{n-1}, E'_0..E'_{n-2} y K con resistencias divididas por F = 1/phi; det_sign, el de la última pasada.
+inline std::optional<std::vector<double>> solve_at(Mechanism& me, const LeSection& s, double phi,
+                                                   int* det_sign = nullptr) {
     const std::size_t n = me.w.size(), N = 2 * n;
     for (auto& w : me.w) {
         w.mat = w.cand.front();
@@ -476,7 +496,7 @@ inline std::optional<std::vector<double>> solve_at(Mechanism& me, const LeSectio
                 b[2 * i + 1] -= sign * (I.U * I.nn.y + I.c * I.L * phi * I.tau.y);
             }
         }
-        x = solve_linear(A, b);
+        x = solve_linear(A, b, det_sign);
         if (!x) return x;
         bool same = true;
         for (std::size_t i = 0; i < n; ++i) {  // contacto: el candidato más débil por τ con el σn' de la solución
@@ -510,59 +530,87 @@ struct Eval {
     std::optional<double> F, Kc;
     std::optional<std::vector<double>> x;  // solución con F = FS
     bool backward = false, failed = false, static_fail = false;
+    bool fs_pole = false, kc_pole = false;  // el sistema se vuelve singular antes del FS / antes de F = 1
+    int kc_negative = 0;                    // N' o E' negativas con F = 1 (Kc vacío)
 };
 
-inline Eval evaluate(const Model& m, const std::vector<double>& angles, const SarmaOptions& o) {
+inline int negatives(const std::vector<double>& x) {
+    return static_cast<int>(std::count_if(x.begin(), x.end() - 1, [](double v) { return v < 0.0; }));
+}
+
+/// FS y Kc en la rama física: marcha en phi = 1/F desde 0 (F infinito) vigilando el signo del determinante; el FS es
+/// el primer K >= kh antes de cualquier cambio de signo (un polo de K), y Kc = K(1) si no hay polo en [0, 1].
+inline Eval evaluate(const Model& m, const std::vector<double>& angles, const SarmaOptions& o, bool with_kc = true) {
     Eval e;
     e.me = make_mechanism(m, angles);
     const double kh = m.s->kh;
-    auto K = [&](double phi) -> std::optional<double> {
-        const auto x = solve_at(e.me, *m.s, phi);
-        if (!x) return std::nullopt;
-        return x->back();
+    struct Pt {
+        double phi, K;
+        int sign;  // 0: singular
     };
-    if (const auto k1 = K(1.0)) {
-        e.Kc = std::max(*k1, 0.0);
-        e.static_fail = *k1 <= 0.0;
-    }
-    const auto K0 = K(0.0);
-    if (!K0) {
-        e.failed = true;
+    auto at_phi = [&](double phi) {
+        int sg = 0;
+        const auto x = solve_at(e.me, *m.s, phi, &sg);
+        return Pt{phi, x ? x->back() : 0.0, x ? sg : 0};
+    };
+    const Pt p0 = at_phi(0.0);
+    if (p0.sign == 0) {
+        e.failed = e.kc_pole = true;
         return e;
     }
     bool strength = false;
     for (const auto& w : e.me.w)
         for (int k : w.cand) strength = strength || m.s->materials[k].cohesion > 0.0 || m.s->materials[k].friction_deg > 0.0;
     for (const auto& I : e.me.f) strength = strength || I.c > 0.0 || I.tf > 0.0;
-    if (*K0 >= kh) {
-        e.backward = true;
-        return e;
+    e.backward = p0.K >= kh;
+    const bool want_fs = !e.backward && strength;
+    // paso de 0.002 hasta phi = 1 y del 0.2 % de phi después, hasta F = 1e-3
+    // shortcut: dos polos dentro de un mismo paso no se ven; afinar el paso si aparece un caso así
+    std::optional<std::pair<double, double>> bracket;  // K(a) < kh <= K(b), sin cambio de signo entre a y b
+    Pt prev = p0;
+    for (int k = 1;; ++k) {
+        const bool need_fs = want_fs && !bracket, need_kc = with_kc && prev.phi < 1.0;
+        if (!need_fs && !need_kc) break;
+        const double phi = k <= 500 ? k / 500.0 : prev.phi * 1.002;
+        if (phi > 1e3) break;
+        const Pt p = at_phi(phi);
+        if (p.sign != prev.sign) {
+            e.kc_pole = need_kc;
+            e.fs_pole = need_fs;
+            break;
+        }
+        if (need_fs && p.K >= kh) bracket = std::pair{prev.phi, p.phi};
+        prev = p;
     }
-    if (!strength) {
+    if (with_kc && !e.kc_pole) {
+        const auto x1 = solve_at(e.me, *m.s, 1.0);
+        if (!x1) e.kc_pole = true;
+        else if ((e.kc_negative = negatives(*x1)) == 0) {
+            e.Kc = std::max(x1->back(), 0.0);
+            e.static_fail = x1->back() <= 0.0;
+        }
+    }
+    // la solución del FS se calcula al final: solve_at deja en las cuñas el material de contacto de su F
+    if (!e.backward && !strength) {
         e.F = 0.0;
         e.x = solve_at(e.me, *m.s, 0.0);
         return e;
     }
-    double lo = 0.0, hi = 1.0;
-    for (int k = 0;; ++k) {
-        const auto v = K(hi);
-        if (!v || k > 64) {
-            e.failed = true;
-            return e;
-        }
-        if (*v > kh) break;
-        lo = hi;
-        hi *= 2.0;
+    if (!want_fs || e.fs_pole) return e;
+    if (!bracket) {
+        e.failed = true;
+        return e;
     }
+    auto [lo, hi] = *bracket;
     bool done = false;
     for (int it = 0; it < o.max_iterations && !done; ++it) {
         const double mid = 0.5 * (lo + hi);
-        const auto v = K(mid);
-        if (!v) {
+        const auto x = solve_at(e.me, *m.s, mid);
+        if (!x) {
             e.failed = true;
             return e;
         }
-        (*v > kh ? hi : lo) = mid;
+        (x->back() >= kh ? hi : lo) = mid;
         done = lo > 0.0 && 1.0 / lo - 1.0 / hi < o.tolerance;
     }
     if (!done) {
@@ -623,7 +671,7 @@ inline SarmaResult sarma_fs(const LeSection& section, const SarmaInput& input, c
         const double lo = m.reflected ? 180.0 - options.angle_max_deg : options.angle_min_deg;
         const double hi = m.reflected ? 180.0 - options.angle_min_deg : options.angle_max_deg;
         for (double& a : angles) a = std::clamp(a, lo, hi);
-        e = evaluate(m, angles, options);
+        e = evaluate(m, angles, options, false);
         // búsqueda de patrón: paso de 8 grados que se parte a la mitad hasta 1e-3
         int evals = 0;
         for (double step = 8.0; step >= 1e-3 && e.F && evals < 5000;) {
@@ -634,8 +682,8 @@ inline SarmaResult sarma_fs(const LeSection& section, const SarmaInput& input, c
                     trial[j] += sign * step;
                     if (trial[j] < lo || trial[j] > hi) continue;
                     ++evals;
-                    try {
-                        Eval t = evaluate(m, trial, options);
+                    try {  // sin solución admisible (t.F vacío) el ángulo se descarta
+                        Eval t = evaluate(m, trial, options, false);
                         if (t.F && *t.F < *e.F - 1e-12) {
                             angles = trial;
                             e = std::move(t);
@@ -647,6 +695,7 @@ inline SarmaResult sarma_fs(const LeSection& section, const SarmaInput& input, c
                 }
             if (!improved) step *= 0.5;
         }
+        e = evaluate(m, angles, options);  // con Kc
         out.notes.push_back("interface angles optimized by pattern search for the minimum factor of safety");
     } else if (options.optimize_angles && ni > 0) {
         out.notes.push_back("interface angles not optimized: no factor of safety at the given angles");
@@ -659,17 +708,20 @@ inline SarmaResult sarma_fs(const LeSection& section, const SarmaInput& input, c
     }
     if (e.backward) out.notes.push_back(le_detail::kBackward);
     if (e.failed) out.warnings.push_back("Sarma did not converge");
+    if (e.fs_pole)
+        out.warnings.push_back(
+            "no admissible solution: the force system becomes singular before the factor of safety is reached");
     out.factor_of_safety = e.F;
     out.critical_acceleration = e.Kc;
-    if (!e.Kc) out.warnings.push_back("critical acceleration not found: the force system is singular at F = 1");
+    if (e.kc_pole) out.warnings.push_back("critical acceleration undefined: the force system becomes singular before F = 1");
+    else if (e.kc_negative > 0)
+        out.warnings.push_back("critical acceleration undefined: negative effective normal force in " +
+                               std::to_string(e.kc_negative) + " bases or interfaces at F = 1");
     else if (e.static_fail) out.warnings.push_back("static factor of safety at or below 1: critical acceleration taken as 0");
     const std::size_t n = e.me.w.size();
-    if (e.x) {
-        int neg = 0;
-        for (std::size_t i = 0; i < 2 * n - 1; ++i) neg += (*e.x)[i] < 0.0;
-        if (neg > 0)
+    if (e.x)
+        if (const int neg = negatives(*e.x); neg > 0)
             out.warnings.push_back("negative effective normal force in " + std::to_string(neg) + " bases or interfaces");
-    }
     if (section.piezometric)
         for (const auto& mm : section.materials)
             if (mm.ru > 0.0) {

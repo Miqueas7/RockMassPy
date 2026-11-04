@@ -65,8 +65,10 @@ PlanarInput planar_in(double H, double face, double plane, double g, double c, d
 TEST(Sarma, Problem4DryWithGivenInterface) {
     const auto r = sarma_fs(problem4(), problem4_input());
     ASSERT_TRUE(r.factor_of_safety.has_value());
-    EXPECT_NEAR(*r.factor_of_safety, 1.1977, 2e-3);
+    EXPECT_NEAR(*r.factor_of_safety, 1.19702, 1e-4);  // implementación independiente del revisor: 1.1970197
     EXPECT_NEAR(*r.factor_of_safety, 1.198, 0.01 * 1.198);
+    ASSERT_TRUE(r.critical_acceleration.has_value());
+    EXPECT_NEAR(*r.critical_acceleration, 0.054041, 1e-6);
     ASSERT_EQ(r.wedges.size(), 2u);
     EXPECT_EQ(r.wedges[0].base_material, 0);  // tramo sobre el contacto: el piso cizallado
     EXPECT_EQ(r.wedges[1].base_material, 1);
@@ -83,9 +85,8 @@ TEST(Sarma, Problem4OptimizedInterface) {
     o.optimize_angles = true;
     const auto r = sarma_fs(problem4(), problem4_input(), o);
     ASSERT_TRUE(r.factor_of_safety.has_value());
-    EXPECT_LE(*r.factor_of_safety, 1.1977);
+    EXPECT_NEAR(*r.factor_of_safety, 1.19599, 1e-5);
     EXPECT_LE(*r.factor_of_safety, *sarma_fs(problem4(), problem4_input()).factor_of_safety);
-    EXPECT_GE(*r.factor_of_safety, 1.18);
     EXPECT_GT(r.interface_angles_deg[0], 100.0);
     EXPECT_LT(r.interface_angles_deg[0], 130.0);
     EXPECT_TRUE(has(r.notes, "pattern search"));
@@ -222,4 +223,58 @@ TEST(Sarma, NoStrengthAndBackward) {
     const auto r = sarma_fs(up, {{{-50, 5}, {-40, -22}, {0, 0}}, {90}});
     EXPECT_FALSE(r.factor_of_safety.has_value());
     EXPECT_TRUE(has(r.notes, "does not move towards the face"));
+}
+
+namespace {
+LeSection one_layer(std::vector<Point2> surface, double g, double c, double phi, double kh = 0.0) {
+    LeSection s;
+    s.surface = std::move(surface);
+    s.materials = {mc(g, c, phi)};
+    s.layers = {LeLayer{{}, 0}};
+    s.kh = kh;
+    return s;
+}
+const std::vector<Point2> kMinSurface{{-1000, 45.09}, {-68.32, 45.09}, {0, 0}, {1000, 0}};
+const SarmaInput kMinInput{{{-85.05, 45.09}, {-49.55, 10.91}, {0, 0}}, {42}};
+const std::vector<Point2> kKcSurface{{-1000, 50}, {-40, 50}, {0, 0}, {1000, 0}};
+const SarmaInput kKcInput{{{-90, 50}, {0, -11.547}, {20, 0}}, {90}};
+}  // namespace
+
+// Caso mínimo del revisor: la búsqueda vieja (duplicar 1/F desde 1) saltaba el primer corte K = kh y con kh = Kc daba
+// 0.427, de la rama no física; la marcha desde phi = 0 da 1.
+TEST(Sarma, PhysicalBranchMinimalCase) {
+    const auto r = sarma_fs(one_layer(kMinSurface, 23.01, 6.66, 22.89), kMinInput);
+    ASSERT_TRUE(r.factor_of_safety && r.critical_acceleration);
+    EXPECT_NEAR(*r.factor_of_safety, 1.0999, 1e-4);
+    EXPECT_NEAR(*r.critical_acceleration, 0.0718, 1e-4);
+    const auto r1 = sarma_fs(one_layer(kMinSurface, 23.01, 6.66, 22.89, *r.critical_acceleration), kMinInput);
+    ASSERT_TRUE(r1.factor_of_safety.has_value());
+    EXPECT_NEAR(*r1.factor_of_safety, 1.0, 1e-6);
+}
+
+TEST(Sarma, CriticalAccelerationUndefinedWithPole) {  // polo en F ≈ 1.7: antes Kc 0.124
+    const auto r = sarma_fs(one_layer(kKcSurface, 20, 5, 45), kKcInput);
+    EXPECT_FALSE(r.critical_acceleration.has_value());
+    EXPECT_TRUE(has(r.warnings, "critical acceleration undefined: the force system becomes singular before F = 1"));
+}
+
+TEST(Sarma, CriticalAccelerationUndefinedWithNegativeForces) {  // antes Kc 1.86 g con N' < 0 en F = 1
+    const auto r = sarma_fs(one_layer(kKcSurface, 20, 5, 30), kKcInput);
+    EXPECT_FALSE(r.critical_acceleration.has_value());
+    EXPECT_TRUE(has(r.warnings, "critical acceleration undefined: negative effective normal force in 1 bases or "
+                                "interfaces at F = 1"));
+}
+
+TEST(Sarma, OptimizerDiscardsAnglesWithoutAdmissibleSolution) {  // antes 0.759 en una sección con mínimo 1.754
+    SarmaOptions o;
+    o.optimize_angles = true;
+    const auto r = sarma_fs(one_layer(kKcSurface, 20, 19.6063, 38.5630), {{{-100, 50}, {-65, 25}, {-30, 6}, {0, 0}}, {90, 90}}, o);
+    ASSERT_TRUE(r.factor_of_safety.has_value());
+    EXPECT_GE(*r.factor_of_safety, 1.75);
+}
+
+TEST(Sarma, BaseEndBelowGroundSaysBase) {
+    const std::string e = error_of([] { sarma_fs(one_layer(kKcSurface, 20, 5, 30), {{{-90, 49}, {0, -11.547}, {20, 0}}, {90}}); });
+    EXPECT_NE(e.find("'base' must start and end on or above the ground surface: extend the end segment until it "
+                     "reaches the ground surface"), std::string::npos);
 }
