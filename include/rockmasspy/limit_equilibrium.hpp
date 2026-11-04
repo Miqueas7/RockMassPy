@@ -27,7 +27,15 @@
  * falla a la cuerda entre sus extremos y L el largo de la cuerda; b1 = 0.69 si todas las bases tienen c > 0 y φ > 0,
  * 0.50 si todas tienen c = 0, 0.31 si todas tienen φ = 0, y 0.69 con nota si se mezclan. Fuente secundaria (Abramson
  * et al. 2002, no leído).
- * Pendiente de la tarea 3: Hoek-Brown lanza «not implemented yet» en vez de dar un número.
+ * Hoek-Brown no lineal: en cada iteración la base toma el c y el φ tangentes a la envolvente de Balmer (Hoek et al.
+ * 2002, ec. 8-10, `hb_normal_shear`) en el σn' = N'/l de la iteración anterior; σ3 se busca por bisección en
+ * [σt, max(σn', 0)] y tan φ = (k - 1)/(2√k) con k = dσ1/dσ3. Arranque: tangentes en el σn' del Ordinario de cada
+ * tajada (Spencer y M-P arrancan en el σn' de Bishop convergido, si lo hay). La recta pasa por el punto de la
+ * envolvente, así que el FS convergido no depende de la pendiente: la tangente solo guía la iteración. Una base con σn' <= σt no resiste (τ = 0, aviso agregado). Se itera hasta que el FS cambie menos que la
+ * tolerancia y los σn' de las bases de Hoek-Brown menos que tolerancia·σci; si no, FS vacío y aviso. El Ordinario no
+ * itera (su N' no depende de la resistencia). Unidades: `sigma_ci` va en la unidad de esfuerzo de la sección (kPa si
+ * γ está en kN/m³ y la geometría en m). make_slices deja c y φ en 0 en las bases de Hoek-Brown (dependen de σn').
+ * Fuente: Carranza-Torres y Hormazábal (2020), similitud de la Tabla 1 (Secondary); su FS 2.01 no se reproduce.
  */
 
 #pragma once
@@ -93,6 +101,16 @@ struct SlipSurface {
 enum class LeMethod { Ordinary, Bishop, JanbuSimplified, JanbuCorrected, Spencer, MorgensternPrice };
 enum class InterSliceFunction { Constant, HalfSine, Points };
 
+/// Constantes de Hoek-Brown dadas directamente (sin GSI), como en Carranza-Torres y Hormazábal (2020).
+inline HbParams hb_params_from_constants(double mb, double s, double a) {
+    using namespace validation;
+    require_positive(mb, "mb");
+    require_in_range(s, 0.0, 1.0, "s");
+    require_positive(a, "a");
+    require(a <= 1.0, "a", "must be within (0, 1]", a);
+    return {mb, s, a, {"HB-constants", Verification::Primary, "Hoek, Carranza-Torres & Corkum (2002); mb, s, a given"}, {}};
+}
+
 struct LeOptions {
     int n_slices = 50;
     double tolerance = 1e-6;
@@ -129,9 +147,6 @@ using Poly = std::vector<Point2>;
 
 [[noreturn]] inline void fail(const std::string& name, const std::string& what) {
     throw std::invalid_argument("Domain error [RockMassPy]: parameter '" + name + "' " + what);
-}
-[[noreturn]] inline void not_implemented(const std::string& name, int task) {
-    fail(name, "is not implemented yet (task " + std::to_string(task) + ")");
 }
 inline std::string at(const std::string& name, std::size_t i) { return name + "[" + std::to_string(i) + "]"; }
 
@@ -313,6 +328,8 @@ struct Slice {
     std::vector<int> cand;  // materiales candidatos de la base (más de uno si cae en un contacto)
     int mat = -1;           // -1: aire
     double c = 0.0, tf = 0.0;
+    bool tension = false;  // base de Hoek-Brown con σn' <= σt
+    std::optional<double> tangent_at;  // σn' donde se tomó la última tangente de Hoek-Brown
     double Np = 0.0, E = 0.0, X = 0.0;
     double Px = 0.0, Py = 0.0;  // fuerza horizontal externa hacia el pie (agua de la grieta) y la cota de su línea
 };
@@ -401,29 +418,95 @@ inline Slice build_slice(const Geo& g, const LeSection& s, double xa, double xb)
             t.u = ru * W / t.b;
         }
         const auto& m = s.materials[t.mat];
-        t.c = m.cohesion;
-        t.tf = std::tan(m.friction_deg * kPi / 180.0);
+        if (m.model == StrengthModel::MohrCoulomb) {
+            t.c = m.cohesion;
+            t.tf = std::tan(m.friction_deg * kPi / 180.0);
+        }
     }
     return t;
 }
 
-/// El candidato más débil por τ = c + σn' tan φ en el σn' de la iteración.
+struct Strength {
+    double c, tf;
+    bool tension;
+};
+
+/// c y tan φ tangentes a la envolvente de Balmer en σn'; σn' <= σt (o un punto sin tangente finita): sin resistencia.
+inline Strength hb_tangent(const LeMaterial& m, double sn) {
+    const HbParams& p = *m.hb;
+    const double sci = *m.sigma_ci, st = hb_tensile(sci, p);
+    if (!(sn > st)) return {0.0, 0.0, true};
+    // σn(σ3) crece con σ3 y σn(σ3) >= σ3 para σ3 >= 0: la raíz está en [σt, max(σn', 0)]
+    double lo = st, hi = std::max(sn, 0.0);
+    for (int k = 0; k < 200 && hi - lo > 1e-15 * (std::fabs(lo) + std::fabs(hi)); ++k) {
+        const double mid = 0.5 * (lo + hi);
+        (hb_normal_shear(mid, sci, p).sigma_n_mpa < sn ? lo : hi) = mid;
+    }
+    const NormalShear ns = hb_normal_shear(hi, sci, p);
+    const double k = 1.0 + p.a * p.mb * std::pow(std::max(0.0, p.mb * hi / sci + p.s), p.a - 1.0);
+    const double tf = (k - 1.0) / (2.0 * std::sqrt(k)), c = ns.tau_mpa - ns.sigma_n_mpa * tf;
+    if (!std::isfinite(tf) || !std::isfinite(c)) return {0.0, 0.0, true};
+    return {c, tf, false};
+}
+
+inline bool any_hb(const LeSection& s) {
+    for (const auto& m : s.materials)
+        if (m.model == StrengthModel::HoekBrown) return true;
+    return false;
+}
+
+/// Resistencia de la base en el σn' de la iteración: el candidato más débil por τ (más de uno si cae en un contacto) y,
+/// con Hoek-Brown, las tangentes en ese σn'. Mohr-Coulomb compara con σn' >= 0, como en la tarea 1.
 inline void choose(std::vector<Slice>& sl, const LeSection& s) {
     for (auto& t : sl) {
-        if (t.cand.size() < 2) continue;
-        const double sn = std::max(t.Np / t.l, 0.0);
+        if (t.cand.empty()) continue;
+        if (t.cand.size() < 2 && s.materials[t.cand.front()].model == StrengthModel::MohrCoulomb) continue;
+        const double sn = t.Np / t.l;
         double best = std::numeric_limits<double>::infinity();
         for (int m : t.cand) {
             const auto& mm = s.materials[m];
-            const double tf = std::tan(mm.friction_deg * kPi / 180.0), tau = mm.cohesion + sn * tf;
+            Strength k{};
+            double tau = 0.0;
+            if (mm.model == StrengthModel::HoekBrown) {
+                // la tangente queda sobre la envolvente cóncava: el σn' linealizado puede saltar bajo σt sin estar en
+                // tracción; entonces el punto de la tangente baja solo hasta la mitad del camino a σt
+                double at = sn;
+                const double st = hb_tensile(*mm.sigma_ci, *mm.hb);
+                if (sn <= st && t.tangent_at && *t.tangent_at > st) at = st + 0.5 * (*t.tangent_at - st);
+                k = hb_tangent(mm, at);
+                if (m == t.cand.front()) t.tangent_at = at;
+                tau = k.tension ? 0.0 : k.c + sn * k.tf;
+            } else {
+                k = {mm.cohesion, std::tan(mm.friction_deg * kPi / 180.0), false};
+                tau = mm.cohesion + std::max(sn, 0.0) * k.tf;
+            }
             if (tau < best) {
                 best = tau;
                 t.mat = m;
-                t.c = mm.cohesion;
-                t.tf = tf;
+                t.c = k.c;
+                t.tf = k.tf;
+                t.tension = k.tension;
             }
         }
     }
+}
+
+/// Mayor cambio de σn' en las bases de Hoek-Brown, relativo a su σci; deja los σn' actuales en prev.
+inline double hb_change(const std::vector<Slice>& sl, const LeSection& s, std::vector<double>& prev) {
+    double d = 0.0;
+    for (std::size_t i = 0; i < sl.size(); ++i) {
+        const auto& t = sl[i];
+        const double sn = t.Np / t.l;
+        if (t.mat >= 0 && s.materials[t.mat].model == StrengthModel::HoekBrown)
+            d = std::max(d, std::fabs(sn - prev[i]) / *s.materials[t.mat].sigma_ci);
+        prev[i] = sn;
+    }
+    return d;
+}
+inline std::vector<double> normal_stresses(const std::vector<Slice>& sl) {
+    std::vector<double> v;
+    for (const auto& t : sl) v.push_back(t.Np / t.l);
+    return v;
 }
 
 inline void validate(const LeSection& s, const SlipSurface& f, const LeOptions& o) {
@@ -445,6 +528,10 @@ inline void validate(const LeSection& s, const SlipSurface& f, const LeOptions& 
             if (!m.hb) fail(n + ".hb", "is required for HoekBrown");
             if (!m.sigma_ci) fail(n + ".sigma_ci", "is required for HoekBrown");
             require_positive(*m.sigma_ci, n + ".sigma_ci");
+            require_positive(m.hb->mb, n + ".hb.mb");
+            require_in_range(m.hb->s, 0.0, 1.0, n + ".hb.s");
+            require_positive(m.hb->a, n + ".hb.a");
+            require(m.hb->a <= 1.0, n + ".hb.a", "must be within (0, 1]", m.hb->a);
         }
     }
     if (s.layers.empty()) fail("layers", "must not be empty");
@@ -494,9 +581,6 @@ inline void validate(const LeSection& s, const SlipSurface& f, const LeOptions& 
         require(fp.back().x == 1.0, at("function_points", fp.size() - 1) + ".x", "must be 1", fp.back().x);
         if (!positive) fail("function_points", "needs some f > 0");
     }
-    // lo que llega en la tarea 3: nunca un número a medias
-    for (std::size_t i = 0; i < s.materials.size(); ++i)
-        if (s.materials[i].model == StrengthModel::HoekBrown) not_implemented(at("materials", i) + ".model HoekBrown", 3);
 }
 
 struct Built {
@@ -602,7 +686,9 @@ inline LeSlice to_public(const Slice& t, const Slice* left, bool reflected, Poin
     out.weight = t.W;
     out.pore_pressure = t.u;
     out.cohesion = t.mat >= 0 ? t.c : 0.0;
-    out.friction_deg = t.mat >= 0 ? s.materials[t.mat].friction_deg : 0.0;
+    out.friction_deg = t.mat < 0 ? 0.0
+                       : s.materials[t.mat].model == StrengthModel::HoekBrown ? std::atan(t.tf) * 180.0 / kPi
+                                                                              : s.materials[t.mat].friction_deg;
     out.normal_force = t.Np;
     out.shear_strength = t.c * t.l + t.Np * t.tf;
     out.material = t.mat;
@@ -800,6 +886,7 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
         od += t.W * t.sa + kh * t.W * t.ca;
     }
     if (od > 0.0 && on / od > 0.0 && std::isfinite(on / od)) F = on / od;
+    std::vector<double> prev = normal_stresses(sl);
     for (r.iterations = 1; r.iterations <= o.max_iterations; ++r.iterations) {
         choose(sl, s);
         for (auto& t : sl) t.Np = vertical_normal(t, F);
@@ -819,7 +906,8 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
             r.bad_m_alpha = m_alpha_count(sl, F, 0.0, true);
             return r;
         }
-        if (std::fabs(Fn - F) < o.tolerance) {
+        const double dsn = hb_change(sl, s, prev);
+        if (std::fabs(Fn - F) < o.tolerance && dsn < o.tolerance) {
             r.F = Fn;
             r.converged = true;
             for (auto& t : sl) t.Np = vertical_normal(t, Fn);
@@ -842,13 +930,17 @@ inline double interslice_f(const LeOptions& o, bool spencer, double t, bool refl
 /// λ es la raíz de la ecuación de momentos, buscada barriendo desde 0 hacia afuera hasta un cambio de signo y cerrada
 /// con regula falsi (Illinois) alternada con bisección. kh entra en R, T y el momento (brazo del centroide).
 inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o, bool spencer, bool reflected,
-                 double F0) {
+                 double F0, const std::vector<Slice>* seed = nullptr) {
     Solve r;
     const std::size_t n = sl.size();
     const double kh = s.kh, x0 = sl.front().xa, x1 = sl.back().xb;
     std::vector<double> fb(n), R(n), T(n), Phi(n), Psi(n);
     for (std::size_t i = 0; i < n; ++i) fb[i] = interslice_f(o, spencer, (sl[i].xb - x0) / (x1 - x0), reflected);
     ordinary_normals(sl, kh);
+    // con Hoek-Brown, las primeras tangentes salen de las N' de Bishop convergido si las hay (las del Ordinario dan
+    // tangentes casi verticales en las tajadas delgadas y Spencer no encuentra λ)
+    if (seed && any_hb(s))
+        for (std::size_t i = 0; i < n; ++i) sl[i].Np = (*seed)[i].Np;
     choose(sl, s);
     double driving = 0.0;
     for (const auto& t : sl) driving += t.W * t.sa + kh * t.W * t.ca + t.Px * t.ca;
@@ -924,7 +1016,11 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         r.bad_m_alpha = m_alpha_count(sl, last_F, 0.0, true);
         return r;
     };
-    for (int pass = 0; pass < 3; ++pass) {
+    const bool hb = any_hb(s);
+    std::vector<double> prev = normal_stresses(sl);
+    std::optional<double> F_pass;
+    const int passes = hb ? o.max_iterations : 3;  // Mohr-Coulomb: hasta 3 pasadas por el material de los contactos
+    for (int pass = 0; pass < passes; ++pass) {
         for (std::size_t i = 0; i < n; ++i) {
             const auto& t = sl[i];
             R[i] = ordinary_normal(t, kh) * t.tf + t.c * t.l;
@@ -942,14 +1038,22 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
             for (int k = 1; k <= 40 && !a && (alive[0] || alive[1]); ++k)
                 for (int side = 0; side < 2 && !a; ++side) {
                     if (!alive[side]) continue;
-                    const auto q = eval((side ? -0.1 : 0.1) * k, prev[side].F);
-                    if (!q) {
-                        alive[side] = false;
-                    } else if ((q->g > 0.0) != (prev[side].g > 0.0)) {
-                        a = prev[side];
-                        b = q;
-                    } else {
-                        prev[side] = *q;
+                    // si la ecuación de fuerzas se rompe en el paso, se acerca con pasos partidos a la mitad
+                    const double target = (side ? -0.1 : 0.1) * k;
+                    double step = target - prev[side].lam;
+                    for (int h = 0; h <= 6 && !a; ) {
+                        const auto q = eval(prev[side].lam + step, prev[side].F);
+                        if (!q) {
+                            step *= 0.5;
+                            ++h;
+                        } else if ((q->g > 0.0) != (prev[side].g > 0.0)) {
+                            a = prev[side];
+                            b = q;
+                        } else {
+                            prev[side] = *q;
+                            if (std::fabs(prev[side].lam - target) <= 1e-12) break;
+                        }
+                        if (h > 6) alive[side] = false;
                     }
                 }
         }
@@ -1000,6 +1104,12 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         choose(sl, s);
         bool same = true;
         for (std::size_t i = 0; i < n; ++i) same = same && mats[i] == sl[i].mat;
+        if (hb) {
+            const double dsn = hb_change(sl, s, prev);
+            same = same && dsn < o.tolerance && F_pass && std::fabs(best.F - *F_pass) < o.tolerance;
+            F_pass = best.F;
+            if (!same && pass + 1 == passes) return fail();
+        }
         if (same) break;
         F0 = best.F;
     }
@@ -1075,10 +1185,13 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
             auto tmp = sl;
             const Solve bi = bishop_janbu(tmp, section, g, options, true);
             r = gle(sl, section, options, method == LeMethod::Spencer, b.reflected,
-                    bi.F && *bi.F > 0.0 ? *bi.F : 1.0);
+                    bi.F && *bi.F > 0.0 ? *bi.F : 1.0, bi.converged ? &tmp : nullptr);
         }
     }
     LeResult out{std::nullopt, method, std::nullopt, r.iterations, r.converged, {}, 0.0, info(method), {}, b.notes};
+    if (any_hb(section))
+        out.info.source += "; Hoek-Brown by tangents to the Balmer envelope (Hoek et al. 2002), similarity checked "
+                           "against Carranza-Torres & Hormazabal (2020)";
     out.notes.insert(out.notes.end(), r.notes.begin(), r.notes.end());
     if (section.piezometric)
         for (const auto& m : section.materials)
@@ -1089,7 +1202,22 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
     if (b.air)
         out.warnings.push_back("slip surface crosses the ground surface more than twice: the mass is taken between "
                                "the first and the last cut");
-    if (!r.converged && !r.explained) {
+    // Hoek-Brown: una base que terminó bajo σt con la recta de su tangente (no con τ = 0) no tiene solución
+    // consistente cerca (suele ser mα pequeño al pie): FS vacío, nunca un número a medias
+    int tension = 0, at_limit = 0;
+    if (r.converged)
+        for (const auto& t : sl) {
+            if (t.mat < 0 || section.materials[t.mat].model != StrengthModel::HoekBrown) continue;
+            const auto& m = section.materials[t.mat];
+            if (t.tension) ++tension;
+            else if (t.Np / t.l <= hb_tensile(*m.sigma_ci, *m.hb)) ++at_limit;
+        }
+    if (at_limit > 0) {
+        r.converged = false;
+        out.converged = false;
+        out.warnings.push_back(std::string(name(method)) + " did not converge (Hoek-Brown base at the tensile limit in " +
+                               std::to_string(at_limit) + " slices)");
+    } else if (!r.converged && !r.explained) {
         std::string w = std::string(name(method)) + " did not converge";
         if (r.bad_m_alpha > 0) w += " (m-alpha <= 0 in " + std::to_string(r.bad_m_alpha) + " slices)";
         out.warnings.push_back(w);
@@ -1097,6 +1225,9 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
     if (r.converged) {
         out.factor_of_safety = r.F;
         out.lambda = r.lambda;
+        if (tension > 0)
+            out.warnings.push_back("Hoek-Brown base in tension in " + std::to_string(tension) +
+                                   " slices: shear strength taken as zero");
         if (method != LeMethod::Ordinary && *r.F > 0.0) {
             const int k = m_alpha_count(sl, F_alpha.value_or(*r.F), 0.2, false);
             if (k > 0)

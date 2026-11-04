@@ -268,7 +268,7 @@ def _hb(**kw):
     (_hb(hb=rm.hb_params(50, 10, 0)), r"materials\[0\]\.sigma_ci"),
     (lambda s, f, o: _set(s, piezometric=pts([(0, 50), (180, NAN)])), r"piezometric\[1\]\.y"),
     (lambda s, f, o: _set(s, piezometric=pts([(50, 50), (180, 10)])), "piezometric"),
-    (_hb(hb=rm.hb_params(50, 10, 0), sigma_ci=50.0), r"not implemented yet \(task 3\)"),
+    (_hb(hb=rm.hb_params(50, 10, 0), sigma_ci=NAN), r"materials\[0\]\.sigma_ci"),
 ])
 def test_invalid_inputs_name_the_field(edit, field):
     with pytest.raises(ValueError, match=field):
@@ -497,3 +497,90 @@ def test_reflected_section_with_water_and_crack(method):
     assert rb.factor_of_safety == pytest.approx(ra.factor_of_safety, rel=1e-9)
     if ra.lambda_ is not None:
         assert rb.lambda_ == pytest.approx(ra.lambda_, rel=1e-9)
+
+
+# --- Tarea 3: Hoek-Brown no lineal ---
+
+# Carranza-Torres y Hormazábal (2020), Tabla 1: H, γ (kN/m³), σci (MPa), mb, s (a = 0.5, talud de 50°) y el FS
+# recalculado con Bishop en el círculo escalado. El artículo publica 2.01 para el caso 3 y no se reproduce (plan,
+# «Valores a confirmar»): con Balmer y con el Mohr-Coulomb equivalente salen 3.5 a 3.6.
+CCT = [(241, 27, 20.4, 3.2374, 1.0509e-2, 3.6031), (520, 25, 15.0, 8.7961, 7.7649e-2, 3.6031),
+       (360, 27, 77.7, 1.2601, 1.5893e-3, 3.5940), (676, 24, 11.3, 14.5567, 2.1107e-1, 3.6015),
+       (399, 26, 225, 0.4638, 2.1509e-4, 3.5924)]
+
+
+def hb(gamma, sci_kpa, mb, s, ru=0.0):
+    m = rm.LeMaterial()
+    m.unit_weight, m.model, m.sigma_ci, m.ru = gamma, rm.StrengthModel.HoekBrown, sci_kpa, ru
+    m.hb = rm.hb_params_from_constants(mb, s, 0.5)
+    return m
+
+
+def cct(H, gamma, sci, mb, s, material=None, flip=False):
+    # pie en el origen y el centro (-0.5758H, 1.6293H) sobre la cara: la cresta en x = -H cot 50°; σci en kPa
+    xk = -H / math.tan(math.radians(50))
+    surf = [(xk - 3 * H, H), (xk, H), (0, 0), (3 * H, 0)]
+    return section(mirror(surf) if flip else surf, [layer([], 0)], [material or hb(gamma, sci * 1000, mb, s)])
+
+
+def cct_circle(H, flip=False):
+    return circle((0.5758 if flip else -0.5758) * H, 1.6293 * H, 1.728 * H)
+
+
+def test_hoek_brown_similarity_carranza_torres():
+    f3 = fs(cct(*CCT[2][:5]), cct_circle(CCT[2][0]), M.Bishop)
+    assert f3 == pytest.approx(3.594, abs=0.01)
+    for H, g, sci, mb, s, re in CCT:
+        r = run(cct(H, g, sci, mb, s), cct_circle(H), M.Bishop)
+        assert r.factor_of_safety == pytest.approx(f3, rel=0.005)
+        assert r.factor_of_safety == pytest.approx(re, abs=0.01)
+        assert not r.warnings
+        assert r.slices[0].x_left / H == pytest.approx(-2.1851, abs=1e-3)
+
+
+def test_hoek_brown_against_equivalent_mohr_coulomb():
+    H, g, sci, mb, s, _ = CCT[2]
+    p = rm.hb_params_from_constants(mb, s, 0.5)
+    s3 = rm.hb_sigma3max(rm.hb_global_strength(sci, p), g / 1000, H, rm.HbApplication.Slope)
+    fit = rm.hb_mohr_coulomb(sci, p, s3)
+    v = fs(cct(H, g, sci, mb, s), cct_circle(H), M.Bishop)
+    eq = fs(cct(H, g, sci, mb, s, material=mc(g, fit.cohesion_mpa * 1000, fit.phi_deg)), cct_circle(H), M.Bishop)
+    assert 0.9 <= v / eq <= 1.1
+    assert eq == pytest.approx(3.580, abs=0.01)
+
+
+@pytest.mark.parametrize("method", [M.Spencer, M.MorgensternPrice])
+def test_hoek_brown_spencer_and_gle(method):
+    H, g, sci, mb, s, _ = CCT[2]
+    b = fs(cct(H, g, sci, mb, s), cct_circle(H), M.Bishop)
+    r = run(cct(H, g, sci, mb, s), cct_circle(H), method)
+    assert r.converged and r.lambda_ is not None
+    assert r.factor_of_safety == pytest.approx(b, rel=0.02)
+
+
+@pytest.mark.parametrize("method", ALL_METHODS)
+def test_hoek_brown_reflected(method):
+    H, g, sci, mb, s, _ = CCT[2]
+    ra = run(cct(H, g, sci, mb, s), cct_circle(H), method)
+    rb = run(cct(H, g, sci, mb, s, flip=True), cct_circle(H, flip=True), method)
+    assert rb.factor_of_safety == pytest.approx(ra.factor_of_safety, rel=1e-9)
+
+
+def test_hoek_brown_tension_gives_zero_shear():
+    s = section([(0, 30), (40, 30), (80, 0), (120, 0)], [layer([], 0)], [hb(20, 10000, 0.5, 0.0, ru=0.45)])
+    f = circle(70, 45, 50)
+    r = run(s, f, M.Ordinary)
+    assert r.warnings == ["Hoek-Brown base in tension in 12 slices: shear strength taken as zero"]
+    assert all(t.shear_strength == 0.0 for t in r.slices if t.normal_force <= 0.0)
+    for method in ALL_METHODS:
+        r = run(s, f, method)
+        assert r.factor_of_safety is not None or r.warnings
+        assert all(math.isfinite(v) for t in r.slices for v in (t.normal_force, t.shear_strength, t.friction_deg))
+
+
+def test_hoek_brown_constants_validation():
+    assert rm.hb_params_from_constants(1.2601, 1.5893e-3, 0.5).info.method_id == "HB-constants"
+    with pytest.raises(ValueError, match="mb"):
+        rm.hb_params_from_constants(-1.0, 0.1, 0.5)
+    with pytest.raises(ValueError, match="'a'"):
+        rm.hb_params_from_constants(1.0, 0.1, 1.5)

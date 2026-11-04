@@ -664,6 +664,8 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("converged", &LeResult::converged).def_ro("slices", &LeResult::slices)
         .def_ro("sliding_mass_area", &LeResult::sliding_mass_area).def_ro("info", &LeResult::info)
         .def_ro("warnings", &LeResult::warnings).def_ro("notes", &LeResult::notes);
+    m.def("hb_params_from_constants", &hb_params_from_constants, nb::arg("mb"), nb::arg("s"), nb::arg("a"),
+          "Hoek-Brown constants given directly (no GSI); sigma_ci goes in the stress unit of the section.");
     m.def("make_slices", &make_slices, nb::arg("section"), nb::arg("surface"), nb::arg("n_slices"));
     m.def("le_factor_of_safety", &le_factor_of_safety, nb::arg("section"), nb::arg("surface"), nb::arg("method"),
           nb::arg("options") = LeOptions());

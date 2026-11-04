@@ -343,12 +343,23 @@ TEST(LimitEquilibrium, InvalidInputsNameTheField) {
         "piezometric[1].y");
     bad([](LeSection& s, SlipSurface&, LeOptions&) { s.piezometric = std::vector<Point2>{{50, 50}, {180, 10}}; },
         "piezometric");
-    // lo que llega en la tarea 3 no da un número
     bad([](LeSection& s, SlipSurface&, LeOptions&) {
         s.materials[0].model = StrengthModel::HoekBrown;
         s.materials[0].hb = hb_params(50, 10, 0);
         s.materials[0].sigma_ci = 50.0;
-    }, "not implemented yet (task 3)");
+        s.materials[0].hb->mb = -1.0;
+    }, "materials[0].hb.mb");
+    bad([](LeSection& s, SlipSurface&, LeOptions&) {
+        s.materials[0].model = StrengthModel::HoekBrown;
+        s.materials[0].hb = hb_params(50, 10, 0);
+        s.materials[0].sigma_ci = 50.0;
+        s.materials[0].hb->a = kNan;
+    }, "materials[0].hb.a");
+    bad([](LeSection& s, SlipSurface&, LeOptions&) {
+        s.materials[0].model = StrengthModel::HoekBrown;
+        s.materials[0].hb = hb_params(50, 10, 0);
+        s.materials[0].sigma_ci = kNan;
+    }, "materials[0].sigma_ci");
 }
 
 TEST(LimitEquilibrium, InterSliceFunctions) {
@@ -779,4 +790,178 @@ TEST(LimitEquilibrium, SpencerGlobalEquilibriumWithWaterFilledCrack) {
     EXPECT_NEAR(M / scale, 0.0, 1e-8);
     // el agua pesa en el balance: sin ella no cerraría
     EXPECT_GT(P / W, 1e-3);
+}
+
+// --- Tarea 3: Hoek-Brown no lineal ---
+
+namespace {
+// Carranza-Torres y Hormazábal (2020), Tabla 1: H, γ (kN/m³), σci (MPa), mb, s; a = 0.5, talud de 50°
+struct CctCase { double H, gamma, sci_mpa, mb, s, fs; };
+// FS recalculados (plan 3C) con Bishop en el círculo escalado; el artículo publica 2.01 para el caso 3 y no se
+// reproduce (plan, «Valores a confirmar»): con Balmer y con el Mohr-Coulomb equivalente salen 3.5 a 3.6.
+const CctCase kCct[] = {{241, 27, 20.4, 3.2374, 1.0509e-2, 3.6031},
+                        {520, 25, 15.0, 8.7961, 7.7649e-2, 3.6031},
+                        {360, 27, 77.7, 1.2601, 1.5893e-3, 3.5940},
+                        {676, 24, 11.3, 14.5567, 2.1107e-1, 3.6015},
+                        {399, 26, 225, 0.4638, 2.1509e-4, 3.5924}};
+
+LeMaterial hb_material(double gamma, double sci_kpa, double mb, double s, double ru = 0.0) {
+    LeMaterial m;
+    m.unit_weight = gamma;
+    m.model = StrengthModel::HoekBrown;
+    m.hb = hb_params_from_constants(mb, s, 0.5);
+    m.sigma_ci = sci_kpa;
+    m.ru = ru;
+    return m;
+}
+// Pie en el origen y el centro (xc, yc) = (-0.5758H, 1.6293H) sobre la cara: la cresta queda en x = -H cot 50° y la
+// cara mira a +x (con la cresta en +H cot 50° el centro cae fuera de la cara y sale FS 3.398, no el 3.594 del plan).
+// σci en kPa porque γ va en kN/m³.
+LeSection cct_section(const CctCase& c, std::optional<LeMaterial> mat = std::nullopt) {
+    const double H = c.H, xk = -H / std::tan(50.0 * le_detail::kPi / 180.0);
+    return one_layer({{xk - 3 * H, H}, {xk, H}, {0, 0}, {3 * H, 0}},
+                     mat.value_or(hb_material(c.gamma, c.sci_mpa * 1000.0, c.mb, c.s)));
+}
+SlipSurface cct_circle(double H) { return circle(-0.5758 * H, 1.6293 * H, 1.728 * H); }
+
+// τ de la envolvente de Balmer en σn, por bisección propia sobre hb_normal_shear (independiente del núcleo)
+double balmer_tau(double sn, double sci, const HbParams& p) {
+    const double st = hb_tensile(sci, p);
+    if (sn <= st) return 0.0;
+    double lo = st, hi = std::max(sn, 0.0) + 1.0;
+    for (int k = 0; k < 300; ++k) {
+        const double mid = 0.5 * (lo + hi);
+        (hb_normal_shear(mid, sci, p).sigma_n_mpa < sn ? lo : hi) = mid;
+    }
+    return hb_normal_shear(0.5 * (lo + hi), sci, p).tau_mpa;
+}
+}  // namespace
+
+TEST(LimitEquilibrium, HoekBrownSimilarityCarranzaTorres) {
+    const double f3 = fs(cct_section(kCct[2]), cct_circle(kCct[2].H), LeMethod::Bishop);
+    EXPECT_NEAR(f3, 3.594, 0.01);
+    for (const auto& c : kCct) {
+        const auto r = run(cct_section(c), cct_circle(c.H), LeMethod::Bishop);
+        ASSERT_TRUE(r.factor_of_safety.has_value()) << c.H;
+        EXPECT_NEAR(*r.factor_of_safety, f3, 0.005 * f3) << c.H;  // similitud: el mismo FS a ±0.5 %
+        EXPECT_NEAR(*r.factor_of_safety, c.fs, 0.01) << c.H;
+        EXPECT_TRUE(r.warnings.empty()) << c.H;
+        // la masa va de 2.185H detrás del pie (sobre la cresta) hasta el pie
+        EXPECT_NEAR(r.slices.front().x_left / c.H, -2.1851, 1e-3);
+        EXPECT_NEAR(r.slices.back().x_right / c.H, 0.0, 1e-3);
+        EXPECT_NE(r.info.source.find("Balmer"), std::string::npos);
+    }
+    // con s = 0 baja (plan: 3.545)
+    auto zero = kCct[2];
+    zero.s = 0.0;
+    EXPECT_NEAR(fs(cct_section(zero), cct_circle(zero.H), LeMethod::Bishop), 3.545, 0.01);
+}
+
+// Mohr-Coulomb equivalente de Hoek et al. (2002) con σ3max de talud (hb_sigma3max en MPa y MN/m³)
+TEST(LimitEquilibrium, HoekBrownAgainstEquivalentMohrCoulomb) {
+    const auto& c = kCct[2];
+    const HbParams p = hb_params_from_constants(c.mb, c.s, 0.5);
+    const double s3 = hb_sigma3max(hb_global_strength(c.sci_mpa, p), c.gamma / 1000.0, c.H, HbApplication::Slope);
+    const auto fit = hb_mohr_coulomb(c.sci_mpa, p, s3);
+    const double hb = fs(cct_section(c), cct_circle(c.H), LeMethod::Bishop);
+    const double eq = fs(cct_section(c, mc(c.gamma, fit.cohesion_mpa * 1000.0, fit.phi_deg)), cct_circle(c.H),
+                         LeMethod::Bishop);
+    EXPECT_GE(hb / eq, 0.9);
+    EXPECT_LE(hb / eq, 1.1);
+    EXPECT_NEAR(eq, 3.580, 0.01);  // φ' 36.56°, c' 1.858 MPa con σ3max 7.12 MPa
+    // el par del plan (φ' 36.38°, c' 1.770 MPa) da su 3.51
+    EXPECT_NEAR(fs(cct_section(c, mc(c.gamma, 1770.0, 36.38)), cct_circle(c.H), LeMethod::Bishop), 3.51, 0.01);
+}
+
+TEST(LimitEquilibrium, HoekBrownSpencerAndMorgensternPrice) {
+    const auto& c = kCct[2];
+    const double b = fs(cct_section(c), cct_circle(c.H), LeMethod::Bishop);
+    for (LeMethod m : {LeMethod::Spencer, LeMethod::MorgensternPrice}) {
+        const auto r = run(cct_section(c), cct_circle(c.H), m);
+        ASSERT_TRUE(r.factor_of_safety.has_value()) << le_detail::name(m);
+        EXPECT_TRUE(r.converged);
+        EXPECT_NEAR(*r.factor_of_safety, b, 0.02 * b) << le_detail::name(m);
+        EXPECT_TRUE(r.lambda.has_value());
+    }
+    // reflejada: mismo FS y λ en todos los métodos
+    const auto a = cct_section(c), m = mirrored(a);
+    for (LeMethod k : kAllMethods) {
+        const auto ra = run(a, cct_circle(c.H), k), rb = run(m, circle(0.5758 * c.H, 1.6293 * c.H, 1.728 * c.H), k);
+        ASSERT_TRUE(ra.factor_of_safety && rb.factor_of_safety) << le_detail::name(k);
+        EXPECT_NEAR(*rb.factor_of_safety, *ra.factor_of_safety, 1e-9 * *ra.factor_of_safety) << le_detail::name(k);
+        if (ra.lambda) EXPECT_NEAR(*rb.lambda, *ra.lambda, 1e-9 * std::fabs(*ra.lambda));
+    }
+}
+
+// En el FS convergido la resistencia de cada base es la τ de Balmer en su σn' (la recta tangente pasa por el punto):
+// el Ordinario en forma cerrada, Bishop y Spencer en la tabla.
+TEST(LimitEquilibrium, HoekBrownStrengthIsOnTheEnvelope) {
+    auto c = kCct[2];
+    auto s = cct_section(c);
+    s.kh = 0.1;
+    s.materials[0].ru = 0.1;
+    const double sci = c.sci_mpa * 1000.0;
+    const HbParams& p = *s.materials[0].hb;
+    const auto o = run(s, cct_circle(c.H), LeMethod::Ordinary);
+    double num = 0.0, den = 0.0;
+    for (const auto& t : o.slices) {
+        const double a = t.alpha_deg * le_detail::kPi / 180.0;
+        const double np = std::max(0.0, t.weight * std::cos(a) - 0.1 * t.weight * std::sin(a) -
+                                            t.pore_pressure * t.base_length);
+        num += balmer_tau(np / t.base_length, sci, p) * t.base_length;
+        den += t.weight * std::sin(a) + 0.1 * t.weight * std::cos(a);
+    }
+    EXPECT_NEAR(*o.factor_of_safety, num / den, 1e-9 * num / den);
+    for (LeMethod m : {LeMethod::Bishop, LeMethod::Spencer}) {
+        const auto r = run(s, cct_circle(c.H), m);
+        ASSERT_TRUE(r.factor_of_safety.has_value()) << le_detail::name(m);
+        for (const auto& t : r.slices) {
+            const double tau = balmer_tau(t.normal_force / t.base_length, sci, p);
+            EXPECT_NEAR(t.shear_strength / t.base_length, tau, 1e-6 * sci) << le_detail::name(m);
+            EXPECT_GT(t.friction_deg, 0.0);
+            EXPECT_LT(t.friction_deg, 90.0);
+        }
+    }
+}
+
+TEST(LimitEquilibrium, HoekBrownTensionGivesZeroShear) {
+    // s = 0: σt = 0, y con ru alto el Ordinario deja N' = 0 cerca de la cresta
+    const auto s = one_layer({{0, 30}, {40, 30}, {80, 0}, {120, 0}}, hb_material(20, 10000, 0.5, 0.0, 0.45));
+    const auto f = circle(70, 45, 50);
+    const auto o = run(s, f, LeMethod::Ordinary);
+    ASSERT_TRUE(o.factor_of_safety.has_value());
+    ASSERT_EQ(o.warnings.size(), 1u);
+    EXPECT_EQ(o.warnings[0], "Hoek-Brown base in tension in 12 slices: shear strength taken as zero");
+    int zero = 0;
+    for (const auto& t : o.slices) {
+        if (t.normal_force <= 0.0) {
+            EXPECT_EQ(t.shear_strength, 0.0);
+            ++zero;
+        }
+    }
+    EXPECT_EQ(zero, 12);
+    // en ningún método sale NaN: o un FS, o FS vacío con aviso
+    for (LeMethod m : kAllMethods) {
+        const auto r = run(s, f, m);
+        EXPECT_TRUE(r.factor_of_safety.has_value() || !r.warnings.empty()) << le_detail::name(m);
+        if (r.factor_of_safety) EXPECT_TRUE(std::isfinite(*r.factor_of_safety));
+        for (const auto& t : r.slices)
+            for (double v : {t.normal_force, t.shear_strength, t.cohesion, t.friction_deg, t.interslice_normal_right})
+                EXPECT_TRUE(std::isfinite(v)) << le_detail::name(m);
+    }
+    // Bishop: la base del pie queda bajo σt con la recta tangente (mα chico): FS vacío con aviso, no un número a medias
+    const auto b = run(s, f, LeMethod::Bishop);
+    EXPECT_FALSE(b.factor_of_safety.has_value());
+    ASSERT_FALSE(b.warnings.empty());
+    EXPECT_NE(b.warnings.back().find("tensile limit"), std::string::npos);
+}
+
+TEST(LimitEquilibrium, HoekBrownConstants) {
+    const auto p = hb_params_from_constants(1.2601, 1.5893e-3, 0.5);
+    EXPECT_EQ(p.mb, 1.2601);
+    EXPECT_EQ(p.info.method_id, "HB-constants");
+    EXPECT_NE(error_of([] { hb_params_from_constants(-1, 0.1, 0.5); }).find("mb"), std::string::npos);
+    EXPECT_NE(error_of([] { hb_params_from_constants(1, 1.5, 0.5); }).find("'s'"), std::string::npos);
+    EXPECT_NE(error_of([] { hb_params_from_constants(1, 0.1, 1.5); }).find("'a'"), std::string::npos);
+    EXPECT_NE(error_of([] { hb_params_from_constants(1, kNan, 0.5); }).find("'s'"), std::string::npos);
 }
