@@ -5,6 +5,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -30,6 +31,7 @@
 #include "rockmasspy/toppling.hpp"
 #include "rockmasspy/bench.hpp"
 #include "rockmasspy/newmark.hpp"
+#include "rockmasspy/slip_search.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -608,6 +610,34 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("info", &NewmarkResult::info).def_ro("warnings", &NewmarkResult::warnings)
         .def_ro("notes", &NewmarkResult::notes);
     m.def("newmark_rigid_block", &newmark_rigid_block, nb::arg("input"));
+
+    // Búsqueda de la superficie crítica (malla circular y bloque, con afinado)
+    nb::class_<CircularGrid>(m, "CircularGrid", "Grid of circle centres (nx, ny intervals) and radii per centre.")
+        .def(nb::init<>())
+        .def_rw("x_min", &CircularGrid::x_min).def_rw("x_max", &CircularGrid::x_max)
+        .def_rw("y_min", &CircularGrid::y_min).def_rw("y_max", &CircularGrid::y_max)
+        .def_rw("nx", &CircularGrid::nx).def_rw("ny", &CircularGrid::ny).def_rw("n_radii", &CircularGrid::n_radii);
+    nb::class_<BlockSearch>(m, "BlockSearch",
+                            "Block search: two points on a weak line and projection angles (degrees counterclockwise "
+                            "from +x with the face towards -x; left = toe side).")
+        .def(nb::init<>())
+        .def_rw("weak_line", &BlockSearch::weak_line).def_rw("n_points", &BlockSearch::n_points)
+        .def_rw("left_angle_min", &BlockSearch::left_angle_min).def_rw("left_angle_max", &BlockSearch::left_angle_max)
+        .def_rw("right_angle_min", &BlockSearch::right_angle_min)
+        .def_rw("right_angle_max", &BlockSearch::right_angle_max).def_rw("n_angles", &BlockSearch::n_angles);
+    nb::class_<SearchOptions>(m, "SearchOptions", "Method, limit equilibrium options, refinement and minimum mass area.")
+        .def(nb::init<>())
+        .def_rw("method", &SearchOptions::method).def_rw("le", &SearchOptions::le)
+        .def_rw("refine", &SearchOptions::refine).def_rw("min_mass_area", &SearchOptions::min_mass_area);
+    nb::class_<SearchResult>(m, "SearchResult", "Critical slip surface, its result, counts and the 10 best surfaces.")
+        .def_ro("best", &SearchResult::best).def_ro("surface", &SearchResult::surface)
+        .def_ro("evaluated", &SearchResult::evaluated).def_ro("discarded", &SearchResult::discarded)
+        .def_ro("discarded_malpha", &SearchResult::discarded_malpha)
+        .def_ro("top", &SearchResult::top).def_ro("info", &SearchResult::info)
+        .def_ro("warnings", &SearchResult::warnings).def_ro("notes", &SearchResult::notes);
+    m.def("search_circular", &search_circular, nb::arg("section"), nb::arg("grid"),
+          nb::arg("options") = SearchOptions());
+    m.def("search_block", &search_block, nb::arg("section"), nb::arg("block"), nb::arg("options") = SearchOptions());
 
     // Equilibrio límite 2D por tajadas
     nb::class_<Circle>(m, "Circle", "Circular slip surface: centre and radius.")
