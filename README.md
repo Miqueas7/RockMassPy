@@ -400,7 +400,7 @@ required and `piezometrica` optional), `Estratos` (`orden` 1 on top, `material`,
 (`mohr_coulomb` or `hoek_brown`), `Analisis_LE` (`metodos` separated by `;`, the first one searches; `superficie` =
 `circular`, `bloque` or `dada`; `kh`, `registro`) and `Sismos` (`registro`, `t_s`, `a_g` in g, constant step), as one
 xlsx or one CSV per sheet. `rm.le_counts` gives the counts, `rm.save_le_results` writes one row per method (with
-`kh` and `fs_estatico`, the FS without kh on the same surface and with the same method),
+`kh` and `fs_estatico`, the static FS of each method on the static critical surface),
 `report.build_slope_report(..., le=...)` adds the limit-equilibrium tables and `report.le_figure` /
 `report.newmark_figure` draw the section and the Newmark record. From the command line (exit 0 if all is well, 1 on an
 input error, 2 if something asks for attention):

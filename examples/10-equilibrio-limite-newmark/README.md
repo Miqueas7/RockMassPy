@@ -32,21 +32,22 @@ tarda unos 10 a 15 s; con kh, ky por vueltas puede repetirla hasta 5 veces.
 |---|---|---|
 | FS del primer método | Bishop **1.485** | Spencer **1.108** (con kh 0.1) |
 | FS del segundo método | GLE **1.480** (λ 0.886) | GLE **1.106** (λ 0.927) |
-| FS estático en la misma superficie (`fs_estatico`) | el mismo (kh 0) | Spencer **1.343**, GLE **1.349** |
-| FS de la crítica estática | el mismo | Spencer **1.315** (otra superficie: la de ky) |
+| FS estático (`fs_estatico`, sobre la crítica estática) | el mismo (kh 0) | Spencer **1.315**, GLE **1.305** |
 | ky | no se pide | **0.156** |
 | Newmark | no se pide | **4.6 cm** (gobierna el registro tal como está, no el invertido) |
 | Superficies evaluadas / descartadas | 6515 / 1353 | 4545 / 1845 |
 
-`le_counts` da 2 análisis, 2 con FS, 0 con FS ≤ 1, 1 circular, 1 de bloque, 1 con Newmark, 0 avisos y 4 notas. Las
+`le_counts` da 2 análisis, 2 con FS, 0 con FS ≤ 1, 1 circular, 1 de bloque, 1 con Newmark, 0 avisos y 5 notas. Las
 notas no piden atención:
 - en el tajo, Bishop dice que en una tajada la fuerza normal efectiva sale negativa. Es una nota, no un aviso: el FS
   converge y GLE, que no la tiene, da casi lo mismo;
 - en el botadero, cómo se buscó ky (por vueltas, abajo), que ky salió en otra superficie (la crítica estática, que
-  es la de menor ky) y no en la crítica con kh 0.1 que se dibuja, y que en Newmark gobierna el sentido original del
-  registro. Por eso la figura dice «ky = 0.156 (otra superficie)».
+  es la de menor ky) y no en la crítica con kh 0.1 que se dibuja, que el FS estático se calcula sobre la crítica
+  estática y que en Newmark gobierna el sentido original del registro. Por eso la figura dice «ky = 0.156 (otra superficie)».
 
 En `equilibrio_resultados.csv`, ky y Newmark van solo en la fila del primer método (Spencer), que es el que los calcula.
+`fs_estatico` es el FS del talud sin sismo: cada método sobre la crítica estática (la búsqueda con kh = 0), no sobre la
+crítica con kh 0.1. Sobre esa otra superficie el FS sin kh sería 1.343, y el talud parecería más seguro de lo que es.
 
 El círculo crítico del tajo (centro 162.10, 143.15 y radio 123.13) corta el suelo residual arriba y entra en la roca.
 No pasa por el pie: sale por la cara en (137.5, 22.5), 2.5 m sobre el pie, y su punto más bajo (cota 20.02 en

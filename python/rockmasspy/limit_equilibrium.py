@@ -474,7 +474,9 @@ class LeAnalysisResult:
     section: "rm.LeSection | None" = field(default=None, repr=False)
     record: "Accelerogram | None" = field(default=None, repr=False)  # el registro escalado que usó Newmark
     yield_surface: "rm.SlipSurface | None" = field(default=None, repr=False)  # la de ky (R17), si se calculó
-    # con kh > 0: los mismos métodos con kh = 0 sobre `surface`, paralelo a `results`; con kh = 0, vacío
+    # con kh > 0: la crítica estática (la búsqueda con kh = 0 de la vuelta 1 de ky; con `dada`, la misma superficie)
+    # y los mismos métodos con kh = 0 sobre ella, paralelo a `results`; con kh = 0, None y vacío
+    static_surface: "rm.SlipSurface | None" = field(default=None, repr=False)
     static_results: tuple = field(default=(), repr=False)
 
     @property
@@ -599,19 +601,22 @@ _KY_ROUNDS_NOTE = ("ky: up to 4 rounds, searching first with kh = 0 and then wit
 def _yield_rounds(a, s, materials, static, so, opts, method, surface, warnings, *, searched):
     """ky por vueltas (R17): la crítica estática no es la de menor ky, así que se busca con kh = 0, se calcula ky, se
     busca otra vez con kh = ky y se recalcula, hasta 4 vueltas o hasta que ky cambie menos de 1e-4. Devuelve el menor ky
-    con su superficie. `surface` es la crítica con kh = 0 si `searched` (la búsqueda principal ya fue sin sismo)."""
+    con su superficie y la crítica estática (la de la vuelta 1). `surface` es la crítica con kh = 0 si `searched` (la
+    búsqueda principal ya fue sin sismo)."""
     def search(kh):
         found = _search(a, s, _section(s, a, materials, kh, [], []) if kh else static, so)
         warnings.extend(f"ky search: {w}" for w in found.warnings if w not in warnings)  # sin repetir la principal
         return found.surface if _has_surface(found.surface) else None
 
-    best = best_surface = prev = None
+    best = best_surface = prev = static_surface = None
     kh = 0.0
     for k in range(_KY_ROUNDS):
         if k or not searched:
             surface = search(kh)
         if surface is None:
             break
+        if k == 0:
+            static_surface = surface
         y = rm.le_yield_coefficient(static, surface, method, opts)
         warnings.extend(_ky(w) for w in y.warnings)
         if best is None or (y.ky is not None and (best.ky is None or y.ky < best.ky)):
@@ -619,7 +624,7 @@ def _yield_rounds(a, s, materials, static, so, opts, method, surface, warnings, 
         if y.ky is None or y.ky <= 0 or (prev is not None and abs(y.ky - prev) < _KY_CHANGE):
             break
         prev = kh = y.ky
-    return best, best_surface
+    return best, best_surface, static_surface
 
 
 def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
@@ -653,24 +658,32 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
         _add_messages(notes, _METHOD_WORD[m], r.notes)
         methods.append(r.info)
 
-    yld = nm = record = ysurf = None
+    yld = nm = record = ysurf = ssurf = None
     static_results = ()
     if kh > 0 or a.registro is not None:
         static = _section(s, a, materials, 0.0, [], [])  # le_yield_coefficient reemplaza el kh de la sección
-        if kh > 0 and surface is not None:  # el FS sin sismo sobre la misma superficie, con cada método
-            static_results = tuple(rm.le_factor_of_safety(static, surface, m, opts) for m in methods_le)
-            for m, r in zip(methods_le, static_results):
-                _add_messages(warnings, _METHOD_WORD[m], r.warnings)
-        if search is None:  # superficie dada: ky sobre ella
-            ysurf = surface
+        if search is None:  # superficie dada: ky y el FS estático sobre ella
+            ysurf = ssurf = surface
             yld = rm.le_yield_coefficient(static, surface, first, opts)
             warnings += [_ky(w) for w in yld.warnings]
         else:
-            yld, ysurf = _yield_rounds(a, s, materials, static, so, opts, first, surface, warnings, searched=kh == 0)
+            yld, ysurf, ssurf = _yield_rounds(a, s, materials, static, so, opts, first, surface, warnings,
+                                              searched=kh == 0)
             if yld is not None and yld.ky is not None:
                 notes.append(_KY_ROUNDS_NOTE)
                 if not _same_surface(ysurf, surface):
                     notes.append(_KY_OTHER_NOTE)
+        if kh > 0:  # el FS estático del talud: con kh = 0 sobre la crítica estática, con cada método
+            if ssurf is None:
+                static_results = (None,) * len(methods_le)  # sin crítica estática: FS estático vacío
+            else:
+                static_results = tuple(rm.le_factor_of_safety(static, ssurf, m, opts) for m in methods_le)
+                for m, r in zip(methods_le, static_results):
+                    _add_messages(warnings, _METHOD_WORD[m], r.warnings)
+                if search is not None:
+                    notes.append("static FS on the static critical surface")
+        else:
+            ssurf = None
         if yld is None:
             notes.append("ky not computed: no valid static slip surface")
         else:
@@ -695,7 +708,7 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
     uniq = {m.method_id: m for m in methods}
     return LeAnalysisResult(a.id_analisis, a.id_seccion, order, _SURFACES[a.superficie], results, search, yld, nm,
                             _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record, ysurf,
-                            static_results)
+                            ssurf, static_results)
 
 
 # nombres del núcleo que pueden salir en un error -> columna de Analisis_LE
@@ -770,8 +783,9 @@ def _points(f) -> str | None:
 
 
 def le_static_fs(r: LeAnalysisResult) -> list:
-    """FS sin sismo de cada método, paralelo a `results`: con kh > 0 el de `static_results`; con kh = 0, el mismo FS."""
-    return [x.factor_of_safety for x in (r.static_results or r.results)]
+    """FS estático de cada método, paralelo a `results`: con kh > 0 el de `static_results` (sobre la crítica
+    estática); con kh = 0, el mismo FS."""
+    return [None if x is None else x.factor_of_safety for x in (r.static_results or r.results)]
 
 
 def save_le_results(results: Iterable[LeAnalysisResult], path) -> Path:

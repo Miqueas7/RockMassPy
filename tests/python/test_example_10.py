@@ -21,7 +21,7 @@ def test_equilibrio(tmp_path, capsys):
     salida = capsys.readouterr().out
     assert r["cli_exit"] == 0
     assert r["le_counts"] == {"analyses": 2, "with_fs": 2, "fs_below_1": 0, "circular": 1, "block": 1, "given": 0,
-                              "with_newmark": 1, "warnings": 0, "notes": 4}
+                              "with_newmark": 1, "warnings": 0, "notes": 5}
     assert r["attention"] == [[], []]
     tajo, botadero = r["fs"]
     assert tajo["Bishop-Simplified"] == pytest.approx(1.485, abs=1e-3)
@@ -42,11 +42,11 @@ def test_equilibrio(tmp_path, capsys):
     assert [(f["id_analisis"], f["metodo"]) for f in filas] == [("A1", "bishop"), ("A1", "gle"), ("A2", "spencer"),
                                                                  ("A2", "gle")]
     assert [f["fs_menor_o_igual_1"] for f in filas] == ["no"] * 4
-    # FS pseudoestático y estático sobre la misma superficie (la crítica con kh 0.1), con el mismo método
+    # FS pseudoestático sobre la crítica con kh 0.1; el estático, sobre la crítica estática, con el mismo método
     a2 = filas[2]
     assert float(a2["kh"]) == 0.1 and float(a2["fs"]) == pytest.approx(1.108, abs=1e-3)
-    assert float(a2["fs_estatico"]) == pytest.approx(1.343, abs=1e-3)
-    assert float(filas[3]["fs_estatico"]) == pytest.approx(1.349, abs=1e-3)
+    assert float(a2["fs_estatico"]) == pytest.approx(1.315, abs=1e-3) == r["fs_static_botadero"]
+    assert float(filas[3]["fs_estatico"]) == pytest.approx(1.305, abs=1e-3)  # GLE sobre esa misma superficie
     assert [float(f["kh"]) for f in filas[:2]] == [0, 0] and all(f["fs_estatico"] == f["fs"] for f in filas[:2])
     assert a2["ky"] != "" and filas[3]["ky"] == filas[3]["desplazamiento_newmark_m"] == ""  # solo el primer método
     html = (tmp_path / "equilibrio.html").read_text(encoding="utf-8")

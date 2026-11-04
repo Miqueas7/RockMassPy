@@ -406,7 +406,7 @@ obligatoria y `piezometrica` opcional), `Estratos` (`orden` 1 arriba, `material`
 (`mohr_coulomb` o `hoek_brown`), `Analisis_LE` (`metodos` separados por `;`, el primero busca; `superficie` =
 `circular`, `bloque` o `dada`; `kh`, `registro`) y `Sismos` (`registro`, `t_s`, `a_g` en g, paso constante), en un
 xlsx o en un CSV por hoja. `rm.le_counts` da los conteos, `rm.save_le_results` escribe una fila por método (con
-`kh` y `fs_estatico`, el FS sin kh sobre la misma superficie y con el mismo método),
+`kh` y `fs_estatico`, el FS estático de cada método sobre la crítica estática),
 `report.build_slope_report(..., le=...)` agrega las tablas de equilibrio límite y `report.le_figure` /
 `report.newmark_figure` dibujan la sección y el registro de Newmark. Desde la línea de comandos (0 si todo está bien, 1
 si hay un error de entrada, 2 si algo pide atención):

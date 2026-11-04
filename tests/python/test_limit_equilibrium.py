@@ -589,3 +589,23 @@ def test_avance_por_analisis(tmp_path):
     vistos = []
     rm.assess_le(hojas(tmp_path, merge(fk_data(), acads3b_data())), progress=lambda k, n: vistos.append((k, n)))
     assert vistos == [(1, 2), (2, 2)]
+
+
+def test_fs_estatico_sobre_la_critica_estatica(tmp_path):
+    def fk(kh, sub):
+        d = fk_data()
+        d["Analisis_LE"] = [ana(id_analisis="AFK-ZZSENT", id_seccion="SFK-ZZSENT", metodos="bishop;spencer",
+                                superficie="circular", malla_x_min=110, malla_x_max=130, malla_y_min=80,
+                                malla_y_max=100, base_modelo_m=10, kh=kh)]
+        (tmp_path / sub).mkdir()
+        (r,) = rm.assess_le(hojas(tmp_path / sub, d))
+        return r
+
+    r0, r = fk("", "seco"), fk(0.15, "kh")
+    assert r0.static_surface is None and r0.static_results == ()
+    assert le.le_static_fs(r0) == [x.factor_of_safety for x in r0.results]  # con kh = 0, el mismo FS, bit a bit
+    c0, c = r0.surface.circle, r.static_surface.circle
+    assert (c.xc, c.yc, c.radius) == (c0.xc, c0.yc, c0.radius)  # la crítica estática, no la sísmica
+    assert le.le_static_fs(r) == [x.factor_of_safety for x in r0.results]
+    assert "static FS on the static critical surface" in r.notes
+    assert "static FS on the static critical surface" not in r0.notes
