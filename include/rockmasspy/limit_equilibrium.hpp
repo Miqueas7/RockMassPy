@@ -4,8 +4,9 @@
  *        Bishop simplificado, Janbu simplificado, Spencer y Morgenstern-Price/GLE.
  *
  * Fuentes (todas Secondary): Slide2 Verification Manual (2022), problemas 1 y 21 (Fredlund y Krahn 1977, ACADS);
- * Morgenstern-Price y Spencer: F por la ecuación de fuerzas de Zhu, Lee, Qian y Chen (2005), no leído; λ como raíz
- * de la ecuación de momentos (barrido desde 0 y regula falsi con bisección).
+ * Morgenstern-Price y Spencer: para cada λ, F es la raíz con intervalo de la ecuación de fuerzas de Zhu, Lee, Qian y
+ * Chen (2005), no leído; λ como raíz de la ecuación de momentos (barrido desde 0 mientras el residuo baje y regula
+ * falsi con bisección).
  * Convenciones: x horizontal, y hacia arriba, unidades coherentes. Se trabaja con un origen local (UTM sin pérdida de
  * precisión). La cara puede mirar a cualquier lado: el núcleo detecta el sentido y refleja (x -> -x) por dentro, así
  * que una sección reflejada da el mismo FS y el mismo λ.
@@ -46,6 +47,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "rockmasspy/hoek_brown.hpp"
@@ -926,15 +928,16 @@ inline double interslice_f(const LeOptions& o, bool spencer, double t, bool refl
     return interp(o.function_points, reflected ? 1.0 - t : t);
 }
 
-/// Spencer y Morgenstern-Price. Para cada λ, F sale de la ecuación de fuerzas con la iteración de Zhu et al. (2005);
-/// λ es la raíz de la ecuación de momentos, buscada barriendo desde 0 hacia afuera hasta un cambio de signo y cerrada
-/// con regula falsi (Illinois) alternada con bisección. kh entra en R, T y el momento (brazo del centroide).
+/// Spencer y Morgenstern-Price. Para cada λ, F es la raíz con intervalo de la ecuación de fuerzas (recurrencia de
+/// Zhu et al. 2005); λ es la raíz de la ecuación de momentos g, buscada barriendo desde 0 hacia afuera mientras |g|
+/// baje hasta un cambio de signo, y cerrada con regula falsi (Illinois) alternada con bisección. kh entra en R, T y el
+/// momento (brazo del centroide).
 inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o, bool spencer, bool reflected,
                  double F0, const std::vector<Slice>* seed = nullptr) {
     Solve r;
     const std::size_t n = sl.size();
     const double kh = s.kh, x0 = sl.front().xa, x1 = sl.back().xb;
-    std::vector<double> fb(n), R(n), T(n), Phi(n), Psi(n);
+    std::vector<double> fb(n), R(n), T(n), Phi(n);
     for (std::size_t i = 0; i < n; ++i) fb[i] = interslice_f(o, spencer, (sl[i].xb - x0) / (x1 - x0), reflected);
     ordinary_normals(sl, kh);
     // con Hoek-Brown, las primeras tangentes salen de las N' de Bishop convergido si las hay (las del Ordinario dan
@@ -957,26 +960,102 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         return (t.sa - lam * f * t.ca) * t.tf + (t.ca + lam * f * t.sa) * F;
     };
     double last_F = F0;
-    // F de la ecuación de fuerzas para un λ dado
-    auto force_F = [&](double lam, double F) -> std::optional<double> {
-        for (int k = 0; k < o.max_iterations; ++k) {
-            for (std::size_t i = 0; i + 1 < n; ++i) {
-                Phi[i] = phi(sl[i], fb[i], lam, F);
-                Psi[i] = phi(sl[i + 1], fb[i], lam, F) / Phi[i];
-            }
-            double num = R[n - 1], den = T[n - 1], p = 1.0;
-            for (std::size_t i = n - 1; i-- > 0;) {
-                p *= Psi[i];
-                num += R[i] * p;
-                den += T[i] * p;
-            }
-            const double Fn = num / den;
-            if (!(den > 0.0) || !(Fn > 0.0) || !std::isfinite(Fn)) break;
-            last_F = Fn;
-            if (std::fabs(Fn - F) < o.tolerance) return Fn;
-            F = Fn;
+    const double F_cap = 1e3 * F0;  // F0 es el de Bishop (o 1): techo del intervalo de F
+    // residuo de la ecuación de fuerzas, recurrencia de Zhu: e = E Φ del último borde = F Σ T Π Ψ - Σ R Π Ψ, que debe
+    // ser nulo; d = Σ T Π Ψ
+    auto force_residual = [&](double lam, double F, double& d) {
+        double e = 0.0;
+        d = 0.0;
+        for (std::size_t i = 0; i < n; ++i) {
+            const double psi = i ? phi(sl[i], fb[i - 1], lam, F) / phi(sl[i - 1], fb[i - 1], lam, F) : 0.0;
+            e = psi * e + F * T[i] - R[i];
+            d = psi * d + T[i];
         }
-        return std::nullopt;
+        return e;
+    };
+    // F de la ecuación de fuerzas para un λ dado: raíz de e(F) con intervalo y cambio de signo. e es continua mientras
+    // ninguna Φ de los bordes (denominadores de Ψ) cruce cero; Φ es lineal en F, así que ese dominio es un intervalo,
+    // que se corta a (0, 1e3 F_Bishop]. El intervalo se abre desde el F de arranque hacia los dos lados con pasos que
+    // se duplican y se cierra con Illinois alternado con bisección. Sin raíz (o con Σ T Π Ψ <= 0 en ella), el λ no sirve.
+    auto force_F = [&](double lam, double F) -> std::optional<double> {
+        double lo = 0.0, hi = F_cap;
+        for (std::size_t i = 0; i + 1 < n; ++i) {
+            const double a = (sl[i].sa - lam * fb[i] * sl[i].ca) * sl[i].tf, b = sl[i].ca + lam * fb[i] * sl[i].sa;
+            if (b > 0.0) lo = std::max(lo, -a / b);
+            else if (b < 0.0) hi = std::min(hi, -a / b);
+            else if (!(a > 0.0)) return std::nullopt;
+        }
+        const double pad = 1e-12 * std::max(1.0, hi);
+        lo += pad;
+        hi -= pad;
+        if (!(hi > lo)) return std::nullopt;
+        double d = 0.0;
+        auto ev = [&](double x) {
+            ++r.iterations;
+            return force_residual(lam, x, d);
+        };
+        const double xs = std::clamp(F, lo, hi);
+        const double es = ev(xs);
+        if (!std::isfinite(es)) return std::nullopt;
+        double a = xs, ea = es, b = xs, eb = es;
+        if (es != 0.0) {
+            // pasos desde xs que se duplican, alternando arriba y abajo, hasta el primer cambio de signo
+            double up = xs, eu = es, dn = xs, edn = es, step = 0.02 * std::max(xs, 1e-3 * F0);
+            bool found = false;
+            for (int k = 0; k < 64 && !found && (up < hi || dn > lo); ++k, step *= 2.0) {
+                if (up < hi) {
+                    const double x = std::min(xs + step, hi), ex = ev(x);
+                    if (!std::isfinite(ex)) return std::nullopt;
+                    if ((ex > 0.0) != (eu > 0.0) || ex == 0.0) {
+                        a = up, ea = eu, b = x, eb = ex, found = true;
+                        break;
+                    }
+                    up = x, eu = ex;
+                }
+                if (dn > lo) {
+                    const double x = std::max(xs - step, lo), ex = ev(x);
+                    if (!std::isfinite(ex)) return std::nullopt;
+                    if ((ex > 0.0) != (edn > 0.0) || ex == 0.0) {
+                        a = x, ea = ex, b = dn, eb = edn, found = true;
+                        break;
+                    }
+                    dn = x, edn = ex;
+                }
+            }
+            if (!found) return std::nullopt;
+            // Illinois alternado con bisección: el intervalo se reduce al menos a la mitad cada dos pasos
+            double fa = ea, fbv = eb;
+            int keep = 0;
+            const double tol = std::min(o.tolerance, 1e-9) * std::max(1.0, b);
+            for (int it = 0; eb != 0.0 && ea != 0.0 && b - a > tol; ++it) {
+                if (it >= o.max_iterations) return std::nullopt;
+                double x = 0.5 * (a + b);
+                if (it % 2 == 0 && fbv != fa) {
+                    const double rf = (a * fbv - b * fa) / (fbv - fa);
+                    if (rf > a && rf < b) x = rf;
+                }
+                const double ex = ev(x);
+                if (!std::isfinite(ex)) return std::nullopt;
+                if (ex == 0.0) {
+                    a = b = x, ea = eb = 0.0;
+                    break;
+                }
+                if ((ex > 0.0) == (ea > 0.0)) {
+                    a = x, ea = fa = ex;
+                    if (keep == 1) fbv *= 0.5;
+                    keep = 1;
+                } else {
+                    b = x, eb = fbv = ex;
+                    if (keep == -1) fa *= 0.5;
+                    keep = -1;
+                }
+            }
+        }
+        const double root = std::fabs(ea) <= std::fabs(eb) ? a : b;
+        force_residual(lam, root, d);
+        if (!(d > 0.0) || !(root > 0.0)) return std::nullopt;
+        last_F = root;
+        return root;
     };
     // fuerzas entre tajadas (borde derecho; E = 0 en los extremos) y residuo de momentos λ Σ b (f E + f E) - Σ [...]
     auto residual = [&](double lam, double F) {
@@ -1016,6 +1095,27 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         r.bad_m_alpha = m_alpha_count(sl, last_F, 0.0, true);
         return r;
     };
+    // mínimo de |g| entre lo y hi (sección áurea), con mid del lado de lo que se cruza; si en el camino g cambia de
+    // signo respecto de mid, devuelve ese intervalo
+    auto dip = [&](const Pt& lo, const Pt& mid, const Pt& hi) -> std::optional<std::pair<Pt, Pt>> {
+        const double sg = mid.g > 0.0 ? 1.0 : -1.0, gr = 0.5 * (std::sqrt(5.0) - 1.0);
+        double x0 = lo.lam, x3 = hi.lam, x1 = x3 - gr * (x3 - x0), x2 = x0 + gr * (x3 - x0);
+        auto e1 = eval(x1, mid.F);
+        auto e2 = e1 ? eval(x2, e1->F) : std::nullopt;
+        for (int it = 0; it < 40 && e1 && e2; ++it) {
+            if (sg * e1->g <= 0.0) return std::pair<Pt, Pt>{mid, *e1};
+            if (sg * e2->g <= 0.0) return std::pair<Pt, Pt>{mid, *e2};
+            if (std::fabs(x3 - x0) <= o.tolerance) break;
+            if (sg * e1->g < sg * e2->g) {
+                x3 = x2, x2 = x1, e2 = e1, x1 = x3 - gr * (x3 - x0);
+                e1 = eval(x1, e2->F);
+            } else {
+                x0 = x1, x1 = x2, e1 = e2, x2 = x0 + gr * (x3 - x0);
+                e2 = eval(x2, e1->F);
+            }
+        }
+        return std::nullopt;
+    };
     const bool hb = any_hb(s);
     std::vector<double> prev = normal_stresses(sl);
     std::optional<double> F_pass;
@@ -1033,8 +1133,8 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         if (p0->g == 0.0) {
             a = b = p0;
         } else {
-            Pt prev[2] = {*p0, *p0};
-            bool alive[2] = {true, true};
+            Pt prev[2] = {*p0, *p0}, before[2] = {*p0, *p0}, first[2] = {*p0, *p0};
+            bool alive[2] = {true, true}, moved[2] = {false, false};
             for (int k = 1; k <= 40 && !a && (alive[0] || alive[1]); ++k)
                 for (int side = 0; side < 2 && !a; ++side) {
                     if (!alive[side]) continue;
@@ -1049,12 +1149,35 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
                         } else if ((q->g > 0.0) != (prev[side].g > 0.0)) {
                             a = prev[side];
                             b = q;
+                        } else if (std::fabs(q->g) > std::fabs(prev[side].g)) {
+                            // |g| vuelve a subir sin cambio de signo: las raíces más allá resultaron espurias (λ cerca
+                            // de -2, F de 0.2 con Bishop 3.7 y un tercio de las bases bajo el vértice de Mohr-Coulomb,
+                            // ACADS 3(a)); si venía bajando, dos raíces juntas pueden quedar entre las muestras y se
+                            // busca el mínimo de |g| entre before y q
+                            if (moved[side]) {
+                                if (const auto c = dip(before[side], prev[side], *q)) {
+                                    a = c->first;
+                                    b = c->second;
+                                }
+                            } else {
+                                first[side] = *q;
+                            }
+                            alive[side] = false;
+                            break;
                         } else {
+                            before[side] = prev[side];
                             prev[side] = *q;
+                            moved[side] = true;
                             if (std::fabs(prev[side].lam - target) <= 1e-12) break;
                         }
                         if (h > 6) alive[side] = false;
                     }
+                }
+            // |g| subió en el primer paso de los dos lados: el mínimo está entre -0.1 y 0.1
+            if (!a && !moved[0] && !moved[1] && first[0].lam != 0.0 && first[1].lam != 0.0)
+                if (const auto c = dip(first[1], *p0, first[0])) {
+                    a = c->first;
+                    b = c->second;
                 }
         }
         if (!a) return fail();

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <random>
+#include <string>
 
 #include "error_of.hpp"
 #include "rockmasspy/limit_equilibrium.hpp"
@@ -965,3 +967,150 @@ TEST(LimitEquilibrium, HoekBrownConstants) {
     EXPECT_NE(error_of([] { hb_params_from_constants(1, 0.1, 1.5); }).find("'a'"), std::string::npos);
     EXPECT_NE(error_of([] { hb_params_from_constants(1, kNan, 0.5); }).find("'s'"), std::string::npos);
 }
+
+// Barridos de robustez de Spencer y M-P: para cada λ, F sale como raíz de la ecuación de fuerzas con intervalo y
+// cambio de signo. Secciones al azar con semilla fija; el generador uniforme es propio porque
+// uniform_real_distribution cambia entre bibliotecas estándar y los umbrales no deben moverse por plataforma.
+namespace {
+struct Uniform {
+    std::mt19937 g;
+    explicit Uniform(unsigned seed) : g(seed) {}
+    double operator()(double a, double b) { return a + (b - a) * ((static_cast<double>(g()) + 0.5) / 4294967296.0); }
+};
+enum class Sweep { MohrCoulomb, HoekBrown, HoekBrownTinyS };
+struct SweepCase {
+    LeSection section;
+    SlipSurface surface;
+};
+SweepCase sweep_case(Uniform& U, Sweep kind) {
+    const double H = U(10, 60), toe = H / std::tan(U(25, 60) * le_detail::kPi / 180.0);
+    const double x0 = -3 * H, x1 = toe + 3 * H;
+    LeSection s;
+    s.surface = {{x0, H}, {0, H}, {toe, 0}, {x1, 0}};
+    const int nl = 1 + std::min(2, static_cast<int>(U(0, 3)));
+    const bool no_c = U(0, 1) < 0.5;
+    double y = H;
+    for (int i = 0; i < nl; ++i) {
+        if (kind == Sweep::MohrCoulomb) {
+            s.materials.push_back(mc(U(17, 26), no_c ? 0.0 : U(2, 60), U(20, 42), U(0, 0.4)));
+        } else {
+            const double g = U(22, 27), mb = U(0.3, 5), X = std::pow(10.0, U(std::log10(0.02), std::log10(0.5)));
+            double sv = std::pow(10.0, U(-4, -2));
+            if (kind == Sweep::HoekBrownTinyS) sv = U(0, 1) < 0.3 ? 0.0 : std::pow(10.0, U(-7, -4));
+            s.materials.push_back(hb_material(g, g * H / (mb * X), mb, sv, U(0, 0.4)));
+        }
+        if (i + 1 == nl) {
+            s.layers.push_back(LeLayer{{}, i});
+        } else {
+            y = U(y - 0.6 * H, y - 0.1 * H);
+            s.layers.push_back(LeLayer{{{x0, y}, {x1, y}}, i});
+        }
+    }
+    s.kh = U(0, 0.3);
+    const Point2 A{U(-2 * H, -0.1 * H), H};
+    const double xb = U(0.3 * toe, toe + H);
+    const Point2 B{xb, xb < toe ? H * (1 - xb / toe) : 0.0};
+    const double vx = B.x - A.x, vy = B.y - A.y, L = std::hypot(vx, vy), t = U(0.2, 1.5) * L;
+    const double xc = 0.5 * (A.x + B.x) - vy / L * t, yc = 0.5 * (A.y + B.y) + vx / L * t;
+    const double rad = std::hypot(A.x - xc, A.y - yc);
+    if (U(0, 1) < 0.5) return {mirrored(s), circle(-xc, yc, rad)};
+    return {s, circle(xc, yc, rad)};
+}
+// Equilibrio de fuerzas de toda la masa desde la tabla: N = N' + u l normal a la base y S = resistencia / F a lo largo
+// de ella, contra el peso y kh W (α es el del marco interno, positivo hacia el pie; las fuerzas entre tajadas se anulan)
+void expect_force_balance(const LeSection& s, const LeResult& r, const std::string& what) {
+    double H = 0, V = 0, W = 0;
+    for (const auto& t : r.slices) {
+        const double a = t.alpha_deg * le_detail::kPi / 180.0;
+        const double N = t.normal_force + t.pore_pressure * t.base_length, S = t.shear_strength / *r.factor_of_safety;
+        H += N * std::sin(a) - S * std::cos(a) + s.kh * t.weight;
+        V += N * std::cos(a) + S * std::sin(a) - t.weight;
+        W += t.weight;
+    }
+    EXPECT_LT(std::fabs(H), 1e-6 * W) << what;
+    EXPECT_LT(std::fabs(V), 1e-6 * W) << what;
+}
+// FS finito o vacío con aviso, y la tabla sin NaN
+void expect_number_or_warning(const LeResult& r, const std::string& what) {
+    EXPECT_TRUE(r.factor_of_safety.has_value() || !r.warnings.empty()) << what;
+    if (r.factor_of_safety) EXPECT_TRUE(std::isfinite(*r.factor_of_safety)) << what;
+    for (const auto& t : r.slices)
+        for (double v : {t.normal_force, t.shear_strength, t.cohesion, t.friction_deg, t.interslice_normal_right,
+                         t.interslice_shear_right})
+            EXPECT_TRUE(std::isfinite(v)) << what;
+}
+struct SweepStats {
+    int cases = 0, good = 0, balanced = 0;
+    int converged[2] = {0, 0};
+    double worst_gap = 0.0;
+};
+SweepStats run_sweep(Sweep kind, unsigned seed, bool check_gap, int balance_cases) {
+    Uniform U(seed);
+    SweepStats st;
+    const LeMethod gle_methods[] = {LeMethod::Spencer, LeMethod::MorgensternPrice};
+    for (int k = 0; k < 100; ++k) {
+        const auto c = sweep_case(U, kind);
+        LeResult bi;
+        try {
+            bi = run(c.section, c.surface, LeMethod::Bishop);
+        } catch (const std::invalid_argument&) {
+            continue;  // el círculo no forma masa: no es un caso
+        }
+        ++st.cases;
+        expect_number_or_warning(bi, "Bishop case " + std::to_string(k));
+        const bool good = bi.factor_of_safety && *bi.factor_of_safety >= 0.3 && *bi.factor_of_safety <= 5.0;
+        st.good += good;
+        bool balanced = false;
+        for (int j = 0; j < 2; ++j) {
+            const std::string what = std::string(le_detail::name(gle_methods[j])) + " case " + std::to_string(k);
+            const auto r = run(c.section, c.surface, gle_methods[j]);
+            expect_number_or_warning(r, what);
+            if (!good || !r.factor_of_safety) continue;
+            ++st.converged[j];
+            const double gap = std::fabs(*r.factor_of_safety - *bi.factor_of_safety) / *bi.factor_of_safety;
+            st.worst_gap = std::max(st.worst_gap, gap);
+            if (check_gap) EXPECT_LT(gap, 0.15) << what;
+            if (st.balanced < balance_cases) {
+                expect_force_balance(c.section, r, what);
+                balanced = true;
+            }
+        }
+        st.balanced += balanced;
+    }
+    std::printf("[sweep] cases %d, Bishop in [0.3, 5] %d, Spencer %d, M-P %d, worst |GLE - Bishop|/Bishop %.4f\n",
+                st.cases, st.good, st.converged[0], st.converged[1], st.worst_gap);
+    return st;
+}
+}  // namespace
+
+// Mohr-Coulomb: c = 0 en la mitad de los casos, kh 0 a 0.3, ru 0 a 0.4. Spencer y M-P convergen en al menos el 95 %
+// de los casos en que Bishop da FS en [0.3, 5], a menos de 15 % de Bishop; 30 casos cierran el equilibrio de fuerzas.
+// Medido el 4-nov-2026: convergen 95 de 95, pero los casos 39 y 43 (kh 0.30 y 0.28, c = 0, Bishop 0.631 y 0.457)
+// quedan a 24-35 % de Bishop (Spencer 0.824 y 0.606, M-P 0.783 y 0.618: entre ellos < 6 %, con el equilibrio de
+// fuerzas cerrado). Ya salían iguales con la iteración de punto fijo: es Bishop simplificado, que no cumple el
+// equilibrio horizontal, frente a kh alto. La cota del 15 % no se ensancha: queda en rojo hasta que se decida.
+TEST(LimitEquilibrium, SweepMohrCoulombSpencerAndMorgensternPrice) {
+    const auto st = run_sweep(Sweep::MohrCoulomb, 20261104u, true, 30);
+    ASSERT_GE(st.good, 50);
+    EXPECT_GE(st.converged[0], 0.95 * st.good);
+    EXPECT_GE(st.converged[1], 0.95 * st.good);
+    EXPECT_EQ(st.balanced, 30);
+}
+
+// Hoek-Brown con s de 1e-4 a 1e-2: el mismo umbral del 95 %
+// Medido el 4-nov-2026: Spencer 88 de 92 (95.7 %), M-P 87 de 92 (94.6 %; pide 87.4). Los que faltan: tres en que la
+// iteración de tangentes no se asienta (casos 6, 18 y 41) y dos sin raíz de λ (42 y 82: el residuo de momentos tiene
+// un mínimo de 40 y 71 sin cruzar cero). El umbral no se baja.
+TEST(LimitEquilibrium, SweepHoekBrownSpencerAndMorgensternPrice) {
+    const auto st = run_sweep(Sweep::HoekBrown, 20261105u, false, 0);
+    ASSERT_GE(st.good, 50);
+    EXPECT_GE(st.converged[0], 0.95 * st.good);
+    EXPECT_GE(st.converged[1], 0.95 * st.good);
+}
+
+// Hoek-Brown con s < 1e-4 (y s = 0): sin umbral, pero nunca NaN ni FS vacío sin aviso
+TEST(LimitEquilibrium, SweepHoekBrownTinySNeverSilent) {
+    const auto st = run_sweep(Sweep::HoekBrownTinyS, 20261106u, false, 0);
+    EXPECT_GE(st.cases, 50);
+}
+
