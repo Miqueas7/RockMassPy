@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <algorithm>
 #include <limits>
+#include <random>
 #include <stdexcept>
 #include <string>
 
@@ -205,6 +207,31 @@ TEST(Stereonet, ObliqueGreatCircle) {
 TEST(StereonetDensity, AreaFractionFactor) {
     const std::vector<LineOrientation> poles(50, LineOrientation{120, 40});
     EXPECT_NEAR(pole_density(poles, {{120, 40}}, 0.05)[0], 20.0, 1e-9);
+}
+
+// Familias dispersas (45°) con polos horizontales: la media no depende del orden ni del volteo t -> t + 180.
+TEST(StereonetFisher, DispersedFamiliesIndependentOfOrderAndFlip) {
+    std::mt19937 rng(5);
+    std::uniform_real_distribution<double> az(0.0, 360.0);
+    std::normal_distribution<double> dev(0.0, 45.0);
+    for (int k = 0; k < 300; ++k) {
+        const double t0 = az(rng);
+        std::vector<LineOrientation> a, b;
+        for (int i = 0; i < 6; ++i) {
+            const double t = (t0 + dev(rng)) * 3.14159265358979323846 / 180, p = dev(rng) * 3.14159265358979323846 / 180;
+            double v[3] = {std::cos(p) * std::cos(t), std::cos(p) * std::sin(t), std::sin(p)};
+            if (v[2] < 0) v[0] = -v[0], v[1] = -v[1], v[2] = -v[2];
+            a.push_back({std::fmod(std::atan2(v[1], v[0]) * 180 / 3.14159265358979323846 + 360.0, 360.0),
+                         std::asin(std::min(1.0, v[2])) * 180 / 3.14159265358979323846});
+        }
+        const double h = az(rng);
+        b.assign(a.rbegin(), a.rend());
+        a.push_back({h, 0});
+        b.insert(b.begin(), {std::fmod(h + 180.0, 360.0), 0});
+        const auto fa = fisher_stats(a), fb = fisher_stats(b);
+        EXPECT_NEAR(fa.resultant_length, fb.resultant_length, 1e-9);
+        EXPECT_LT(angle_between(fa.mean, fb.mean), 1e-6) << "family " << k;
+    }
 }
 
 TEST(StereonetFisher, HorizontalMeanIndependentOfOrder) {
