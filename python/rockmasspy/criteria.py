@@ -366,9 +366,10 @@ def load_criteria_table(path, *, sheet: str = CRITERIA_SHEET,
         for col, rule, comp, unit in _TABLE_RULES:
             if v[col] is None:
                 continue
+            # hoja fija y no el nombre del archivo: el archivo puede llevar el nombre de la mina
             items.append(NormItem(
                 item_id=f"{src}-{col}", jurisdiction="user", instrument=v["fuente"],
-                article=f"sheet '{sheet_name}', row {n}", page="", source=src, url="", force="guide",
+                article=f"sheet 'Criterios', row {n}", page="", source=src, url="", force="guide",
                 verification="user", effective_from="0001-01-01", effective_to=None, check=rule,
                 summary=_SUMMARY, value=v[col], unit=unit, comparison=comp,
                 applies_to=(f"{v['escala']}:{v['consecuencia']}",)))

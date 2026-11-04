@@ -301,6 +301,8 @@ def _criteria_args(a):
         raise ValueError("--criteria-output must end in .csv or .xlsx")
     norm = None
     if getattr(a, "profile", None):
+        if a.profile not in available_profiles():  # sin repetir el valor, como --criteria
+            raise ValueError("--profile: unknown profile id (see available_profiles())")
         norm = get_profile(a.profile)
         if not any(i.check == "pseudostatic_analysis_present" for i in norm.items):
             raise ValueError("--profile: the profile has no pseudo-static analysis requirement (art. 264)")

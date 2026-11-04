@@ -152,3 +152,7 @@ Cada CLI recibe un solo perfil de criterios. Para evaluar cada parte con el suyo
 Los ids (`id_bloque`, `id_talud`, `id_analisis`, `id_seccion`), los materiales, el registro y los nombres de línea
 salen solo en las tablas de los informes y en los archivos de resultados. Nunca salen en la CLI, en las figuras (que
 llevan el número de orden) ni en un mensaje. Las razones de «no verificable» van sin ids ni valores.
+
+La columna `fuente` de tu tabla `Criterios` sale **tal cual** en el informe y en el archivo de criterios, porque es el
+respaldo que se cita. El informe es material para terceros: no pongas ahí el nombre de la mina, del cliente ni de la
+empresa. El nombre del archivo de la tabla no sale: el informe dice «sheet 'Criterios', row n».

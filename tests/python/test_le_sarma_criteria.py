@@ -82,6 +82,9 @@ def test_kh_estatico_sobre_las_mismas_cunas_y_newmark_con_kc(tmp_path):
     acc = le.read_accelerogram(hojas(tmp_path, {"Sismos": seno(amp=0.4)})["Sismos"])["R-ZZSENT"]
     ni.dt_s, ni.acceleration_g, ni.ky, ni.both_directions = acc.dt_s, list(acc.acceleration_g), r.ky, True
     assert r.newmark.displacement_m == rm.newmark_rigid_block(ni).displacement_m > 0
+    pytest.importorskip("matplotlib")
+    from rockmasspy import report as rp
+    assert rp.newmark_figure(r, "es") is not None  # en Sarma el ky es Kc (yield_ es None); antes se caía
 
 
 def test_archivo_de_resultados_una_fila_sarma(tmp_path):

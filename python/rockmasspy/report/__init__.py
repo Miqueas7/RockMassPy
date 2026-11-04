@@ -707,7 +707,7 @@ def newmark_figure(r, lang: str):
     from ..viz import plot_newmark
     from ..viz.style import Style
 
-    return plot_newmark(r.newmark, r.record, r.yield_.ky, title=t("fig_newmark", lang).format(n=r.order),
+    return plot_newmark(r.newmark, r.record, r.ky, title=t("fig_newmark", lang).format(n=r.order),
                         style=Style(lang=lang))
 
 
