@@ -1,0 +1,340 @@
+{
+ "schema": 1,
+ "profile_id": "READ-STACEY-2009",
+ "jurisdiction": "INT",
+ "name": {
+  "es": "Read y Stacey (2009), Guidelines for Open Pit Slope Design, tabla 9.9: FS estático mínimo y PoF máxima por escala y consecuencia (sin la columna dinámica, [NV])",
+  "en": "Read and Stacey (2009), Guidelines for Open Pit Slope Design, Table 9.9: minimum static FoS and maximum PoF by scale and consequence (without the dynamic column, [NV])"
+ },
+ "instruments": [
+  "Read y Stacey (2009)"
+ ],
+ "range_policy": "conservative",
+ "sources": {
+  "moffitt2023": {
+   "title": "Moffitt, K. (2023). Critical challenges impacting the advancement of slope design reliability. SSIM 2023, ACG, tabla 1 (reproduce la tabla 9.9 de Wesseloo y Read 2009)",
+   "url": "https://papers.acg.uwa.edu.au/d/2335_0.02_Moffitt/0.02_Moffitt.pdf"
+  },
+  "readstacey2009": {
+   "title": "Read, J. y Stacey, P. (eds.) (2009). Guidelines for Open Pit Slope Design. CSIRO Publishing (libro de pago, no leído)",
+   "url": "https://publish.csiro.au/book/6108"
+  }
+ },
+ "items": [
+  {
+   "id": "RS-FS-banco-todas",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value": 1.1,
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "banco:*"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala banco, cualquier consecuencia.",
+    "en": "Minimum static FoS, bench scale, any consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-banco-todas",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value_range": [
+    25,
+    50
+   ],
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "banco:*"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala banco, cualquier consecuencia.",
+    "en": "Maximum PoF, bench scale, any consequence."
+   }
+  },
+  {
+   "id": "RS-FS-interrampa-baja",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value_range": [
+    1.15,
+    1.2
+   ],
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "interrampa:baja"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala interrampa, consecuencia baja.",
+    "en": "Minimum static FoS, inter-ramp scale, low consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-interrampa-baja",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value": 25,
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "interrampa:baja"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala interrampa, consecuencia baja.",
+    "en": "Maximum PoF, inter-ramp scale, low consequence."
+   }
+  },
+  {
+   "id": "RS-FS-interrampa-media",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value": 1.2,
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "interrampa:media"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala interrampa, consecuencia media.",
+    "en": "Minimum static FoS, inter-ramp scale, medium consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-interrampa-media",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value": 20,
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "interrampa:media"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala interrampa, consecuencia media.",
+    "en": "Maximum PoF, inter-ramp scale, medium consequence."
+   }
+  },
+  {
+   "id": "RS-FS-interrampa-alta",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value_range": [
+    1.2,
+    1.3
+   ],
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "interrampa:alta"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala interrampa, consecuencia alta.",
+    "en": "Minimum static FoS, inter-ramp scale, high consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-interrampa-alta",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value": 10,
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "interrampa:alta"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala interrampa, consecuencia alta.",
+    "en": "Maximum PoF, inter-ramp scale, high consequence."
+   }
+  },
+  {
+   "id": "RS-FS-global-baja",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value_range": [
+    1.2,
+    1.3
+   ],
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "global:baja"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala global, consecuencia baja.",
+    "en": "Minimum static FoS, overall scale, low consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-global-baja",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value_range": [
+    15,
+    20
+   ],
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "global:baja"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala global, consecuencia baja.",
+    "en": "Maximum PoF, overall scale, low consequence."
+   }
+  },
+  {
+   "id": "RS-FS-global-media",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value": 1.3,
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "global:media"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala global, consecuencia media.",
+    "en": "Minimum static FoS, overall scale, medium consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-global-media",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value_range": [
+    5,
+    10
+   ],
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "global:media"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala global, consecuencia media.",
+    "en": "Maximum PoF, overall scale, medium consequence."
+   }
+  },
+  {
+   "id": "RS-FS-global-alta",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_fs_static",
+   "value_range": [
+    1.3,
+    1.5
+   ],
+   "unit": "FS",
+   "comparison": ">=",
+   "applies_to": [
+    "global:alta"
+   ],
+   "summary": {
+    "es": "FS estático mínimo, escala global, consecuencia alta.",
+    "en": "Minimum static FoS, overall scale, high consequence."
+   }
+  },
+  {
+   "id": "RS-PoF-global-alta",
+   "instrument": "Read y Stacey (2009)",
+   "article": "tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), tabla 1",
+   "page": "3",
+   "source": "moffitt2023",
+   "force": "guide",
+   "verification": "V2",
+   "effective_from": "2009-01-01",
+   "check": "slope_pof",
+   "value": 5,
+   "unit": "%",
+   "comparison": "<=",
+   "applies_to": [
+    "global:alta"
+   ],
+   "summary": {
+    "es": "PoF máxima, escala global, consecuencia alta.",
+    "en": "Maximum PoF, overall scale, high consequence."
+   }
+  }
+ ]
+}

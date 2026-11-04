@@ -1,0 +1,45 @@
+{
+ "schema": 1,
+ "profile_id": "RYAN-PRYOR-2000",
+ "jurisdiction": "INT",
+ "name": {
+  "es": "Ryan y Pryor (2000): confiabilidad de berma de seguridad",
+  "en": "Ryan and Pryor (2000): catch bench reliability"
+ },
+ "instruments": [
+  "Ryan y Pryor (2000)"
+ ],
+ "range_policy": "conservative",
+ "sources": {
+  "ryanpryor2000": {
+   "title": "Ryan, T. M. y Pryor, P. R. (2000). Designing catch benches and interramp slopes. En Hustrulid, McCarter y Van Zyl (eds.), Slope Stability in Surface Mining, cap. 3. SME",
+   "url": "https://www.osti.gov/etdeweb/biblio/20276781"
+  }
+ },
+ "items": [
+  {
+   "id": "RP-berma",
+   "instrument": "Ryan y Pryor (2000)",
+   "article": "cap. 3",
+   "page": "31",
+   "source": "ryanpryor2000",
+   "force": "guide",
+   "verification": "PrimaryLaterAuthors",
+   "effective_from": "2000-01-01",
+   "check": "berm_reliability",
+   "value_range": [
+    50,
+    90
+   ],
+   "unit": "%",
+   "comparison": ">=",
+   "applies_to": [
+    "banco:*"
+   ],
+   "summary": {
+    "es": "Confiabilidad de berma recomendada de 50 a 90 % según el caso (fracción de bermas con ancho final mayor que el criterio).",
+    "en": "Recommended catch bench reliability of 50 to 90% depending on the case (share of benches wider than the criterion)."
+   }
+  }
+ ]
+}
