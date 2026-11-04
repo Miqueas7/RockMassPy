@@ -217,7 +217,7 @@ from rockmasspy.verify import verify
 # una estación de refugio inventada: RMR 55 sin sostenimiento declarado, a 400 m del frente, 30 m2 para 20 personas
 st = RefugeStation("E1", "roca", rmr=55, distancia_frente_m=400, area_m2=30, aforo=20)
 v = verify(rm.get_profile("PE-DS024-2016"), as_of="2026-11-02", design=DesignInputs(refuge_stations=(st,)))
-print(sorted(rm.available_profiles()))                  # ['PE-DS024-2016']
+print("PE-DS024-2016" in rm.available_profiles())        # True
 print(v.counts())                                       # {'complies': 2, 'does_not_comply': 1, 'attention': 0, 'note': 0, 'not_checked': 12, 'not_verifiable': 9}
 print(v.exit_code)                                      # 2
 ```

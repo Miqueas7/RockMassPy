@@ -235,6 +235,11 @@ _RULES = {
     "refuge_area_per_person": _refuge(_area), "walkway_spacing": _walkway, "qc_ratio": _qc, "fs_minimum": _fs,
     "standup_time": _standup,
 }
+# los criterios de aceptación de taludes se evalúan con rockmasspy.criteria.assess_criteria, no aquí
+_RULES.update(dict.fromkeys(
+    ("slope_fs_static", "slope_fs_pseudostatic", "slope_pof", "berm_reliability", "deformation_required",
+     "pseudostatic_analysis_present"),
+    lambda item, ctx: ("not_verifiable", "slope acceptance criterion; evaluate it with assess_criteria")))
 
 
 def verify(profile: NormativeProfile, *, as_of: str | None = None, tables: Sequence[LaborTable] = (),
