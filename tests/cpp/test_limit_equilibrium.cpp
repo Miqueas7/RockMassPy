@@ -86,7 +86,7 @@ const LeMethod kMethods[] = {LeMethod::Ordinary, LeMethod::Bishop, LeMethod::Jan
 }  // namespace
 
 // Publicado F&K / recalculado con 400 tajadas. El Ordinario de Slide con ru (1.687) resta u de otra forma; manda F&K
-// (N' = W cos α - u l, R3), que da 1.607.
+// (N' = W cos α - u l, R3, con el recorte N' >= 0), que da 1.607.
 TEST(LimitEquilibrium, FredlundKrahnDryAndRu) {
     struct Case { LeMethod m; double pub_dry, re_dry, pub_ru, re_ru; };
     const Case cases[] = {{LeMethod::Ordinary, 1.928, 1.9277, 1.607, 1.6062},
@@ -99,7 +99,7 @@ TEST(LimitEquilibrium, FredlundKrahnDryAndRu) {
             EXPECT_NEAR(dry, c.pub_dry, 0.005 * c.pub_dry) << le_detail::name(c.m) << " n " << n;
             EXPECT_NEAR(dry, c.re_dry, 1e-3) << le_detail::name(c.m) << " n " << n;
             EXPECT_NEAR(wet, c.pub_ru, 0.005 * c.pub_ru) << le_detail::name(c.m) << " n " << n;
-            // el Ordinario con ru va aparte (DISABLED_FredlundKrahnOrdinaryRuRecalculated)
+            // el Ordinario con ru va aparte (FredlundKrahnOrdinaryRuRecalculated)
             if (c.m != LeMethod::Ordinary) EXPECT_NEAR(wet, c.re_ru, 1e-3) << le_detail::name(c.m) << " n " << n;
         }
     const auto sp = run(fk(), fk_circle(), LeMethod::Spencer, 400);
@@ -115,11 +115,10 @@ TEST(LimitEquilibrium, FredlundKrahnDryAndRu) {
     EXPECT_TRUE(run(fk(), fk_circle(), LeMethod::Ordinary).notes.empty());
 }
 
-// PENDIENTE DE DECISIÓN (no se ensancha la tolerancia): el plan pide N' = (W cos α - kh W sin α - u l)⁺ y a la vez el
-// 1.6062 recalculado, que sale sin el recorte. Con el recorte da 1.6077 (50 tajadas) y 1.6073 (400): +1.1e-3. Las dos
-// formas quedan a menos de 0.5 % del 1.607 de F&K, que sí se prueba arriba.
-TEST(LimitEquilibrium, DISABLED_FredlundKrahnOrdinaryRuRecalculated) {
-    for (int n : {50, 400}) EXPECT_NEAR(fs(fk(0.25), fk_circle(), LeMethod::Ordinary, n), 1.6062, 1e-3) << n;
+// Ordinario con ru: N' = (W cos α - kh W sin α - u l)⁺ con nota (el recorte actúa cerca de la cresta). Recalculado con
+// el recorte y 400 tajadas: 1.6073 (sin recorte saldría 1.6062); con 50 tajadas basta el ±0.5 % del 1.607 de F&K.
+TEST(LimitEquilibrium, FredlundKrahnOrdinaryRuRecalculated) {
+    EXPECT_NEAR(fs(fk(0.25), fk_circle(), LeMethod::Ordinary, 400), 1.6073, 1e-3);
 }
 
 TEST(LimitEquilibrium, Acads1aFixedCircle) {
@@ -134,16 +133,16 @@ TEST(LimitEquilibrium, Acads1aFixedCircle) {
     EXPECT_NEAR(m, 0.986, 0.01 * 0.986);
 }
 
-// PENDIENTE DE DECISIÓN (no se ensancha la tolerancia): con los estratos de la capa débil, el tramo de la base entre
-// x = 43.14 y 44 (donde la superficie dada baja de 27.0 a 26.5) cae dentro de la capa débil; el prototipo del plan lo
-// tomaba como suelo 1. Siguiendo los estratos sale Spencer 1.2759 y M-P medio seno 1.2602 (Slide: 1.277 y 1.262),
-// no 1.329 y 1.308; la referencia ACADS 1.34 queda a -4.8 %.
-TEST(LimitEquilibrium, DISABLED_Acads3bGivenSurface) {
+// El tramo de la base entre x = 43.14 y 44 (donde la superficie dada baja de 27.0 a 26.5) cae en la capa débil.
+// Oráculo: lo recalculado asignando la capa débil por la cota de la base (Spencer 1.2758, M-P medio seno 1.2601) y
+// Slide (1.277 y 1.262). La referencia ACADS 1.34 solo se anota: con los estratos no se reproduce (-4.8 %).
+TEST(LimitEquilibrium, Acads3bGivenSurface) {
     const auto f = polyline(acads3b_slip());
     const double s = fs(acads3b(), f, LeMethod::Spencer), m = fs(acads3b(), f, LeMethod::MorgensternPrice);
-    EXPECT_NEAR(s, 1.329, 3e-3);
-    EXPECT_NEAR(m, 1.308, 3e-3);
-    EXPECT_NEAR(s, 1.34, 0.02 * 1.34);
+    EXPECT_NEAR(s, 1.2758, 3e-3);
+    EXPECT_NEAR(m, 1.2601, 3e-3);
+    EXPECT_NEAR(s, 1.277, 0.005 * 1.277);
+    EXPECT_NEAR(m, 1.262, 0.005 * 1.262);
 }
 
 TEST(LimitEquilibrium, ReflectedSectionGivesSameFsAndLambda) {

@@ -90,7 +90,7 @@ def acads3b(flip=False):
 
 @pytest.mark.parametrize("n", [50, 400])
 @pytest.mark.parametrize("method,pub_dry,re_dry,pub_ru,re_ru", [
-    (M.Ordinary, 1.928, 1.9277, 1.607, None),  # el recalculado con ru va aparte (xfail abajo)
+    (M.Ordinary, 1.928, 1.9277, 1.607, None),  # el recalculado con ru va aparte, con 400 tajadas
     (M.Bishop, 2.080, 2.0756, 1.766, 1.7592),
     (M.Spencer, 2.073, 2.0718, 1.761, 1.7574),
     (M.MorgensternPrice, 2.076, 2.0714, 1.764, 1.7567),
@@ -105,11 +105,9 @@ def test_fredlund_krahn(n, method, pub_dry, re_dry, pub_ru, re_ru):
         assert wet == pytest.approx(re_ru, abs=1e-3)
 
 
-@pytest.mark.xfail(strict=True, reason="pendiente de decisión: con el recorte (.)+ del plan sale 1.6077/1.6073, "
-                                       "el 1.6062 recalculado es sin recorte")
-@pytest.mark.parametrize("n", [50, 400])
-def test_fredlund_krahn_ordinary_ru_recalculated(n):
-    assert fs(fk(0.25), circle(*FK_CIRCLE), M.Ordinary, n) == pytest.approx(1.6062, abs=1e-3)
+def test_fredlund_krahn_ordinary_ru_recalculated():
+    # N' recortado a >= 0 con nota; recalculado con el recorte y 400 tajadas (sin recorte saldría 1.6062)
+    assert fs(fk(0.25), circle(*FK_CIRCLE), M.Ordinary, 400) == pytest.approx(1.6073, abs=1e-3)
 
 
 def test_fredlund_krahn_lambda_and_notes():
@@ -132,14 +130,15 @@ def test_acads_1a_fixed_circle():
         assert v == pytest.approx(slide, rel=0.01)
 
 
-@pytest.mark.xfail(strict=True, reason="pendiente de decisión: siguiendo los estratos, la base entre x 43.14 y 44 "
-                                       "cae en la capa débil; sale Spencer 1.2759 y M-P 1.2602 (Slide 1.277/1.262)")
 def test_acads_3b_given_surface():
+    # la base entre x 43.14 y 44 cae en la capa débil; oráculo: recalculado y Slide (1.277, 1.262).
+    # La referencia ACADS 1.34 solo se anota: con los estratos no se reproduce (-4.8 %).
     f = polyline(ACADS3B_SLIP)
     s, m = fs(acads3b(), f, M.Spencer), fs(acads3b(), f, M.MorgensternPrice)
-    assert s == pytest.approx(1.329, abs=3e-3)
-    assert m == pytest.approx(1.308, abs=3e-3)
-    assert s == pytest.approx(1.34, rel=0.02)
+    assert s == pytest.approx(1.2758, abs=3e-3)
+    assert m == pytest.approx(1.2601, abs=3e-3)
+    assert s == pytest.approx(1.277, rel=0.005)
+    assert m == pytest.approx(1.262, rel=0.005)
 
 
 @pytest.mark.parametrize("method", METHODS)
