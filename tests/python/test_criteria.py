@@ -21,13 +21,13 @@ S = "ZZSENT"
 
 # ---------------------------------------------------------------- objetos armados a mano
 
-def blk(fs=None, pof=None, model="planar", reliability=None, id_=f"B-{S}", order=1, prob=False):
+def blk(fs=None, pof=None, model="planar", reliability=None, id_=f"B-{S}", order=1, prob=False, kh=0.0):
     """BlockResult a mano: `pof` da un probabilístico; `prob=True` sin pof da uno sin muestras válidas."""
     det = None if fs is None else SimpleNamespace(factor_of_safety=fs)
     p = SimpleNamespace(pof=pof) if pof is not None or prob else None
     berm = (SimpleNamespace(reliability=None if reliability is None else SimpleNamespace(reliability=reliability))
             if model == "berm" else None)
-    return bk.BlockResult(id_, f"T-{S}", order, model, det, None, p, berm, (), (), ())
+    return bk.BlockResult(id_, f"T-{S}", order, model, det, None, p, berm, (), (), (), kh=kh)
 
 
 def lea(fs=(1.4,), static=None, kh=0.0, newmark=False, id_=f"A-{S}", order=1):
@@ -78,8 +78,13 @@ def test_ndep_dmirs_ryan_values():
     assert w == {"*:moderada": 1.2, "*:seria": 1.5, "*:extrema": 2.0}
     assert all(i.verification == "V1" and i.force == "guide" and i.article == "tabla 3.2" for i in WA.items)
     (r,) = RP.items
-    assert (r.value_range, r.page, r.check, r.comparison) == ((50, 90), "31", "berm_reliability", ">=")
-    assert r.verification == "PrimaryLaterAuthors"
+    assert (r.value_range, r.page, r.check, r.comparison) == ((50, 90), "29", "berm_reliability", ">=")
+    assert r.verification == "V1" and "p. 31 (rango recomendado 50–90 %)" in RP.sources["ryanpryor2000"][0]
+    assert WA.not_applicable == ("no_seria",)
+    assert {k: v for p in (RS, WA, RP) for k, v in p.source_notes.items()} == {
+        "readstacey2009": "libro (CSIRO); los valores salen de Moffitt 2023, tabla 1",
+        "dmirs2019": "versión vigente (2025); no releída, R6",
+        "ryanpryor2000": "registro bibliográfico (OSTI); no es el texto leído"}
 
 
 def test_pe_profile_still_loads():
@@ -110,6 +115,10 @@ BAD = [
     ("escala mala", lambda d: d["items"][0].update(applies_to=["tajo:alta"]), "applies_to"),
     ("sin consecuencia", lambda d: d["items"][0].update(applies_to=["global"]), "applies_to"),
     ("sin umbral", lambda d: d["items"][0].pop("value_range"), "value"),
+    ("no aplica desconocida", lambda d: d.update(not_applicable=["leve"]), "not_applicable"),
+    ("no aplica con criterio", lambda d: d.update(not_applicable=["alta"]), "not_applicable"),
+    ("url_note vacía", lambda d: d["sources"]["s"].update(url_note=" "), "url_note"),
+    ("marca de método", lambda d: d["items"][0].update(verification="PrimaryLaterAuthors"), "verification"),
 ]
 
 
@@ -193,13 +202,39 @@ def test_dmirs_needs_only_consequence():
     a = {("le", f"A-{S}"): (None, "seria"), ("le", "A2"): ("global", "no_seria")}
     cs = one(WA, le=[lea(fs=(1.6,)), lea(fs=(3,), id_="A2", order=2)], assignments=a)
     assert [(c.item_id, c.status) for c in cs] == [("WA-3.2-seria", "meets"), ("", "not_verifiable")]
-    assert cs[1].reason == "the profile has no criterion for this consequence"
+    assert cs[1].reason == "the guideline sets no minimum for this consequence (not applicable)"
+    assert cs[1].source == cs[0].source and not cs[1].needs_attention  # nota, no aviso
+    (c,) = one(WA, le=[lea(fs=(3,))], assignments={("le", f"A-{S}"): ("global", "alta")})
+    assert c.reason == "the profile has no criterion for this consequence"  # «alta» no es de la tabla 3.2
+
+
+def test_profile_not_in_force_is_not_verifiable():
+    a = {("le", f"A-{S}"): ("pad", "alta"), ("block", f"B-{S}"): ("pad", "alta"), ("le", "A2"): ("banco", "alta")}
+    les = [lea(fs=(1.0,), static=(1.4,), kh=0.15), lea(id_="A2", order=2)]
+    cs = one(NDEP, le=les, blocks=[blk(fs=1.4)], assignments=a, as_of="2021-03-07")
+    assert [(c.object_kind, c.rule, c.status, c.reason) for c in cs] == [
+        ("block", "slope_fs_static", "not_verifiable", "profile not in force on the evaluation date"),
+        ("le", "slope_fs_static", "not_verifiable", "profile not in force on the evaluation date"),
+        ("le", "slope_fs_pseudostatic", "not_verifiable", "profile not in force on the evaluation date"),
+        ("le", "deformation_required", "not_verifiable", "profile not in force on the evaluation date")]
+    assert all(c.source == "NDEP (2021) Stability requirements for heap leach pads, ítem 6, p. 1" for c in cs[:2])
+    cs = one(NDEP, le=les, blocks=[blk(fs=1.4)], assignments=a, as_of="2021-03-08")
+    assert [(c.rule, c.status) for c in cs[:4]] == [("slope_fs_static", "meets"), ("slope_fs_static", "meets"),
+                                                    ("slope_fs_pseudostatic", "fails"), ("deformation_required", "fails")]
+    assert {c.reason for c in cs[4:]} == {"the profile has no criterion for this scale"}  # A2 en banco, ya vigente
+    pe = get_profile("PE-DS024-2016")
+    early = pe.version("PE-264", "2026-11-04").effective_from
+    (c,) = [c for c in one(pe, le=les, assignments=a, as_of=f"{int(early[:4]) - 1}{early[4:]}")
+            if c.rule == "pseudostatic_analysis_present"]
+    assert (c.object_kind, c.status, c.reason) == ("le_set", "not_verifiable", "profile not in force on the evaluation date")
 
 
 def test_missing_values_are_not_verifiable():
     a = {("block", f"B-{S}"): ("banco", "alta"), ("berm", "M"): ("banco", "alta"), ("le", f"A-{S}"): ("pad", "alta")}
     cs = one(RS, blocks=[blk(fs=None)], assignments=a)
     assert {c.reason for c in cs} == {"no deterministic FS", "no probabilistic analysis"}
+    assert all(c.source == "Read y Stacey (2009), tabla 9.9 (Wesseloo y Read), reproducida en Moffitt (2023), "
+                           "tabla 1, p. 3" for c in one(RS, blocks=[blk(fs=1)], assignments={}))
     cs = one(RS, blocks=[blk(fs=2, prob=True)], assignments=a)
     assert by_rule(cs, "slope_pof").reason == "no valid probabilistic samples"
     assert by_rule(one(RP, blocks=[blk(model="berm", id_="M")], assignments=a), "berm_reliability").reason == \
@@ -247,6 +282,16 @@ def test_ndep_deformation_required():
     assert (c.status, c.reason) == ("meets", "deformation analysis required and given")
     c = by_rule(one(NDEP, le=[lea(fs=(1.05,), static=(1.4,), kh=0.15)], assignments=a), "deformation_required")
     assert (c.status, c.reason) == ("meets", "deformation analysis not required")
+
+
+def test_block_with_kh_goes_to_pseudostatic():
+    a = {("block", f"B-{S}"): ("pad", "alta")}
+    cs = one(NDEP, blocks=[blk(fs=1.04, pof=0.01, kh=0.1)], assignments=a)
+    assert [(c.rule, c.status, c.obtained) for c in cs] == [("slope_fs_static", "not_verifiable", None),
+                                                            ("slope_fs_pseudostatic", "fails", 1.04)]
+    assert cs[0].reason == "block analysed with kh: no static FS or PoF" and cs[1].required == 1.05
+    cs = one(NDEP, blocks=[blk(fs=1.04, kh=0.0)], assignments=a)  # sin kh: solo el estático, contra 1.3
+    assert [(c.rule, c.status) for c in cs] == [("slope_fs_static", "fails")]
 
 
 # ---------------------------------------------------------------- art. 264 (motor; su uso con PE-264 es de la tarea 3)
@@ -409,9 +454,12 @@ def test_real_block_and_le_results(tmp_path):
     bres, _ = correr(tmp_path, J35, [talud(buz="50")], [bk_row(PL1), bk_row(BERMA)])
     (lr,) = rm.assess_le(hojas(tmp_path, merge(acads3b_data(kh=0.1, registro="R-ZZSENT"), {"Sismos": seno()})))
     a = {("block", "B1"): ("banco", "alta"), ("berm", "M1"): ("banco", "alta"), ("le", lr.id_analisis): ("pad", "alta")}
+    assert bres[0].kh == PL1["kh"] == 0.08 and bres[1].kh == 0.0
     cs = assess_criteria(RS, blocks=bres, le=[lr], assignments=a)
-    fs = by_rule([c for c in cs if c.object_kind == "block"], "slope_fs_static")
-    assert fs.obtained == pytest.approx(bres[0].fs) and fs.status == ("meets" if bres[0].fs >= 1.1 else "fails")
+    blk_cs = [c for c in cs if c.object_kind == "block"]  # PL-1 con kh: su FS es seudoestático y RS no tiene ese
+    assert [(c.rule, c.status, c.reason) for c in blk_cs] == [
+        ("slope_fs_static", "not_verifiable", "block analysed with kh: no static FS or PoF"),
+        ("slope_pof", "not_verifiable", "block analysed with kh: no static FS or PoF")]
     cs = assess_criteria(NDEP, le=[lr], assignments=a)
     c = by_rule(cs, "slope_fs_static")
     assert c.obtained == pytest.approx(min(x for x in le.le_static_fs(lr) if x is not None))
@@ -419,7 +467,9 @@ def test_real_block_and_le_results(tmp_path):
     d = by_rule(cs, "deformation_required")
     assert lr.newmark is not None and lr.fs_min < 1.05
     assert (d.status, d.reason) == ("meets", "deformation analysis required and given")
-    assert fs.status == "fails" and bres[0].fs < 1.1  # PL-1 (0.818) contra 1.1 en banco
+    b0, _ = correr(tmp_path, J35, [talud(buz="50")], [bk_row({**PL1, "kh": 0})])
+    fs = by_rule(assess_criteria(RS, blocks=b0, assignments=a), "slope_fs_static")
+    assert fs.obtained == pytest.approx(b0[0].fs) and b0[0].fs < 1.1 and fs.status == "fails"  # PL-1 sin kh, banco
 
 
 def bk_row(d):

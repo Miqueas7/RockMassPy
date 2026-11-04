@@ -30,8 +30,10 @@ CRITERIA_SHEET = "Criterios"
 CRITERIA_COLUMNS = ("escala", "consecuencia", "fs_estatico_min", "fs_seudoestatico_min", "pof_max_pct",
                     "confiabilidad_berma_min_pct", "fuente")
 # reglas que se miran en cada tipo de objeto
-_KIND_RULES = {"block": ("slope_fs_static", "slope_pof"), "berm": ("berm_reliability",),
+_KIND_RULES = {"block": ("slope_fs_static", "slope_pof", "slope_fs_pseudostatic"), "berm": ("berm_reliability",),
                "le": ("slope_fs_static", "slope_fs_pseudostatic", "deformation_required")}
+NOT_IN_FORCE = "profile not in force on the evaluation date"
+NOT_APPLICABLE = "the guideline sets no minimum for this consequence (not applicable)"
 
 
 @dataclass(frozen=True)
@@ -120,7 +122,9 @@ def _pct(fraction) -> Fraction:
 # --- qué se compara: (obtenido o None, razón si falta, nota si hay) ---
 
 def _block_value(rule, r: BlockResult):
-    if rule == "slope_fs_static":
+    if rule in ("slope_fs_static", "slope_pof") and r.kh > 0:  # el FS y la PoF de la fila son seudoestáticos
+        return None, "block analysed with kh: no static FS or PoF", ""
+    if rule in ("slope_fs_static", "slope_fs_pseudostatic"):
         return (r.fs, "", "") if _finite(r.fs) else (None, "no deterministic FS", "")
     if rule == "slope_pof":
         p = r.probabilistic
@@ -176,9 +180,10 @@ def _source(item: NormItem) -> str:
 
 
 def _empty(kind, oid, order, rule, items, reason):
+    """«no verificable» sin ítem: la fuente es la de los ítems de la regla, sin repetir."""
     first = items[0]
     return CriterionCheck(kind, oid, order, "", rule, None, None, None, "not_verifiable", reason,
-                          "", first.force, first.verification, None)
+                          "; ".join(dict.fromkeys(map(_source, items))), first.force, first.verification, None)
 
 
 def _assigner(assignments: Mapping):
@@ -242,6 +247,9 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
     by_rule: dict[str, list[NormItem]] = {}
     for i in items:
         by_rule.setdefault(i.check, []).append(i)
+    all_by_rule: dict[str, list[NormItem]] = {}  # todas las versiones, para avisar si ninguna está vigente (I2)
+    for i in profile.items:
+        all_by_rule.setdefault(i.check, []).append(i)
 
     assign = _assigner(assignments)
     out: list[CriterionCheck] = []
@@ -252,15 +260,23 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
         scale, cons = assign((kind, oid))
         unknown = _unknown(scale, cons)
         for rule in _KIND_RULES[kind]:
+            if kind == "block" and rule == "slope_fs_pseudostatic" and not r.kh > 0:
+                continue  # un bloque sin kh se juzga solo con las reglas estáticas
             if rule not in by_rule:
+                old = [i for i in all_by_rule.get(rule, ()) if not unknown and _matches(i, scale, cons)]
+                if old:
+                    out.append(_empty(kind, oid, r.order, rule, old, NOT_IN_FORCE))
                 continue
             if unknown:
                 out.append(_empty(kind, oid, r.order, rule, by_rule[rule], unknown))
                 continue
             hits = [i for i in by_rule[rule] if _matches(i, scale, cons)]
             if not hits:
-                out.append(_empty(kind, oid, r.order, rule, by_rule[rule], _no_match_reason(by_rule[rule], scale,
-                                                                                         cons)))
+                old = [i for i in all_by_rule[rule] if _matches(i, scale, cons)]
+                reason = NOT_IN_FORCE if old else _no_match_reason(by_rule[rule], scale, cons)
+                if reason == "the profile has no criterion for this consequence" and cons in profile.not_applicable:
+                    reason = NOT_APPLICABLE
+                out.append(_empty(kind, oid, r.order, rule, old or by_rule[rule], reason))
                 continue
             rule_value = "slope_fs_pseudostatic" if rule == "deformation_required" else rule
             obtained, reason, note = (_le_value(rule_value, r) if kind == "le" else _block_value(rule, r))
@@ -271,6 +287,9 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
         status, reason = _pseudostatic_present(item, le, assign, return_periods or {})
         out.append(CriterionCheck("le_set", "", 0, item.item_id, item.check, item.value, item.comparison, None,
                                   status, reason, _source(item), item.force, item.verification, None))
+    if "pseudostatic_analysis_present" not in by_rule and "pseudostatic_analysis_present" in all_by_rule:
+        out.append(_empty("le_set", "", 0, "pseudostatic_analysis_present",
+                          all_by_rule["pseudostatic_analysis_present"], NOT_IN_FORCE))
     return out
 
 

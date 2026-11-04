@@ -156,6 +156,24 @@ def test_alcance_criterios_y_marca_v2(les):
     assert upper[t("h_range_policy", "es")] == t("policy_lower", "es")
 
 
+def test_fuente_con_url_note_y_en_las_no_verificables(les):
+    prof = dict(table(full(les), "cap_crit_profile").rows)
+    src = prof[t("h_source", "es")]
+    assert "(https://publish.csiro.au/book/6108; libro (CSIRO); los valores salen de Moffitt 2023, tabla 1)" in src
+    rows = table(full(les), "cap_crit_checks").rows
+    assert [r[9] for r in rows[2:]] == [rows[0][9]] * 2 and rows[0][9] != "-"  # la fuente también sin ítem
+
+
+def test_bloque_con_kh_en_el_resumen():
+    import test_criteria as tc
+
+    b = tc.blk(fs=1.2, pof=0.05, kh=0.1)
+    ndep = get_profile("NDEP-2021")
+    cs = assess_criteria(ndep, blocks=[b], assignments={("block", b.id_bloque): ("pad", "alta")})
+    (row,) = rp._crit_summary([b], [], cs, "es").rows
+    assert row[4:7] == ("-", "1.200", "-")  # FS seudoestático; sin FS estático ni PoF
+
+
 def test_verificacion_una_fila_por_chequeo_y_normativa(les):
     rep = full(les)
     rows = table(rep, "cap_crit_checks").rows
@@ -288,7 +306,7 @@ def test_cli_slope_bloques_con_criterios(tmp_path, capsys):
     from test_cli import block_files, run_blocks
 
     jf, tf, bf, df = tb._todas(tmp_path)
-    bf[0] = tb.B(**{**tb.PL1, "retroanalisis": "si", "escala": "banco", "consecuencia": "alta"})  # FS 0.818 < 1.1
+    bf[0] = tb.B(**{**tb.PL1, "retroanalisis": "si", "escala": "banco", "consecuencia": "alta", "kh": 0})  # < 1.1
     bf[-1] = tb.B(**{**tb.SMP, "escala": "Global", "consecuencia": "baja"})
     fs = block_files(tmp_path, jf, tf, bf, df)
     res, html = tmp_path / "c.xlsx", tmp_path / "b.html"

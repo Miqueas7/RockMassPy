@@ -12,8 +12,9 @@
  "range_policy": "conservative",
  "sources": {
   "ryanpryor2000": {
-   "title": "Ryan, T. M. y Pryor, P. R. (2000). Designing catch benches and interramp slopes. En Hustrulid, McCarter y Van Zyl (eds.), Slope Stability in Surface Mining, cap. 3. SME",
-   "url": "https://www.osti.gov/etdeweb/biblio/20276781"
+   "title": "Ryan, T. M. y Pryor, P. R. (2000). Designing catch benches and interramp slopes. En Hustrulid, McCarter y Van Zyl (eds.), Slope Stability in Surface Mining, cap. 3. SME. p. 29 (confiabilidad de berma) y p. 31 (rango recomendado 50–90 %)",
+   "url": "https://www.osti.gov/etdeweb/biblio/20276781",
+   "url_note": "registro bibliográfico (OSTI); no es el texto leído"
   }
  },
  "items": [
@@ -21,10 +22,10 @@
    "id": "RP-berma",
    "instrument": "Ryan y Pryor (2000)",
    "article": "cap. 3",
-   "page": "31",
+   "page": "29",
    "source": "ryanpryor2000",
    "force": "guide",
-   "verification": "PrimaryLaterAuthors",
+   "verification": "V1",
    "effective_from": "2000-01-01",
    "check": "berm_reliability",
    "value_range": [

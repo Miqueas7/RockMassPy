@@ -366,6 +366,7 @@ class BlockResult:
     methods: tuple[rm.MethodInfo, ...]
     escala: str | None = field(default=None, repr=False)
     consecuencia: str | None = field(default=None, repr=False)
+    kh: float = 0.0  # el de la fila (0 si no lo trae): con kh > 0 el FS es seudoestático (criterios, 3D)
 
     @property
     def fs(self) -> float | None:
@@ -521,7 +522,7 @@ def _assess_one(order, r: BlockRow, s: SlopeResult, dists, iterations, sampling,
                 warnings.insert(0, _LATERAL_WARNING)
     uniq = {m.method_id: m for m in methods}
     return BlockResult(r.id_bloque, r.id_talud, order, model, det, back, prob, berm, _unique(warnings),
-                       _unique(notes), tuple(uniq.values()), escala=r.escala, consecuencia=r.consecuencia)
+                       _unique(notes), tuple(uniq.values()), escala=r.escala, consecuencia=r.consecuencia, kh=r.kh or 0.0)
 
 
 def _int_arg(v, name, lo):

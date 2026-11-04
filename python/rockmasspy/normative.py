@@ -11,7 +11,9 @@ Las fechas de vigencia son ISO y ambos extremos son inclusive.
 Criterios de aceptación (3D): las reglas `slope_*`, `berm_reliability` y `deformation_required` llevan
 `applies_to` con claves `escala:consecuencia` («*» vale cualquiera). Un umbral puede ser un rango
 (`value_range: [a, b]`, a < b); el perfil declara `range_policy` (por defecto `conservative`: el extremo alto
-para un mínimo y el bajo para un máximo, R1). Una sola cifra es `value`, no un rango.
+para un mínimo y el bajo para un máximo, R1). Una sola cifra es `value`, no un rango. `not_applicable` lista las
+consecuencias para las que la guía no fija mínimo (sale «no verificable» con esa razón). Una fuente puede llevar
+`url_note`: qué es el enlace (por ejemplo, «registro bibliográfico; no es el texto leído»).
 """
 from __future__ import annotations
 
@@ -19,14 +21,14 @@ import datetime
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 
 from .batch import EsrSpec, parse_esr_spec
 
 FORCES = ("law", "guide")
-VERIFICATIONS = ("V1", "V2", "PrimaryLaterAuthors")
+VERIFICATIONS = ("V1", "V2")
 RANGE_POLICIES = ("conservative", "upper", "lower")
 SCALES = ("banco", "interrampa", "global", "pad", "botadero")
 CONSEQUENCES = ("baja", "media", "alta", "no_seria", "moderada", "seria", "extrema")
@@ -94,6 +96,8 @@ class NormativeProfile:
     sources: dict  # clave -> (título, URL)
     items: tuple
     range_policy: str = "conservative"
+    not_applicable: tuple = ()  # consecuencias sin mínimo en la guía
+    source_notes: dict = field(default_factory=dict)  # clave de fuente -> url_note
 
     def item_ids(self) -> tuple:
         return tuple(dict.fromkeys(i.item_id for i in self.items))
@@ -242,18 +246,28 @@ def load_profile(path) -> NormativeProfile:
     raw_sources = data.get("sources")
     if not isinstance(raw_sources, dict) or not raw_sources:
         raise ValueError(where + "sources: must be a non-empty object")
-    sources = {}
+    sources, notes = {}, {}
     for key, s in raw_sources.items():
         if not isinstance(s, dict) or not isinstance(s.get("title"), str) or not isinstance(s.get("url"), str):
             raise ValueError(f"{where}sources: {key}: needs title and url")
         sources[key] = (s["title"], s["url"])
+        note = s.get("url_note")
+        if note is not None and (not isinstance(note, str) or not note.strip()):
+            raise ValueError(f"{where}sources: {key}: url_note must be non-empty text")
+        if note is not None:
+            notes[key] = note
     policy = data.get("range_policy", "conservative")
     if policy not in RANGE_POLICIES:
         raise ValueError(f"{where}range_policy: must be one of {RANGE_POLICIES}")
+    na = data.get("not_applicable", [])
+    if not isinstance(na, list) or not all(isinstance(c, str) and c in CONSEQUENCES for c in na):
+        raise ValueError(f"{where}not_applicable: must be a list of consequences {CONSEQUENCES}")
     raw_items = data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         raise ValueError(where + "items: must be a non-empty list")
     items = tuple(_parse_item(r, sources, data["jurisdiction"], fname) for r in raw_items)
+    if any(k.partition(":")[2] in na for i in items if i.check in CRITERIA_RULES for k in i.applies_to):
+        raise ValueError(f"{where}not_applicable: a consequence with a criterion cannot be not applicable")
     for iid in dict.fromkeys(i.item_id for i in items):
         vs = sorted((i for i in items if i.item_id == iid), key=lambda i: i.effective_from)
         for a, b in zip(vs, vs[1:]):
@@ -261,7 +275,8 @@ def load_profile(path) -> NormativeProfile:
                 raise ValueError(f"{where}item {iid}: effective_from: versions overlap")
     return NormativeProfile(profile_id=data["profile_id"], jurisdiction=data["jurisdiction"],
                             name={"es": name["es"], "en": name["en"]}, instruments=tuple(instruments),
-                            sources=sources, items=items, range_policy=policy)
+                            sources=sources, items=items, range_policy=policy, not_applicable=tuple(na),
+                            source_notes=notes)
 
 
 def _profiles_dir():

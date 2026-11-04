@@ -867,7 +867,8 @@ def _crit_summary(blocks, le, checks, lang) -> Table:
                     _num(None if r.newmark is None else r.newmark.displacement_m))
         else:
             pof = _block_value("slope_pof", r)[0]
-            vals = (r.escala or "-", r.consecuencia or "-", _num(_block_value("slope_fs_static", r)[0]), "-",
+            pseudo = _block_value("slope_fs_pseudostatic", r)[0] if r.kh > 0 else None  # con kh, el FS va aquí
+            vals = (r.escala or "-", r.consecuencia or "-", _num(_block_value("slope_fs_static", r)[0]), _num(pseudo),
                     _num(None if pof is None else float(pof), ".1f"), "-")
         st = status.get((kind, oid), {})
         rows.append((t(f"kind_{kind}", lang), oid or "-", *vals, *(" / ".join(st.get(x, ["-"])) for x in rules)))
@@ -875,6 +876,13 @@ def _crit_summary(blocks, le, checks, lang) -> Table:
                  (t("h_object", lang), t("h_id_object", lang), t("h_scale", lang), t("h_consequence", lang),
                   t("h_fs_static", lang), t("h_fs_pseudo", lang), t("h_pof", lang), t("h_newmark", lang),
                   *(t(f"rule_{x}", lang) for x in rules)), tuple(rows))
+
+
+def _crit_source(profile, key) -> str:
+    """Título de la fuente con su URL y su `url_note` entre paréntesis (lo que haya)."""
+    title_, url = profile.sources[key]
+    extra = "; ".join(x for x in (url, profile.source_notes.get(key, "")) if x)
+    return f"{title_} ({extra})" if extra else title_
 
 
 def _why(att, lang) -> str:
@@ -909,7 +917,7 @@ def _criteria_sections(results, blocks, le, lang, figures, projection, methods, 
         s2.append(Table(t("cap_crit_profile", lang), (t("h_field", lang), t("h_value", lang)), (
             (t("h_id", lang), profile.profile_id), (t("h_name", lang), profile.name[lang]),
             (t("h_instruments", lang), "; ".join(profile.instruments)),
-            (t("h_source", lang), "; ".join(dict.fromkeys(title_ for title_, _ in profile.sources.values()))),
+            (t("h_source", lang), "; ".join(dict.fromkeys(_crit_source(profile, k) for k in profile.sources))),
             (t("h_force", lang), "/".join(t(f"force_{f}", lang) for f in forces.split("/"))),
             (t("h_mark", lang), marks), (t("h_range_policy", lang), t(f"policy_{policy}", lang)))))
         s2 += [Paragraph(t(f"crit_mark_{m}", lang)) for m in ("V2", "user") if m in marks.split("/")]

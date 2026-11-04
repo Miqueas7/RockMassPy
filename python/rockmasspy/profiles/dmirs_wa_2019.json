@@ -9,10 +9,14 @@
  "instruments": [
   "DMIRS (2019) Ground control management in Western Australian mining operations: Guideline"
  ],
+ "not_applicable": [
+  "no_seria"
+ ],
  "sources": {
   "dmirs2019": {
    "title": "Department of Mines, Industry Regulation and Safety (2019, act. 2025). Ground control management in Western Australian mining operations: Guideline",
-   "url": "https://worksafe.wa.gov.au/system/files/documents/2025-02/MSH_GL_GroundControl.pdf"
+   "url": "https://worksafe.wa.gov.au/system/files/documents/2025-02/MSH_GL_GroundControl.pdf",
+   "url_note": "versión vigente (2025); no releída, R6"
   }
  },
  "items": [
