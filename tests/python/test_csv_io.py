@@ -66,12 +66,14 @@ def test_invalid_separator_decimal(kw, tmp_path):
         rm.save_csv_dir(range_lt(), tmp_path / "c", **kw)
 
 
+@pytest.mark.real_csv_format
 def test_system_format_failure_falls_back(monkeypatch):
     monkeypatch.setattr(csv_io.locale, "setlocale", lambda *a: (_ for _ in ()).throw(OSError("x")))
     monkeypatch.setattr(csv_io.sys, "platform", "linux")
     assert csv_io._system_csv_format() == (",", ".")
 
 
+@pytest.mark.real_csv_format
 @pytest.mark.skipif(sys.platform != "win32", reason="registro de Windows")
 def test_real_system_format_is_accepted(tmp_path):
     sep, dec = csv_io._system_csv_format()

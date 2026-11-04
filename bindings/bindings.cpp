@@ -5,6 +5,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -21,13 +22,17 @@
 #include "rockmasspy/rmr89.hpp"
 #include "rockmasspy/rqd.hpp"
 #include "rockmasspy/kinematics.hpp"
+#include "rockmasspy/limit_equilibrium.hpp"
 #include "rockmasspy/planar.hpp"
 #include "rockmasspy/q_slope.hpp"
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
 #include "rockmasspy/wedge.hpp"
+#include "rockmasspy/yield_coefficient.hpp"
 #include "rockmasspy/toppling.hpp"
 #include "rockmasspy/bench.hpp"
+#include "rockmasspy/newmark.hpp"
+#include "rockmasspy/slip_search.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -591,4 +596,120 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("interramp_angle", &interramp_angle, nb::arg("bench_height_m"), nb::arg("berm_width_m"),
           nb::arg("face_angle_deg"));
     m.def("berm_reliability", &berm_reliability, nb::arg("widths_m"), nb::arg("required_width_m"));
+
+    // Newmark de bloque rígido
+    nb::class_<NewmarkInput>(m, "NewmarkInput", "Acceleration record (g), time step, yield coefficient ky and options.")
+        .def(nb::init<>())
+        .def_rw("dt_s", &NewmarkInput::dt_s).def_rw("acceleration_g", &NewmarkInput::acceleration_g)
+        .def_rw("ky", &NewmarkInput::ky).def_rw("scale", &NewmarkInput::scale)
+        .def_rw("both_directions", &NewmarkInput::both_directions);
+    nb::class_<NewmarkResult>(m, "NewmarkResult", "Rigid-block Newmark displacement, peak relative velocity and history.")
+        .def_ro("displacement_m", &NewmarkResult::displacement_m)
+        .def_ro("max_velocity_m_s", &NewmarkResult::max_velocity_m_s)
+        .def_ro("time_of_max_s", &NewmarkResult::time_of_max_s)
+        .def_ro("displacement_history_m", &NewmarkResult::displacement_history_m)
+        .def_ro("info", &NewmarkResult::info).def_ro("warnings", &NewmarkResult::warnings)
+        .def_ro("notes", &NewmarkResult::notes);
+    m.def("newmark_rigid_block", &newmark_rigid_block, nb::arg("input"));
+
+    // Búsqueda de la superficie crítica (malla circular y bloque, con afinado)
+    nb::class_<CircularGrid>(m, "CircularGrid", "Grid of circle centres (nx, ny intervals) and radii per centre.")
+        .def(nb::init<>())
+        .def_rw("x_min", &CircularGrid::x_min).def_rw("x_max", &CircularGrid::x_max)
+        .def_rw("y_min", &CircularGrid::y_min).def_rw("y_max", &CircularGrid::y_max)
+        .def_rw("nx", &CircularGrid::nx).def_rw("ny", &CircularGrid::ny).def_rw("n_radii", &CircularGrid::n_radii);
+    nb::class_<BlockSearch>(m, "BlockSearch",
+                            "Block search: two points on a weak line and projection angles (degrees counterclockwise "
+                            "from +x with the face towards -x; left = toe side).")
+        .def(nb::init<>())
+        .def_rw("weak_line", &BlockSearch::weak_line).def_rw("n_points", &BlockSearch::n_points)
+        .def_rw("left_angle_min", &BlockSearch::left_angle_min).def_rw("left_angle_max", &BlockSearch::left_angle_max)
+        .def_rw("right_angle_min", &BlockSearch::right_angle_min)
+        .def_rw("right_angle_max", &BlockSearch::right_angle_max).def_rw("n_angles", &BlockSearch::n_angles);
+    nb::class_<SearchOptions>(m, "SearchOptions", "Method, limit equilibrium options, refinement and minimum mass area.")
+        .def(nb::init<>())
+        .def_rw("method", &SearchOptions::method).def_rw("le", &SearchOptions::le)
+        .def_rw("refine", &SearchOptions::refine).def_rw("min_mass_area", &SearchOptions::min_mass_area);
+    nb::class_<SearchResult>(m, "SearchResult", "Critical slip surface, its result, counts and the 10 best surfaces.")
+        .def_ro("best", &SearchResult::best).def_ro("surface", &SearchResult::surface)
+        .def_ro("evaluated", &SearchResult::evaluated).def_ro("discarded", &SearchResult::discarded)
+        .def_ro("discarded_malpha", &SearchResult::discarded_malpha)
+        .def_ro("top", &SearchResult::top).def_ro("info", &SearchResult::info)
+        .def_ro("warnings", &SearchResult::warnings).def_ro("notes", &SearchResult::notes);
+    m.def("search_circular", &search_circular, nb::arg("section"), nb::arg("grid"),
+          nb::arg("options") = SearchOptions());
+    m.def("search_block", &search_block, nb::arg("section"), nb::arg("block"), nb::arg("options") = SearchOptions());
+
+    // Coeficiente de fluencia ky (bisección de kh sobre una superficie dada)
+    nb::class_<YieldResult>(m, "YieldResult", "Yield coefficient ky (kh giving FS = 1; None if not found) and the static FS.")
+        .def_ro("ky", &YieldResult::ky).def_ro("fs_static", &YieldResult::fs_static).def_ro("info", &YieldResult::info)
+        .def_ro("warnings", &YieldResult::warnings).def_ro("notes", &YieldResult::notes);
+    // LeOptions se registra más abajo: el valor por defecto va como None para no convertirlo antes de tiempo
+    m.def(
+        "le_yield_coefficient",
+        [](const LeSection& s, const SlipSurface& f, LeMethod method, const std::optional<LeOptions>& o) {
+            return le_yield_coefficient(s, f, method, o.value_or(LeOptions{}));
+        },
+        nb::arg("section"), nb::arg("surface"), nb::arg("method"), nb::arg("options") = nb::none());
+
+    // Equilibrio límite 2D por tajadas
+    nb::class_<Circle>(m, "Circle", "Circular slip surface: centre and radius.")
+        .def(nb::init<>())
+        .def("__init__", [](Circle* self, double xc, double yc, double radius) { new (self) Circle{xc, yc, radius}; },
+             nb::arg("xc"), nb::arg("yc"), nb::arg("radius"))
+        .def_rw("xc", &Circle::xc).def_rw("yc", &Circle::yc).def_rw("radius", &Circle::radius);
+    nb::enum_<StrengthModel>(m, "StrengthModel", "Shear strength model of a limit equilibrium material.")
+        .value("MohrCoulomb", StrengthModel::MohrCoulomb).value("HoekBrown", StrengthModel::HoekBrown);
+    nb::class_<LeMaterial>(m, "LeMaterial", "Limit equilibrium material: unit weight, strength and ru.")
+        .def(nb::init<>())
+        .def_rw("unit_weight", &LeMaterial::unit_weight).def_rw("model", &LeMaterial::model)
+        .def_rw("cohesion", &LeMaterial::cohesion).def_rw("friction_deg", &LeMaterial::friction_deg)
+        .def_rw("hb", &LeMaterial::hb).def_rw("sigma_ci", &LeMaterial::sigma_ci).def_rw("ru", &LeMaterial::ru);
+    nb::class_<LeLayer>(m, "LeLayer", "Layer from the top down: its bottom line (empty only in the last) and material index.")
+        .def(nb::init<>())
+        .def_rw("bottom", &LeLayer::bottom).def_rw("material", &LeLayer::material);
+    nb::class_<LeTensionCrack>(m, "LeTensionCrack", "Vertical tension crack of fixed depth below the surface.")
+        .def(nb::init<>())
+        .def_rw("depth_m", &LeTensionCrack::depth_m).def_rw("water_fill", &LeTensionCrack::water_fill);
+    nb::class_<LeSection>(m, "LeSection", "2D section: ground surface, layers, materials, water and kh.")
+        .def(nb::init<>())
+        .def_rw("surface", &LeSection::surface).def_rw("layers", &LeSection::layers)
+        .def_rw("materials", &LeSection::materials).def_rw("model_base_y", &LeSection::model_base_y)
+        .def_rw("piezometric", &LeSection::piezometric).def_rw("water_unit_weight", &LeSection::water_unit_weight)
+        .def_rw("kh", &LeSection::kh).def_rw("crack", &LeSection::crack);
+    nb::class_<SlipSurface>(m, "SlipSurface", "Slip surface: exactly one of circle and polyline.")
+        .def(nb::init<>())
+        .def_rw("circle", &SlipSurface::circle).def_rw("polyline", &SlipSurface::polyline);
+    nb::enum_<LeMethod>(m, "LeMethod", "Limit equilibrium method.")
+        .value("Ordinary", LeMethod::Ordinary).value("Bishop", LeMethod::Bishop)
+        .value("JanbuSimplified", LeMethod::JanbuSimplified).value("JanbuCorrected", LeMethod::JanbuCorrected)
+        .value("Spencer", LeMethod::Spencer).value("MorgensternPrice", LeMethod::MorgensternPrice);
+    nb::enum_<InterSliceFunction>(m, "InterSliceFunction", "Interslice force function of Morgenstern-Price.")
+        .value("Constant", InterSliceFunction::Constant).value("HalfSine", InterSliceFunction::HalfSine)
+        .value("Points", InterSliceFunction::Points);
+    nb::class_<LeOptions>(m, "LeOptions", "Number of slices, tolerance, iteration limit and interslice function.")
+        .def(nb::init<>())
+        .def_rw("n_slices", &LeOptions::n_slices).def_rw("tolerance", &LeOptions::tolerance)
+        .def_rw("max_iterations", &LeOptions::max_iterations).def_rw("function", &LeOptions::function)
+        .def_rw("function_points", &LeOptions::function_points);
+    nb::class_<LeSlice>(m, "LeSlice", "One slice, left to right: geometry, weight, pore pressure, strength and forces.")
+        .def_ro("x_left", &LeSlice::x_left).def_ro("x_right", &LeSlice::x_right)
+        .def_ro("base_y_left", &LeSlice::base_y_left).def_ro("base_y_right", &LeSlice::base_y_right)
+        .def_ro("alpha_deg", &LeSlice::alpha_deg).def_ro("base_length", &LeSlice::base_length)
+        .def_ro("weight", &LeSlice::weight).def_ro("pore_pressure", &LeSlice::pore_pressure)
+        .def_ro("cohesion", &LeSlice::cohesion).def_ro("friction_deg", &LeSlice::friction_deg)
+        .def_ro("normal_force", &LeSlice::normal_force).def_ro("shear_strength", &LeSlice::shear_strength)
+        .def_ro("interslice_normal_right", &LeSlice::interslice_normal_right)
+        .def_ro("interslice_shear_right", &LeSlice::interslice_shear_right).def_ro("material", &LeSlice::material);
+    nb::class_<LeResult>(m, "LeResult", "Factor of safety (None if not found), lambda, convergence and slices.")
+        .def_ro("factor_of_safety", &LeResult::factor_of_safety).def_ro("method", &LeResult::method)
+        .def_ro("lambda_", &LeResult::lambda).def_ro("iterations", &LeResult::iterations)
+        .def_ro("converged", &LeResult::converged).def_ro("slices", &LeResult::slices)
+        .def_ro("sliding_mass_area", &LeResult::sliding_mass_area).def_ro("info", &LeResult::info)
+        .def_ro("warnings", &LeResult::warnings).def_ro("notes", &LeResult::notes);
+    m.def("hb_params_from_constants", &hb_params_from_constants, nb::arg("mb"), nb::arg("s"), nb::arg("a"),
+          "Hoek-Brown constants given directly (no GSI); sigma_ci goes in the stress unit of the section.");
+    m.def("make_slices", &make_slices, nb::arg("section"), nb::arg("surface"), nb::arg("n_slices"));
+    m.def("le_factor_of_safety", &le_factor_of_safety, nb::arg("section"), nb::arg("surface"), nb::arg("method"),
+          nb::arg("options") = LeOptions());
 }

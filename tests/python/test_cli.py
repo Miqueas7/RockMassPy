@@ -869,3 +869,220 @@ def test_slope_blocks_warnings_grouped(tmp_path, capsys):
     assert ("warning: toppling: support is insufficient for any friction coefficient below 1; FS is an upper bound "
             "(2 blocks)") in lines
     assert not any(ln.endswith("(1 block)") for ln in lines)
+
+
+# --- rockmass le (3C) ---
+
+def le_files(tmp_path, data=None):
+    import test_limit_equilibrium as tl
+
+    return tl.hojas(tmp_path, data or tl.merge(tl.fk_data(), tl.acads3b_data(registro="R-ZZSENT", kh=0.05),
+                                                {"Sismos": tl.seno()}))
+
+
+def run_le(capsys, files, *extra):
+    args = ["le"]
+    if isinstance(files, dict):
+        for flag, sheet in (("--geometry", "Geometria"), ("--layers", "Estratos"), ("--materials", "Materiales_LE"),
+                            ("--analyses", "Analisis_LE"), ("--records", "Sismos")):
+            if sheet in files:
+                args += [flag, str(files[sheet])]
+    else:
+        args += ["--workbook", str(files)]
+    code = main([*args, *map(str, extra)])
+    cap = capsys.readouterr()
+    return code, cap.out, cap.err
+
+
+_PROGRESS_2 = "analysis 1 of 2...\nanalysis 2 of 2...\n"
+
+
+def clean_err(err):
+    """En éxito, stderr lleva a lo más el avance de `rockmass le` (con más de un análisis): sin `error:` ni traceback."""
+    return "error:" not in err and "Traceback" not in err
+
+
+def fk_kh(kh):
+    import test_limit_equilibrium as tl
+
+    d = tl.fk_data()  # sin círculo fijo en la hoja: búsqueda con una malla pequeña alrededor de (120, 90), base 10
+    d["Analisis_LE"] = [tl.ana(id_analisis="AFK-ZZSENT", id_seccion="SFK-ZZSENT", metodos="bishop;spencer",
+                               superficie="circular", malla_x_min=110, malla_x_max=130, malla_y_min=80,
+                               malla_y_max=100, base_modelo_m=10, kh=kh)]
+    return d
+
+
+def test_le_summary_and_privacy(tmp_path, capsys):
+    code, out, err = run_le(capsys, le_files(tmp_path))
+    lines = out.splitlines()
+    assert code == 0 and clean_err(err) and err == _PROGRESS_2  # avance en stderr, sin ids
+    for ln in ("analyses: 2 (circular 1, block 0, given 1)", "FS at or below 1: 0 of 2", "Newmark: 1 analysis",
+               "warnings: 0 in 0 analyses"):
+        assert ln in lines
+    low = next(ln for ln in lines if ln.startswith("lowest FS: "))
+    assert re.fullmatch(r"lowest FS: \d\.\d{3} \([A-Za-z-]+\)", low)
+    assert out.rstrip().endswith("the library recommends, the engineer decides")
+    assert "ZZSENT" not in out + err
+
+
+def test_le_fk_dry_exits_0_and_kh_half_exits_2(tmp_path, capsys):
+    from rockmasspy import limit_equilibrium as le
+
+    (tmp_path / "seco").mkdir()
+    code, out, _ = run_le(capsys, le_files(tmp_path / "seco", fk_kh("")))
+    assert code == 0 and "FS at or below 1: 0 of 1" in out.splitlines()
+    files = le_files(tmp_path, fk_kh(0.5))
+    code, out, _ = run_le(capsys, files)
+    (r,) = le.assess_le(files)
+    assert r.fs_min < 1 and code == 2  # F&K con kh = 0.5: FS 0.83 (Bishop)
+    assert "FS at or below 1: 1 of 1" in out.splitlines()
+    assert f"lowest FS: {r.fs_min:.3f} (Bishop-Simplified)" in out.splitlines()
+
+
+def test_le_workbook_same_as_csv(tmp_path, capsys):
+    import test_limit_equilibrium as tl
+
+    data = tl.merge(tl.fk_data(), tl.acads3b_data(registro="R-ZZSENT", kh=0.05), {"Sismos": tl.seno()})
+    a = run_le(capsys, le_files(tmp_path, data))
+    b = run_le(capsys, tl.libro(tmp_path, data))
+    assert a == b
+
+
+def test_le_files_charts_report(tmp_path, capsys):
+    from rockmasspy.report.texts import t
+
+    res, html, ch = tmp_path / "r.csv", tmp_path / "x.html", tmp_path / "ch"
+    code, out, err = run_le(capsys, le_files(tmp_path), "--output", res, "--report", html, "--charts", ch)
+    assert code == 0 and clean_err(err) and "ZZSENT" not in out + err
+    for p in (res, html, ch / "seccion_le_1.png", ch / "seccion_le_2.png", ch / "newmark_2.png"):
+        assert p.exists(), p
+    assert f"chart: {ch / 'newmark_2.png'}" in out and f"results: {res}" in out and f"report: {html}" in out
+    txt = html.read_text(encoding="utf-8")
+    assert t("cap_le", "es") in txt and t("sl_no_slopes", "es") in txt
+    assert f"<title>{t('slope_title_le', 'es')}</title>" in txt and t("slope_title", "es") not in txt
+    assert len(re.findall("ZZSENT", txt)) == len(re.findall(r"<td>[AS](?:FK|3B)-ZZSENT</td>", txt)) > 0
+
+
+def test_le_docx(tmp_path, capsys):
+    pytest.importorskip("docx")
+    code, out, _ = run_le(capsys, le_files(tmp_path), "--report", tmp_path / "x.docx", "--no-figures",
+                          "--lang", "en")
+    assert code == 0 and (tmp_path / "x.docx").exists() and "report:" in out
+
+
+def _fake_le(fs, warnings=(), order=1):
+    from types import SimpleNamespace
+
+    import rockmasspy as rmp
+    from rockmasspy import limit_equilibrium as le
+
+    res = SimpleNamespace(factor_of_safety=fs, method=rmp.LeMethod.Bishop, lambda_=None, converged=fs is not None,
+                          info=SimpleNamespace(method_id="Bishop-Simplified"))
+    return le.LeAnalysisResult("A", "S", order, "given", (res,), None, None, None, tuple(warnings), (), ())
+
+
+def test_le_count_parity(tmp_path, capsys, monkeypatch):
+    import test_limit_equilibrium as tl
+    from rockmasspy import limit_equilibrium as le
+    from rockmasspy.report.texts import t
+
+    fakes = [_fake_le(x, order=i) for i, x in enumerate((0.5, 1.0, 1 + 1e-12, 1.2), 1)]
+    monkeypatch.setattr(le, "assess_le", lambda *a, **k: fakes)
+    res, html = tmp_path / "p.csv", tmp_path / "p.html"
+    code, out, _ = run_le(capsys, le_files(tmp_path), "--output", res, "--report", html, "--no-figures")
+    k = le.le_counts(fakes)["fs_below_1"]
+    assert f"FS at or below 1: {k} of 4" in out.splitlines() and k == 3 and code == 2
+    assert "lowest FS: 0.500 (Bishop-Simplified)" in out.splitlines()
+    _, filas = tl.leer(res)
+    assert sum(f["fs_menor_o_igual_1"] == "si" for f in filas) == k
+    tabla = html.read_text(encoding="utf-8").split(t("cap_le", "es"))[1].split("</table>")[0]
+    assert tabla.count(f"<td>{t('sl_yes', 'es')}</td>") == k
+
+
+def test_le_warnings_grouped_and_attention(tmp_path, capsys, monkeypatch):
+    from rockmasspy import limit_equilibrium as le
+
+    w = "bishop: m-alpha below 0.2 in {} slices: results may be unreliable"
+    fakes = [_fake_le(1.5, (w.format(3),)),
+             _fake_le(1.5, (w.format(5), "critical centre on the edge of the search grid"))]
+    monkeypatch.setattr(le, "assess_le", lambda *a, **k: fakes)
+    code, out, _ = run_le(capsys, le_files(tmp_path))
+    lines = out.splitlines()
+    assert code == 2 and "FS at or below 1: 0 of 2" in lines and "warnings: 3 in 2 analyses" in lines
+    assert f"warning: {w.format('N')} (2 analyses)" in lines
+    assert "warning: critical centre on the edge of the search grid (1 analysis)" in lines
+
+
+@pytest.mark.parametrize("case", ["material", "metodos", "x_creciente", "nan", "workbook_y_csv", "falta_analyses",
+                                  "sin_fuente", "report_pdf", "output_txt", "records_con_workbook", "no_existe"])
+def test_le_input_errors(tmp_path, capsys, case):
+    import test_limit_equilibrium as tl
+
+    d = tl.fk_data()
+    if case == "material":
+        d["Estratos"] = [tl.L("SFK-ZZSENT", 1, "MX-ZZSENT")]
+    elif case == "metodos":
+        d["Analisis_LE"] = [d["Analisis_LE"][0].replace("bishop;spencer", "bishop;zzraro")]
+    elif case == "x_creciente":
+        d["Geometria"] = tl.G("SFK-ZZSENT", "superficie", [(0, 60), (60, 60), (50, 20), (180, 20)])
+    elif case == "nan":
+        d["Geometria"] = tl.G("SFK-ZZSENT", "superficie", [(0, 60), ("nan", 60), (140, 20), (180, 20)])
+    files = le_files(tmp_path, d)
+    extra = {"report_pdf": ["--report", "x.pdf"], "output_txt": ["--output", "x.txt"]}.get(case, [])
+    if case == "workbook_y_csv":
+        extra = ["--workbook", tmp_path / "x.xlsx"]
+    elif case == "falta_analyses":
+        files = {k: v for k, v in files.items() if k != "Analisis_LE"}
+    elif case == "sin_fuente":
+        files = {}
+    elif case == "records_con_workbook":
+        files, extra = tmp_path / "x.xlsx", ["--records", tmp_path / "s.csv"]
+    elif case == "no_existe":
+        files = tmp_path / "no_existe.xlsx"
+    code, out, err = run_le(capsys, files, *extra)
+    assert code == 1 and out == "" and "Traceback" not in err, err
+    assert len(err.strip().splitlines()) == 1 and err.startswith("error: "), err
+    assert "ZZSENT" not in err and "zzraro" not in err and "Domain error" not in err
+    if case in ("material", "metodos", "x_creciente"):
+        assert "sheet '" in err and "row " in err and "column '" in err
+
+
+def test_help_lists_le_options(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    assert "le" in capsys.readouterr().out.split()
+    with pytest.raises(SystemExit):
+        main(["le", "--help"])
+    out = capsys.readouterr().out
+    for opt in ("--workbook", "--geometry", "--layers", "--materials", "--analyses", "--records", "--output",
+                "--report", "--charts", "--lang", "--title", "--author", "--no-figures"):
+        assert opt in out
+
+
+def test_le_one_analysis_no_progress(tmp_path, capsys):
+    code, _, err = run_le(capsys, le_files(tmp_path, fk_kh("")))
+    assert code == 0 and err == ""
+
+
+@pytest.mark.parametrize("case", ["base_dada", "base_circular", "sin_records"])
+def test_le_base_and_records_errors(tmp_path, capsys, case):
+    import test_limit_equilibrium as tl
+
+    if case == "sin_records":
+        files = le_files(tmp_path, tl.acads3b_data(registro="R-ZZSENT"))
+        files.pop("Sismos", None)
+        want = ("error: sheet 'Analisis_LE', row 2, column 'registro': no accelerogram given "
+                "(use --records or a Sismos sheet)\n")
+    else:
+        d = tl.fk_data()
+        an = dict(id_analisis="AFK-ZZSENT", id_seccion="SFK-ZZSENT", metodos="bishop", base_modelo_m=70.25)
+        if case == "base_dada":
+            d["Geometria"] += tl.G("SFK-ZZSENT", "ZZSENTLg", [(40, 60), (90, 32), (130, 22), (150, 20)])
+            an.update(superficie="dada", linea_superficie="ZZSENTLg")
+        else:
+            an.update(superficie="circular", malla_x_min=110, malla_x_max=130, malla_y_min=80, malla_y_max=100)
+        d["Analisis_LE"] = [tl.ana(**an)]
+        files = le_files(tmp_path, d)
+        want = "error: sheet 'Analisis_LE', row 2, column 'base_modelo_m': must be below the ground surface\n"
+    code, out, err = run_le(capsys, files)
+    assert code == 1 and out == "" and err == want

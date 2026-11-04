@@ -103,6 +103,10 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_wedge.cpp
         tests/cpp/test_toppling.cpp
         tests/cpp/test_bench.cpp
+        tests/cpp/test_limit_equilibrium.cpp
+        tests/cpp/test_newmark.cpp
+        tests/cpp/test_slip_search.cpp
+        tests/cpp/test_yield_coefficient.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core

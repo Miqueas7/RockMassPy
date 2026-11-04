@@ -356,6 +356,75 @@ Opciones: `--blocks` (pide `--faces` y `--families`), `--sheet-blocks`, `--distr
 
 Mira `examples/09-bloques-probabilistico-berma/`.
 
+## Equilibrio límite y Newmark
+
+`assess_le(...)` y `rockmass le` calculan el **factor de seguridad de una sección 2D por tajadas verticales**: un
+talud de tajo, un pad o un botadero, con estratos, línea piezométrica y coeficiente sísmico pseudoestático. Por cada
+fila de una hoja `Analisis_LE`:
+- los métodos: Ordinario (Fellenius), Bishop simplificado, Janbu simplificado y corregido, Spencer y
+  Morgenstern-Price/GLE (función entre tajadas de medio seno o constante);
+- la superficie de falla: **búsqueda circular** (malla de centros con radios y afinado local), **búsqueda de bloque**
+  sobre una capa débil o una polilínea dada;
+- la resistencia en la base de cada tajada: Mohr-Coulomb o **Hoek-Brown no lineal** (envolvente de Balmer, con GSI y
+  mi o con mb, s y a);
+- agua por `ru` o por línea piezométrica (con el agua encharcada sobre el terreno), grieta de tracción con agua y `kh`;
+- el **coeficiente de fluencia ky** (el kh que lleva el FS a 1) y el **desplazamiento de Newmark de bloque rígido**
+  para un registro de aceleraciones.
+
+Lee esto dos veces:
+
+- **Con sismo, usa Spencer o GLE.** Bishop no equilibra fuerzas horizontales, así que un kh alto lo separa de los
+  métodos rigurosos (ACADS 1(d) en Slide2, kh 0.15: Bishop 1.016, Spencer 0.991).
+- **La librería nunca dice «aceptable».** Solo un FS igual o menor que 1 (con holgura de 1e-9) y los avisos cambian el
+  código de salida; el FS, ky y el desplazamiento de Newmark se informan y no se juzgan. Los criterios de aceptación
+  son de la fase 3D.
+- **Privacidad:** `id_seccion`, `id_analisis`, `material`, `registro` y los nombres de línea salen solo en las tablas
+  del informe (los dos ids también en el archivo de resultados), nunca en la consola, las figuras ni un mensaje.
+
+```python
+import rockmasspy as rm
+
+# Fredlund y Krahn (1977), problema 21 de verificación de Slide2, en psf, pcf y ft: c 600, φ 20, γ 120, seco
+s = rm.LeSection()
+s.surface = [rm.Point2(x, y) for x, y in [(0, 60), (60, 60), (140, 20), (180, 20)]]
+m = rm.LeMaterial()
+m.unit_weight, m.cohesion, m.friction_deg = 120, 600, 20
+estrato = rm.LeLayer()
+estrato.bottom, estrato.material = [], 0              # un solo estrato: sin línea de base
+s.layers, s.materials = [estrato], [m]
+f = rm.SlipSurface()
+f.circle = rm.Circle(120, 90, 80)                     # xc, yc, R
+bishop = rm.le_factor_of_safety(s, f, rm.LeMethod.Bishop)
+spencer = rm.le_factor_of_safety(s, f, rm.LeMethod.Spencer)
+print(f"{bishop.factor_of_safety:.3f}")               # 2.076
+print(f"{spencer.factor_of_safety:.3f}")              # 2.072
+print(spencer.info.method_id)                         # Spencer
+```
+
+Las hojas son `Geometria` (una fila por vértice: `id_seccion`, `linea`, `x_m`, `y_m`; la línea `superficie` es
+obligatoria y `piezometrica` opcional), `Estratos` (`orden` 1 arriba, `material`, `linea_base`), `Materiales_LE`
+(`mohr_coulomb` o `hoek_brown`), `Analisis_LE` (`metodos` separados por `;`, el primero busca; `superficie` =
+`circular`, `bloque` o `dada`; `kh`, `registro`) y `Sismos` (`registro`, `t_s`, `a_g` en g, paso constante), en un
+xlsx o en un CSV por hoja. `rm.le_counts` da los conteos, `rm.save_le_results` escribe una fila por método (con
+`kh` y `fs_estatico`, el FS estático de cada método sobre la crítica estática),
+`report.build_slope_report(..., le=...)` agrega las tablas de equilibrio límite y `report.le_figure` /
+`report.newmark_figure` dibujan la sección y el registro de Newmark. Desde la línea de comandos (0 si todo está bien, 1
+si hay un error de entrada, 2 si algo pide atención):
+
+```bash
+rockmass le --geometry Geometria.csv --layers Estratos.csv --materials Materiales_LE.csv --analyses Analisis_LE.csv \
+    --records Sismos.csv --output equilibrio_resultados.csv --report taludes.html --charts fig
+```
+
+Opciones: `--workbook LIBRO.xlsx` (en lugar de los CSV), `--records`, `-o/--output RES.csv|.xlsx`,
+`--report OUT.docx|.html`, `--charts DIR`, `--title`, `--author`, `--lang es|en` y `--no-figures`. Con más de un
+análisis, `rockmass le` imprime `analysis <k> of <n>...` en stderr.
+
+Tiempos: con Hoek-Brown, una búsqueda circular de 20×20×11 tarda unos 10 a 15 s; con kh, ky por vueltas puede
+repetirla hasta 5 veces.
+
+Mira `examples/10-equilibrio-limite-newmark/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en

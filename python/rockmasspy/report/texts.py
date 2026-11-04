@@ -217,6 +217,7 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_missing": {"es": "Dato que falta", "en": "Missing data"},
     # --- Informe de taludes (cinemática, SMR, Q-slope) ---
     "slope_title": {"es": "Estabilidad de taludes en roca", "en": "Rock slope stability"},
+    "slope_title_le": {"es": "Estabilidad de taludes", "en": "Slope stability"},  # solo equilibrio límite
     "sl_s1": {"es": "Alcance", "en": "Scope"},
     "sl_s2": {"es": "Métodos y ediciones", "en": "Methods and editions"},
     "sl_s3": {"es": "Resultados", "en": "Results"},
@@ -326,6 +327,54 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "att_smr": {"es": "SMR clase IV o V", "en": "SMR class IV or V"},
     "att_qslope": {"es": "cara más empinada que β", "en": "face steeper than β"},
     "att_warnings": {"es": "avisos", "en": "warnings"},
+    # --- Equilibrio límite (3C) ---
+    "sl_no_slopes": {"es": "No se evaluaron taludes por cinemática, SMR ni Q-slope.",
+                     "en": "No slopes were assessed by kinematics, SMR or Q-slope."},
+    "le_scope": {
+        "es": "Además reúne el equilibrio límite 2D por tajadas (Ordinario, Bishop, Janbu, Spencer y "
+              "Morgenstern-Price/GLE) sobre la superficie crítica de cada análisis y, si se da un registro, el "
+              "coeficiente de fluencia ky y el desplazamiento de Newmark de bloque rígido. El FS y el desplazamiento "
+              "se informan sin juzgar su aceptación.",
+        "en": "It also gathers 2D limit equilibrium by slices (Ordinary, Bishop, Janbu, Spencer and "
+              "Morgenstern-Price/GLE) on the critical surface of each analysis and, when a record is given, the "
+              "yield coefficient ky and the rigid-block Newmark displacement. The FS and the displacement are "
+              "reported without judging their acceptance.",
+    },
+    "le_scope_only": {
+        "es": "Este documento reúne el equilibrio límite 2D por tajadas (Ordinario, Bishop, Janbu, Spencer y "
+              "Morgenstern-Price/GLE) sobre la superficie crítica de cada análisis y, si se da un registro, el "
+              "coeficiente de fluencia ky y el desplazamiento de Newmark de bloque rígido. El FS y el desplazamiento "
+              "se informan sin juzgar su aceptación: los criterios de aceptación llegan en la etapa 3D de la "
+              "librería, y el ingeniero decide.",
+        "en": "This document gathers 2D limit equilibrium by slices (Ordinary, Bishop, Janbu, Spencer and "
+              "Morgenstern-Price/GLE) on the critical surface of each analysis and, when a record is given, the "
+              "yield coefficient ky and the rigid-block Newmark displacement. The FS and the displacement are "
+              "reported without judging their acceptance: acceptance criteria come in stage 3D of the library, and "
+              "the engineer decides.",
+    },
+    "cap_le": {"es": "Equilibrio límite", "en": "Limit equilibrium"},
+    "h_fs_static": {"es": "FS estático", "en": "Static FS"},
+    "cap_le_surface": {"es": "Superficie crítica por análisis", "en": "Critical surface per analysis"},
+    "cap_le_warnings": {"es": "Avisos y cantidad de análisis de equilibrio límite que los tienen",
+                        "en": "Warnings and number of limit equilibrium analyses that have them"},
+    "h_analyses": {"es": "Análisis", "en": "Analyses"},
+    "h_le_surface": {"es": "Superficie", "en": "Surface"},
+    "h_le_method": {"es": "Método", "en": "Method"},
+    "h_lambda": {"es": "λ", "en": "λ"},
+    "h_ky": {"es": "ky", "en": "ky"},
+    "h_newmark": {"es": "Newmark (m)", "en": "Newmark (m)"},
+    "h_points": {"es": "Puntos (x y)", "en": "Points (x y)"},
+    "h_evaluated": {"es": "Evaluadas", "en": "Evaluated"},
+    "h_discarded": {"es": "Descartadas", "en": "Discarded"},
+    "le_surf_circular": {"es": "circular", "en": "circular"},
+    "le_surf_block": {"es": "búsqueda de bloque", "en": "block search"},
+    "le_surf_given": {"es": "dada", "en": "given"},
+    "fig_le_section": {"es": "Sección de equilibrio límite, análisis {n}", "en": "Limit equilibrium section, analysis {n}"},
+    "fig_newmark": {"es": "Desplazamiento de Newmark, análisis {n}", "en": "Newmark displacement, analysis {n}"},
+    "att_le_fs_below_1": {"es": "FS ≤ 1", "en": "FS ≤ 1"},
+    "att_le_warnings": {"es": "avisos", "en": "warnings"},
+    "le_attention": {"es": "Análisis de equilibrio límite que piden atención: {n} de {m}. Motivos (análisis): {why}.",
+                     "en": "Limit equilibrium analyses that need attention: {n} of {m}. Reasons (analyses): {why}."},
     "smr_class_1": {"es": "muy buena", "en": "very good"},
     "smr_class_2": {"es": "buena", "en": "good"},
     "smr_class_3": {"es": "normal", "en": "fair"},
