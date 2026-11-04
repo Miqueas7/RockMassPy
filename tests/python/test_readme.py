@@ -137,3 +137,18 @@ def test_readme_blocks_example(archivo, titulo):
     with contextlib.redirect_stdout(salida):
         exec(compile(codigo[0], archivo, "exec"), {})
     assert salida.getvalue().splitlines() == esperado
+
+
+LSECCION = [("README.md", "## Limit equilibrium and Newmark"), ("README.es.md", "## Equilibrio límite y Newmark")]
+
+
+@pytest.mark.parametrize("archivo,titulo", LSECCION)
+def test_readme_limit_equilibrium_example(archivo, titulo):
+    codigo = bloques(archivo, titulo)
+    assert len(codigo) == 1, f"{archivo}: expected one python block under {titulo!r}"
+    esperado = [ln.split("#", 1)[1].strip() for ln in codigo[0].splitlines() if ln.startswith("print(") and "#" in ln]
+    assert esperado == ["2.076", "2.072", "Spencer"]
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        exec(compile(codigo[0], archivo, "exec"), {})
+    assert salida.getvalue().splitlines() == esperado

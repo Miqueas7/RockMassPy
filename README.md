@@ -351,6 +351,69 @@ Options: `--blocks` (needs `--faces` and `--families`), `--sheet-blocks`, `--dis
 
 See `examples/09-bloques-probabilistico-berma/`.
 
+## Limit equilibrium and Newmark
+
+`assess_le(...)` and `rockmass le` compute the **factor of safety of a 2D section by vertical slices**: a pit slope, a
+pad or a waste dump, with layers, a piezometric line and a pseudo-static seismic coefficient. Per row of an
+`Analisis_LE` sheet:
+- the methods: Ordinary (Fellenius), Bishop simplified, Janbu simplified and corrected, Spencer and
+  Morgenstern-Price/GLE (half-sine or constant interslice function);
+- the slip surface: a **circular search** (grid of centres with radii and local refinement), a **block search** along a
+  weak layer, or a given polyline;
+- the strength at each slice base: Mohr-Coulomb or **non-linear Hoek-Brown** (Balmer envelope, from GSI and mi or from
+  mb, s and a);
+- water by `ru` or by a piezometric line (ponded water on the ground included), a tension crack with water and `kh`;
+- the **yield coefficient ky** (the kh that brings FS to 1) and the **rigid-block Newmark displacement** for an
+  acceleration record.
+
+Read this part twice:
+
+- **With seismic load, use Spencer or GLE.** Bishop does not balance horizontal forces, so a high kh separates it from
+  the rigorous methods (Slide2 ACADS 1(d), kh 0.15: Bishop 1.016, Spencer 0.991).
+- **The library never says "acceptable".** Only an FS at or below 1 (1e-9 margin) and the warnings change the exit
+  code; FS, ky and the Newmark displacement are reported, not judged. The acceptance criteria are phase 3D.
+- **Privacy:** `id_seccion`, `id_analisis`, `material`, `registro` and the line names appear only in the report tables
+  (the two ids also in the results file), never in the console, the figures or a message.
+
+```python
+import rockmasspy as rm
+
+# Fredlund and Krahn (1977), Slide2 verification problem 21, in psf, pcf and ft: c 600, phi 20, gamma 120, dry
+s = rm.LeSection()
+s.surface = [rm.Point2(x, y) for x, y in [(0, 60), (60, 60), (140, 20), (180, 20)]]
+m = rm.LeMaterial()
+m.unit_weight, m.cohesion, m.friction_deg = 120, 600, 20
+layer = rm.LeLayer()
+layer.bottom, layer.material = [], 0                  # a single layer: no bottom line
+s.layers, s.materials = [layer], [m]
+f = rm.SlipSurface()
+f.circle = rm.Circle(120, 90, 80)                     # xc, yc, R
+bishop = rm.le_factor_of_safety(s, f, rm.LeMethod.Bishop)
+spencer = rm.le_factor_of_safety(s, f, rm.LeMethod.Spencer)
+print(f"{bishop.factor_of_safety:.3f}")               # 2.076
+print(f"{spencer.factor_of_safety:.3f}")              # 2.072
+print(spencer.info.method_id)                         # Spencer
+```
+
+The sheets are `Geometria` (one row per vertex: `id_seccion`, `linea`, `x_m`, `y_m`; the line `superficie` is
+required and `piezometrica` optional), `Estratos` (`orden` 1 on top, `material`, `linea_base`), `Materiales_LE`
+(`mohr_coulomb` or `hoek_brown`), `Analisis_LE` (`metodos` separated by `;`, the first one searches; `superficie` =
+`circular`, `bloque` or `dada`; `kh`, `registro`) and `Sismos` (`registro`, `t_s`, `a_g` in g, constant step), as one
+xlsx or one CSV per sheet. `rm.le_counts` gives the counts, `rm.save_le_results` writes one row per method,
+`report.build_slope_report(..., le=...)` adds the limit-equilibrium tables and `report.le_figure` /
+`report.newmark_figure` draw the section and the Newmark record. From the command line (exit 0 if all is well, 1 on an
+input error, 2 if something asks for attention):
+
+```bash
+rockmass le --geometry Geometria.csv --layers Estratos.csv --materials Materiales_LE.csv --analyses Analisis_LE.csv \
+    --records Sismos.csv --output equilibrio_resultados.csv --report taludes.html --charts fig
+```
+
+Options: `--workbook LIBRO.xlsx` (instead of the CSV files), `--records`, `-o/--output RES.csv|.xlsx`,
+`--report OUT.docx|.html`, `--charts DIR`, `--title`, `--author`, `--lang es|en` and `--no-figures`.
+
+See `examples/10-equilibrio-limite-newmark/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
