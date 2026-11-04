@@ -20,7 +20,7 @@ from pathlib import Path
 from .batch import write_table
 from .blocks import BlockResult
 from .excel_io import _where
-from .limit_equilibrium import LeAnalysisResult, le_static_fs
+from .limit_equilibrium import LeAnalysisResult, le_fs, le_static_fs
 from .normative import (CONSEQUENCES, RANGE_POLICIES, SCALES, NormativeProfile, NormItem, _check_date)
 from .slopes import _cargar, _rango
 from .verify import _OPS
@@ -147,7 +147,7 @@ def _le_value(rule, r: LeAnalysisResult):
         return _lowest(le_static_fs(r), "static FS")
     if not _pseudo(r):
         return None, "no pseudo-static analysis", ""
-    return _lowest([x.factor_of_safety for x in r.results], "pseudo-static FS")
+    return _lowest(le_fs(r), "pseudo-static FS")
 
 
 def _check(kind, oid, order, item, policy, obtained, reason, note, newmark=None):
@@ -177,8 +177,33 @@ def _empty(kind, oid, order, rule, items, reason):
                           "", first.force, first.verification, None)
 
 
+def _assigner(assignments: Mapping):
+    """(tipo, id) -> (escala, consecuencia) normalizadas; vacía o ausente = None."""
+    def assign(key):
+        v = assignments.get(key)
+        if v is None:
+            return None, None
+        if isinstance(v, str) or len(v) != 2:
+            raise ValueError("assignments: each value must be a pair (scale, consequence)")
+        return _word(v[0], SCALES, "scale"), _word(v[1], CONSEQUENCES, "consequence")
+    return assign
+
+
+def criteria_assignments(blocks: Iterable[BlockResult] = (),
+                         le: Iterable[LeAnalysisResult] = ()) -> dict:
+    """El `assignments` de `assess_criteria`, de las columnas `escala` y `consecuencia` de `Bloques` y `Analisis_LE`."""
+    out = {("berm" if r.model == "berm" else "block", r.id_bloque): (r.escala, r.consecuencia) for r in blocks}
+    out.update({("le", r.id_analisis): (r.escala, r.consecuencia) for r in le})
+    return out
+
+
+def return_periods(le: Iterable[LeAnalysisResult]) -> dict:
+    """El `return_periods` de `assess_criteria`: {id_analisis: periodo_retorno_anios} de los análisis que lo dan."""
+    return {r.id_analisis: r.periodo_retorno_anios for r in le if r.periodo_retorno_anios is not None}
+
+
 def _pseudostatic_present(item, le, assign, return_periods):
-    """art. 264 (la usa la tarea 3 con PE-264): algún análisis global con kh > 0 y Tr >= valor."""
+    """art. 264 (también la usa `verify` con PE-264): algún análisis global con kh > 0 y Tr >= valor."""
     if not le:
         return "not_verifiable", "no limit equilibrium analyses given"
     scales = [assign(("le", r.id_analisis))[0] for r in le]
@@ -211,14 +236,7 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
     for i in items:
         by_rule.setdefault(i.check, []).append(i)
 
-    def assign(key):
-        v = assignments.get(key)
-        if v is None:
-            return None, None
-        if isinstance(v, str) or len(v) != 2:
-            raise ValueError("assignments: each value must be a pair (scale, consequence)")
-        return _word(v[0], SCALES, "scale"), _word(v[1], CONSEQUENCES, "consequence")
-
+    assign = _assigner(assignments)
     out: list[CriterionCheck] = []
     objects = [("berm" if r.model == "berm" else "block", r.id_bloque, r) for r in blocks]
     le = list(le)

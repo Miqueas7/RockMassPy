@@ -11,6 +11,10 @@ sentidos con ese ky. Una piezométrica que no cubre la superficie lanza (hoja `G
 análisis busca. Los mensajes de cada método llevan la palabra de la hoja («ordinario: ...») sin el prefijo del núcleo
 y no se repiten entre métodos. Hoek-Brown: `sigma_ci_mpa` pasa a
 kPa (× 1000), porque la sección va en kN y m. Una sola regla de atención (R14): FS < 1 + 1e-9 o algún aviso.
+Sarma (3D): `superficie = sarma` toma `linea_superficie` como base y `sarma_angulos` (un ángulo por vértice interior,
+en grados, antihorario desde +x, separados por ';'; vacío = 90 en todos; `opt` = optimizar desde 90); `metodos` se
+ignora con nota; con kh > 0 el FS estático es Sarma con kh = 0 sobre las mismas cuñas; ky = Kc y Newmark corre con él.
+`escala`, `consecuencia` y `periodo_retorno_anios` son opcionales y van a `rockmasspy.criteria` (no se validan aquí).
 Privacidad: `id_seccion`, `id_analisis`, `material`, `registro` y los nombres de línea nunca van a un mensaje, a un aviso
 ni a un repr; el archivo de resultados lleva solo `id_analisis` e `id_seccion`. Las columnas ajenas no se leen.
 """
@@ -41,7 +45,7 @@ _METHODS = {"ordinario": rm.LeMethod.Ordinary, "bishop": rm.LeMethod.Bishop, "ja
             "janbu_corregido": rm.LeMethod.JanbuCorrected, "spencer": rm.LeMethod.Spencer,
             "gle": rm.LeMethod.MorgensternPrice}
 _METHOD_WORD = {v: k for k, v in _METHODS.items()}
-_SURFACES = {"circular": "circular", "bloque": "block", "dada": "given"}
+_SURFACES = {"circular": "circular", "bloque": "block", "dada": "given", "sarma": "sarma"}
 _SHEET_SURFACE = {v: k for k, v in _SURFACES.items()}
 _FUNCTIONS = {"medio_seno": rm.InterSliceFunction.HalfSine, "constante": rm.InterSliceFunction.Constant}
 _MODELS = ("mohr_coulomb", "hoek_brown")
@@ -112,6 +116,10 @@ class AnalysisRow:
     tajadas: float | None
     registro: str | None = field(repr=False)
     escala_registro: float | None
+    sarma_angulos: tuple | str | None  # normalizado: None (90 en todos), "opt" o la tupla de ángulos
+    escala: str | None
+    consecuencia: str | None
+    periodo_retorno_anios: float | None
     fila: int
     hoja: str = field(default=ANALYSES_SHEET, repr=False, compare=False)
 
@@ -135,7 +143,7 @@ _GEO_TEXT = {"id_seccion", "linea"}
 _LAYER_TEXT = {"id_seccion", "material", "linea_base"}
 _MAT_TEXT = {"material", "modelo"}
 _AN_TEXT = {"id_analisis", "id_seccion", "metodos", "superficie", "linea_debil", "linea_superficie", "funcion",
-            "registro"}
+            "registro", "sarma_angulos", "escala", "consecuencia"}
 _REC_TEXT = {"registro"}
 
 # columna: (mínimo, máximo, mínimo abierto, máximo abierto)
@@ -148,10 +156,10 @@ _MAT_RANGES = {
 _AN_RANGES = {
     "kh": (0, 1, False, False), "peso_agua_kn_m3": (0, _INF, True, False), "grieta_m": (0, _INF, True, False),
     "grieta_llenado": (0, 1, False, False), "tajadas": (5, _INF, False, False),
-    "escala_registro": (0, _INF, True, False),
+    "escala_registro": (0, _INF, True, False), "periodo_retorno_anios": (0, _INF, True, False),
 }
 _AN_REQUIRED = {"circular": ("malla_x_min", "malla_x_max", "malla_y_min", "malla_y_max"),
-                "bloque": ("linea_debil",), "dada": ("linea_superficie",)}
+                "bloque": ("linea_debil",), "dada": ("linea_superficie",), "sarma": ("linea_superficie",)}
 
 
 def _ranges(vals, sheet, n, ranges):
@@ -200,18 +208,45 @@ def _material(vals, n, sheet):
     return MaterialRow(**vals, fila=n, hoja=sheet)
 
 
+def _sarma_angles(text, sarma, bad):
+    """None (90 en todos), "opt" (optimizar desde 90) o la tupla de ángulos en (0, 180); el error no lleva el valor."""
+    if text is None:
+        return None
+    if not sarma:
+        bad("sarma_angulos", "only for superficie 'sarma'")
+    if _word(text) == "opt":
+        return "opt"
+    try:
+        out = tuple(float(x) for x in text.split(";"))
+    except ValueError:
+        out = (math.nan,)
+    if not all(math.isfinite(x) for x in out):
+        bad("sarma_angulos", "must be a ';'-separated list of angles in degrees, or 'opt'")
+    if not all(0 < x < 180 for x in out):
+        bad("sarma_angulos", "each angle must be within (0, 180)")
+    return out
+
+
 def _analysis(vals, n, sheet):
     def bad(c, motivo):
         raise ValueError(f"{_where(sheet, n, c)}: {motivo}")
 
     _floats(vals, _AN_TEXT, sheet, n)
-    words = [_word(w) for w in vals["metodos"].split(";")]
-    if any(w not in _METHODS for w in words):
-        bad("metodos", f"must be a ';'-separated list of {', '.join(_METHODS)}")
-    vals["metodos"] = ";".join(dict.fromkeys(words))
     vals["superficie"] = _word(vals["superficie"])
+    sarma = vals["superficie"] == "sarma"
+    if not sarma:  # en Sarma `metodos` no aplica: se ignora (con nota) y puede venir vacío
+        if vals["metodos"] is None:
+            bad("metodos", "required value is empty")
+        words = [_word(w) for w in vals["metodos"].split(";")]
+        if any(w not in _METHODS for w in words):
+            bad("metodos", f"must be a ';'-separated list of {', '.join(_METHODS)}")
+        vals["metodos"] = ";".join(dict.fromkeys(words))
     if vals["superficie"] not in _SURFACES:
         bad("superficie", f"must be one of {', '.join(_SURFACES)}")
+    vals["sarma_angulos"] = _sarma_angles(vals["sarma_angulos"], sarma, bad)
+    for c in ("escala", "consecuencia"):  # se validan contra el perfil en assess_criteria, no aquí
+        if vals[c] is not None:
+            vals[c] = _word(vals[c]) or None
     _ranges(vals, sheet, n, _AN_RANGES)
     for c in _AN_REQUIRED[vals["superficie"]]:
         if vals[c] is None:
@@ -359,7 +394,10 @@ def _index(inp: LeInputs):
             bad("registro", "no record with this id in Sismos")
         if a.base_modelo_m is not None and a.base_modelo_m >= min(p.y for p in s.lines[s.ground]):
             bad("base_modelo_m", "must be below the ground surface")
-        if a.superficie != "dada" and s.piezometric is not None:
+        if a.superficie == "sarma" and isinstance(a.sarma_angulos, tuple):
+            if len(a.sarma_angulos) != len(s.lines[a.linea_superficie]) - 2:
+                bad("sarma_angulos", "give one angle per interior vertex of linea_superficie")
+        if a.superficie not in ("dada", "sarma") and s.piezometric is not None:
             # una piezométrica corta descartaría en silencio las superficies que la cruzan (como en el núcleo)
             g, p = s.lines[s.ground], s.lines[s.piezometric]
             short_start = p[0].x > g[0].x + 1e-9
@@ -406,7 +444,8 @@ def load_le_inputs(source, *, sheets: Mapping[str, str] | None = None) -> LeInpu
         lay = leer(LAYERS_SHEET, LAYER_COLUMNS, _LAYER_TEXT, ("id_seccion", "orden", "material"), None, _layer)
         mat = leer(MATERIALS_SHEET, MATERIAL_COLUMNS, _MAT_TEXT, ("material", "modelo", "peso_unitario_kn_m3"),
                    "material", _material)
-        an = leer(ANALYSES_SHEET, ANALYSIS_COLUMNS, _AN_TEXT, ("id_analisis", "id_seccion", "metodos", "superficie"),
+        # `metodos` se exige en la fila (salvo en Sarma)
+        an = leer(ANALYSES_SHEET, ANALYSIS_COLUMNS, _AN_TEXT, ("id_analisis", "id_seccion", "superficie"),
                   "id_analisis", _analysis)
         rec = ()
         need = next((a for a in an if a.registro is not None), None)
@@ -478,10 +517,24 @@ class LeAnalysisResult:
     # y los mismos métodos con kh = 0 sobre ella, paralelo a `results`; con kh = 0, None y vacío
     static_surface: "rm.SlipSurface | None" = field(default=None, repr=False)
     static_results: tuple = field(default=(), repr=False)
+    # superficie sarma (3D): `results` queda vacío; el FS y Kc salen de aquí; con kh > 0, `sarma_static` es Sarma con
+    # kh = 0 sobre las mismas cuñas
+    sarma: "rm.SarmaResult | None" = field(default=None, repr=False)
+    sarma_static: "rm.SarmaResult | None" = field(default=None, repr=False)
+    escala: str | None = field(default=None, repr=False)
+    consecuencia: str | None = field(default=None, repr=False)
+    periodo_retorno_anios: float | None = field(default=None, repr=False)
 
     @property
     def kh(self) -> float | None:
         return None if self.section is None else self.section.kh
+
+    @property
+    def ky(self) -> float | None:
+        """ky del análisis: Kc en Sarma; si no, el de `yield_`."""
+        if self.sarma is not None:
+            return self.sarma.critical_acceleration
+        return None if self.yield_ is None else self.yield_.ky
 
     @property
     def ky_on_critical(self) -> bool:
@@ -490,7 +543,7 @@ class LeAnalysisResult:
 
     @property
     def fs_min(self) -> float | None:
-        fs = [r.factor_of_safety for r in self.results if r.factor_of_safety is not None]
+        fs = [x for x in le_fs(self) if x is not None]
         return min(fs) if fs else None
 
     @property
@@ -689,26 +742,73 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
         else:
             notes += [_ky(t) for t in yld.notes]
             methods.append(yld.info)
-    if a.registro is not None:
-        if yld is None or yld.ky is None:
-            notes.append("Newmark not run: ky not found")
-        elif yld.ky <= 0:
-            notes.append("Newmark not run: ky is 0 (static factor of safety at or below 1)")
-        else:
-            acc = accs[a.registro]
-            ni = rm.NewmarkInput()
-            ni.dt_s, ni.acceleration_g, ni.ky = acc.dt_s, list(acc.acceleration_g), yld.ky
-            ni.scale = 1.0 if a.escala_registro is None else a.escala_registro
-            ni.both_directions = True
-            nm = rm.newmark_rigid_block(ni)
-            record = Accelerogram(acc.dt_s, tuple(ni.scale * x for x in acc.acceleration_g))
-            warnings += [f"newmark: {w}" for w in nm.warnings]
-            notes += [f"newmark: {t}" for t in nm.notes]
-            methods.append(nm.info)
+    nm, record = _newmark(a, accs, None if yld is None else yld.ky, warnings, notes, methods)
     uniq = {m.method_id: m for m in methods}
     return LeAnalysisResult(a.id_analisis, a.id_seccion, order, _SURFACES[a.superficie], results, search, yld, nm,
                             _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record, ysurf,
-                            ssurf, static_results)
+                            ssurf, static_results, escala=a.escala, consecuencia=a.consecuencia,
+                            periodo_retorno_anios=a.periodo_retorno_anios)
+
+
+def _newmark(a: AnalysisRow, accs, ky, warnings, notes, methods):
+    """Newmark de bloque rígido en los dos sentidos con ese ky, si la fila nombra un `registro`: (resultado, registro)."""
+    if a.registro is None:
+        return None, None
+    if ky is None:
+        notes.append("Newmark not run: ky not found")
+        return None, None
+    if ky <= 0:
+        notes.append("Newmark not run: ky is 0 (static factor of safety at or below 1)")
+        return None, None
+    acc = accs[a.registro]
+    ni = rm.NewmarkInput()
+    ni.dt_s, ni.acceleration_g, ni.ky = acc.dt_s, list(acc.acceleration_g), ky
+    ni.scale = 1.0 if a.escala_registro is None else a.escala_registro
+    ni.both_directions = True
+    nm = rm.newmark_rigid_block(ni)
+    warnings += [f"newmark: {w}" for w in nm.warnings]
+    notes += [f"newmark: {t}" for t in nm.notes]
+    methods.append(nm.info)
+    return nm, Accelerogram(acc.dt_s, tuple(ni.scale * x for x in acc.acceleration_g))
+
+
+_SARMA_STATIC_NOTE = "static FS: Sarma with kh = 0 on the same wedges"
+
+
+def _sarma_input(base, angles):
+    i = rm.SarmaInput()
+    i.base, i.interface_angles_deg = base, list(angles)
+    return i
+
+
+def _assess_sarma(order, a: AnalysisRow, s: _Section, materials, accs):
+    """Sarma no vertical sobre `linea_superficie`: FS, Kc como ky (sin vueltas R17: la superficie es dada) y Newmark."""
+    warnings, notes, methods = [], [], []
+    if a.metodos is not None:
+        notes.append("metodos does not apply to Sarma; ignored")
+    kh = a.kh or 0.0
+    sec = _section(s, a, materials, kh, methods, warnings)
+    base = s.lines[a.linea_superficie]
+    opts = rm.SarmaOptions()
+    opts.optimize_angles = a.sarma_angulos == "opt"
+    angles = a.sarma_angulos if isinstance(a.sarma_angulos, tuple) else (90.0,) * (len(base) - 2)
+    sr = rm.sarma_fs(sec, _sarma_input(base, angles), opts)
+    warnings += [f"sarma: {w}" for w in sr.warnings]
+    notes += [f"sarma: {t}" for t in sr.notes]
+    methods.append(sr.info)
+    static = None
+    if kh > 0:
+        static = rm.sarma_fs(_section(s, a, materials, 0.0, [], []), _sarma_input(base, sr.interface_angles_deg))
+        warnings += [f"sarma: {w}" for w in static.warnings]
+        notes.append(_SARMA_STATIC_NOTE)
+    nm, record = _newmark(a, accs, sr.critical_acceleration, warnings, notes, methods)
+    surface = rm.SlipSurface()
+    surface.polyline = base
+    uniq = {m.method_id: m for m in methods}
+    return LeAnalysisResult(a.id_analisis, a.id_seccion, order, "sarma", (), None, None, nm, _unique(warnings),
+                            _unique(notes), tuple(uniq.values()), surface, sec, record, sarma=sr, sarma_static=static,
+                            escala=a.escala, consecuencia=a.consecuencia,
+                            periodo_retorno_anios=a.periodo_retorno_anios)
 
 
 # nombres del núcleo que pueden salir en un error -> columna de Analisis_LE
@@ -716,7 +816,8 @@ _ERR_NAMES = {"model_base_y": "base_modelo_m", "water_unit_weight": "peso_agua_k
               "crack.water_fill": "grieta_llenado", "n_slices": "tajadas", "weak_line": "linea_debil",
               "polyline": "linea_superficie", "slip_surface": "linea_superficie", "grid.x_min": "malla_x_min",
               "grid.x_max": "malla_x_max",
-              "grid.y_min": "malla_y_min", "grid.y_max": "malla_y_max", "scale": "escala_registro"}
+              "grid.y_min": "malla_y_min", "grid.y_max": "malla_y_max", "scale": "escala_registro",
+              "interface_angles_deg": "sarma_angulos"}
 
 
 def _clean(msg: str) -> str:
@@ -740,7 +841,8 @@ def assess_le(source, *, sheets: Mapping[str, str] | None = None,
         if progress is not None:
             progress(order, len(inp.analyses))
         try:
-            out.append(_assess_one(order, a, sections[a.id_seccion], materials, accs))
+            assess = _assess_sarma if a.superficie == "sarma" else _assess_one
+            out.append(assess(order, a, sections[a.id_seccion], materials, accs))
         except ValueError as e:
             raise ValueError(f"sheet '{a.hoja}', row {a.fila}: {_clean(str(e))}") from None
     return out
@@ -759,7 +861,7 @@ def le_counts(results: Iterable[LeAnalysisResult]) -> dict[str, int]:
         out["analyses"] += 1
         out["with_fs"] += r.fs_min is not None
         out["fs_below_1"] += "att_le_fs_below_1" in le_attention(r)
-        out[r.surface_type] += 1
+        out[r.surface_type] = out.get(r.surface_type, 0) + 1  # «sarma» sale solo si hay alguno (forma de la 3C)
         out["with_newmark"] += r.newmark is not None
         out["warnings"] += len(r.warnings)
         out["notes"] += len(r.notes)
@@ -782,9 +884,18 @@ def _points(f) -> str | None:
     return "; ".join(f"{p.x:.3f} {p.y:.3f}" for p in f.polyline)
 
 
+def le_fs(r: LeAnalysisResult) -> list:
+    """FS de cada método (con el kh del análisis); en Sarma, uno solo."""
+    if r.sarma is not None:
+        return [r.sarma.factor_of_safety]
+    return [x.factor_of_safety for x in r.results]
+
+
 def le_static_fs(r: LeAnalysisResult) -> list:
-    """FS estático de cada método, paralelo a `results`: con kh > 0 el de `static_results` (sobre la crítica
-    estática); con kh = 0, el mismo FS."""
+    """FS estático de cada método, paralelo a `le_fs`: con kh > 0 el de `static_results` (sobre la crítica
+    estática) o, en Sarma, el de `sarma_static`; con kh = 0, el mismo FS."""
+    if r.sarma is not None:
+        return [(r.sarma if r.sarma_static is None else r.sarma_static).factor_of_safety]
     return [None if x is None else x.factor_of_safety for x in (r.static_results or r.results)]
 
 
@@ -796,8 +907,14 @@ def save_le_results(results: Iterable[LeAnalysisResult], path) -> Path:
     rows = []
     for r in results:
         c = r.surface.circle if r.surface is not None else None
-        s, y, nm = r.search, r.yield_, r.newmark
-        ky_nm = [None if y is None else y.ky, None if nm is None else nm.displacement_m]
+        s, nm = r.search, r.newmark
+        ky_nm = [r.ky, None if nm is None else nm.displacement_m]
+        if r.sarma is not None:  # una fila; las columnas que no aplican a Sarma quedan vacías (R9)
+            fs, fs0 = le_fs(r)[0], le_static_fs(r)[0]
+            rows.append([r.id_analisis, r.id_seccion, "sarma", "sarma", r.kh, fs, fs0,
+                         None if fs is None else _yes(is_failure(fs)), None, None, None, None, None,
+                         _points(r.surface), None, None, *ky_nm, " | ".join(r.warnings), " | ".join(r.notes)])
+            continue
         for k, (x, fs0) in enumerate(zip(r.results, le_static_fs(r))):
             fs = x.factor_of_safety
             rows.append([r.id_analisis, r.id_seccion, _SHEET_SURFACE[r.surface_type], _METHOD_WORD[x.method], r.kh,

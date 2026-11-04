@@ -85,7 +85,7 @@ def test_ndep_dmirs_ryan_values():
 def test_pe_profile_still_loads():
     pe = get_profile("PE-DS024-2016")
     assert pe.range_policy == "conservative" and all(i.value_range is None for i in pe.items)
-    assert pe.version("PE-264", "2026-11-04").check == "none"
+    assert pe.version("PE-264", "2026-11-04").check == "pseudostatic_analysis_present"  # tarea 3 (R8)
 
 
 # ---------------------------------------------------------------- esquema: value_range y range_policy

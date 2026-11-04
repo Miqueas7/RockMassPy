@@ -369,6 +369,7 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "le_surf_circular": {"es": "circular", "en": "circular"},
     "le_surf_block": {"es": "búsqueda de bloque", "en": "block search"},
     "le_surf_given": {"es": "dada", "en": "given"},
+    "le_surf_sarma": {"es": "Sarma (cuñas no verticales)", "en": "Sarma (non-vertical wedges)"},
     "fig_le_section": {"es": "Sección de equilibrio límite, análisis {n}", "en": "Limit equilibrium section, analysis {n}"},
     "fig_newmark": {"es": "Desplazamiento de Newmark, análisis {n}", "en": "Newmark displacement, analysis {n}"},
     "att_le_fs_below_1": {"es": "FS ≤ 1", "en": "FS ≤ 1"},

@@ -232,7 +232,12 @@ def _verify(a) -> int:
         results = add_q_chart_reference(results, esr, edition=a.q_edition)
     stopes = assess_stope_surfaces(load_stope_surfaces(a.surfaces)) if a.surfaces else ()
     design = load_design_inputs(a.design) if a.design else None
-    v = verify(profile, as_of=as_of, tables=tables, results=results, stopes=stopes, design=design)
+    le = ()
+    if a.workbook or a.records or any(getattr(a, attr) for attr, _, _ in _LE_CSV):  # para el art. 264
+        from .limit_equilibrium import assess_le
+
+        le = assess_le(_le_source(a, "--le"))
+    v = verify(profile, as_of=as_of, tables=tables, results=results, stopes=stopes, design=design, le=le)
     c = v.counts()
     print(f"profile: {profile.profile_id} (as of {v.as_of})\nrequirements: {len(v.findings)}")
     for s, label in (("complies", "complies"), ("does_not_comply", "does not comply"), ("attention", "attention"),
@@ -370,16 +375,17 @@ _LE_CSV = (("geometry", "--geometry", "Geometria"), ("layers", "--layers", "Estr
            ("materials", "--materials", "Materiales_LE"), ("analyses", "--analyses", "Analisis_LE"))
 
 
-def _le_source(a):
-    """--workbook o los CSV por hoja; todo se valida antes de leer archivos."""
+def _le_source(a, workbook_flag="--workbook"):
+    """--workbook (en `verify`, --le) o los CSV por hoja; todo se valida antes de leer archivos."""
     given = [flag for attr, flag, _ in _LE_CSV if getattr(a, attr)]
     if a.workbook:
         if given or a.records:
-            raise ValueError(f"--workbook goes alone; drop {(given or ['--records'])[0]}")
+            raise ValueError(f"{workbook_flag} goes alone; drop {(given or ['--records'])[0]}")
         return a.workbook
     if len(given) != len(_LE_CSV):
         missing = [flag for attr, flag, _ in _LE_CSV if not getattr(a, attr)]
-        raise ValueError(f"give --workbook, or --geometry, --layers, --materials and --analyses (missing {missing[0]})")
+        raise ValueError(f"give {workbook_flag}, or --geometry, --layers, --materials and --analyses "
+                         f"(missing {missing[0]})")
     src = {sheet: getattr(a, attr) for attr, _, sheet in _LE_CSV}
     if a.records:
         src["Sismos"] = a.records
@@ -613,6 +619,7 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--q-edition", choices=("Q-NGI-2025", "Q-NGI-2015"), default="Q-NGI-2025")
     c.add_argument("--surfaces", metavar="SUPERFICIES")
     c.add_argument("--design", nargs="+", metavar="FILE")
+    _le_inputs(c, "--le")
     c.add_argument("--report", metavar="OUT.docx|.html")
     c.add_argument("--title")
     c.add_argument("--author")
@@ -642,13 +649,7 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--blocks-output", metavar="RES.csv|.xlsx")
     c.set_defaults(fn=_slope)
     c = sub.add_parser("le", help="2D limit equilibrium, critical slip surface, ky and Newmark")
-    c.add_argument("--workbook", metavar="LIBRO.xlsx", help="workbook with the sheets Geometria, Estratos, "
-                   "Materiales_LE, Analisis_LE and Sismos")
-    c.add_argument("--geometry", metavar="GEOMETRIA.csv")
-    c.add_argument("--layers", metavar="ESTRATOS.csv")
-    c.add_argument("--materials", metavar="MATERIALES.csv")
-    c.add_argument("--analyses", metavar="ANALISIS.csv")
-    c.add_argument("--records", metavar="SISMOS.csv", help="acceleration records for Newmark (with the CSV files)")
+    _le_inputs(c, "--workbook")
     c.add_argument("-o", "--output", metavar="RES.csv|.xlsx")
     c.add_argument("--report", metavar="OUT.docx|.html")
     c.add_argument("--charts", metavar="DIR")
@@ -658,6 +659,17 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--no-figures", action="store_true")
     c.set_defaults(fn=_le)
     return p
+
+
+def _le_inputs(c, workbook_flag: str) -> None:
+    """Entradas de equilibrio límite: las mismas en `le` (--workbook) y en `verify` (--le, para el art. 264)."""
+    c.add_argument(workbook_flag, dest="workbook", metavar="LIBRO.xlsx", help="workbook with the sheets Geometria, "
+                   "Estratos, Materiales_LE, Analisis_LE and Sismos")
+    c.add_argument("--geometry", metavar="GEOMETRIA.csv")
+    c.add_argument("--layers", metavar="ESTRATOS.csv")
+    c.add_argument("--materials", metavar="MATERIALES.csv")
+    c.add_argument("--analyses", metavar="ANALISIS.csv")
+    c.add_argument("--records", metavar="SISMOS.csv", help="acceleration records for Newmark (with the CSV files)")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

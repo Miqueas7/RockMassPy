@@ -235,20 +235,37 @@ _RULES = {
     "refuge_area_per_person": _refuge(_area), "walkway_spacing": _walkway, "qc_ratio": _qc, "fs_minimum": _fs,
     "standup_time": _standup,
 }
-# los criterios de aceptación de taludes se evalúan con rockmasspy.criteria.assess_criteria, no aquí
+
+
+def _pseudostatic(item, ctx):
+    """art. 264 (PE-264) con la misma regla de `criteria`: un análisis global con kh > 0 y Tr >= valor."""
+    from .criteria import _assigner, _pseudostatic_present, criteria_assignments, return_periods
+
+    status, reason = _pseudostatic_present(item, ctx.le, _assigner(criteria_assignments(le=ctx.le)),
+                                           return_periods(ctx.le))
+    if status == "meets":
+        return "complies", (f"a pseudo-static analysis of the overall slope is given with a return period "
+                            f"{_limit(item)}; the library does not derive kh from the seismic hazard")
+    return (_fail(item) if status == "fails" else "not_verifiable"), reason
+
+
+_RULES["pseudostatic_analysis_present"] = _pseudostatic
+# los demás criterios de aceptación de taludes se evalúan con rockmasspy.criteria.assess_criteria, no aquí
 _RULES.update(dict.fromkeys(
-    ("slope_fs_static", "slope_fs_pseudostatic", "slope_pof", "berm_reliability", "deformation_required",
-     "pseudostatic_analysis_present"),
+    ("slope_fs_static", "slope_fs_pseudostatic", "slope_pof", "berm_reliability", "deformation_required"),
     lambda item, ctx: ("not_verifiable", "slope acceptance criterion; evaluate it with assess_criteria")))
 
 
 def verify(profile: NormativeProfile, *, as_of: str | None = None, tables: Sequence[LaborTable] = (),
            results: Sequence[TramoResult] = (), stopes: Sequence[StopeSurfaceResult] = (),
-           design: DesignInputs | None = None, report=None) -> VerificationResult:
-    """Un hallazgo por requisito, en el orden del perfil. Un incumplimiento nunca lanza; solo los datos imposibles."""
+           design: DesignInputs | None = None, report=None, le: Sequence = ()) -> VerificationResult:
+    """Un hallazgo por requisito, en el orden del perfil. Un incumplimiento nunca lanza; solo los datos imposibles.
+
+    `le`: resultados de `assess_le` (3C/3D), para el art. 264 (`pseudostatic_analysis_present`), con la escala y el
+    período de retorno de cada análisis."""
     as_of = datetime.date.today().isoformat() if as_of is None else _check_date(as_of, "as_of")
     ctx = SimpleNamespace(tables=tuple(tables), results=tuple(results), stopes=tuple(stopes), design=design,
-                          report=report)
+                          report=report, le=tuple(le))
     findings = []
     for iid in profile.item_ids():
         if profile.versions(iid)[0].check == "esr":  # parámetro, no requisito
