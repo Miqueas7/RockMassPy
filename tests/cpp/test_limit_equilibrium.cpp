@@ -339,16 +339,16 @@ TEST(LimitEquilibrium, InvalidInputsNameTheField) {
         s.materials[0].model = StrengthModel::HoekBrown;
         s.materials[0].hb = hb_params(50, 10, 0);
     }, "materials[0].sigma_ci");
-    // lo que llega en las tareas 2 y 3 no da un número
-    bad([](LeSection& s, SlipSurface&, LeOptions&) { s.crack = LeTensionCrack{2.0, 0.5}; }, "not implemented yet (task 2)");
-    bad([](LeSection& s, SlipSurface&, LeOptions&) { s.piezometric = std::vector<Point2>{{0, 50}, {180, 10}}; },
-        "not implemented yet (task 2)");
+    bad([](LeSection& s, SlipSurface&, LeOptions&) { s.piezometric = std::vector<Point2>{{0, 50}, {180, kNan}}; },
+        "piezometric[1].y");
+    bad([](LeSection& s, SlipSurface&, LeOptions&) { s.piezometric = std::vector<Point2>{{50, 50}, {180, 10}}; },
+        "piezometric");
+    // lo que llega en la tarea 3 no da un número
     bad([](LeSection& s, SlipSurface&, LeOptions&) {
         s.materials[0].model = StrengthModel::HoekBrown;
         s.materials[0].hb = hb_params(50, 10, 0);
         s.materials[0].sigma_ci = 50.0;
     }, "not implemented yet (task 3)");
-    has([] { le_factor_of_safety(fk(), fk_circle(), LeMethod::JanbuCorrected); }, "not implemented yet (task 2)");
 }
 
 TEST(LimitEquilibrium, InterSliceFunctions) {
@@ -558,4 +558,225 @@ TEST(LimitEquilibrium, ReviewOptionChecks) {
                       .find("function_points"),
                   std::string::npos);
     }
+}
+
+// --- Tarea 2: agua, grieta de tracción y Janbu corregido ---
+
+namespace {
+const LeMethod kAllMethods[] = {LeMethod::Ordinary, LeMethod::Bishop, LeMethod::JanbuSimplified,
+                                LeMethod::JanbuCorrected, LeMethod::Spencer, LeMethod::MorgensternPrice};
+
+// ACADS 1(b), Slide problema 2: geometría de 1(a), c 32, φ 10, γ 20, grieta de 2c/(γ√Ka) = 3.814 m llena de agua
+LeSection acads1b(double fill = 1.0) {
+    auto s = one_layer({{20, 25}, {30, 25}, {50, 35}, {70, 35}}, mc(20, 32, 10));
+    s.model_base_y = 20;
+    s.crack = LeTensionCrack{3.814, fill};
+    return s;
+}
+// Círculo crítico de Bishop hallado con una búsqueda propia (malla de centros (31-47) x (34-49) como la de Slide,
+// 21 radios por centro y afinado por patrón hasta 0.001 m), llamando a le_factor_of_safety.
+SlipSurface acads1b_circle() { return circle(37.45, 44.5, 20.875); }
+}  // namespace
+
+// Slide: Bishop 1.596, Spencer y GLE 1.592 (referencia 1.65); recalculado en el círculo de la búsqueda propia:
+// Bishop 1.5915, Spencer 1.5879, M-P 1.5885. La grieta corta la masa en x = 53.53, a 3.814 m bajo la cresta.
+TEST(LimitEquilibrium, Acads1bTensionCrackWithWater) {
+    const auto f = acads1b_circle();
+    const double b = fs(acads1b(), f, LeMethod::Bishop), sp = fs(acads1b(), f, LeMethod::Spencer),
+                 mp = fs(acads1b(), f, LeMethod::MorgensternPrice);
+    EXPECT_NEAR(b, 1.596, 0.02 * 1.596);
+    EXPECT_NEAR(sp, 1.592, 0.02 * 1.592);
+    EXPECT_NEAR(mp, 1.592, 0.02 * 1.592);
+    EXPECT_NEAR(b, 1.5915, 2e-3);
+    EXPECT_NEAR(sp, 1.5879, 2e-3);
+    const auto r = run(acads1b(), f, LeMethod::Bishop);
+    EXPECT_NEAR(r.slices.back().x_right, 53.528, 1e-3);
+    EXPECT_NEAR(r.slices.back().base_y_right, 35.0 - 3.814, 1e-9);
+    // el agua de la grieta baja el FS; sin grieta es mayor
+    EXPECT_LT(b, fs(acads1b(0.0), f, LeMethod::Bishop));
+    auto none = acads1b();
+    none.crack.reset();
+    EXPECT_LT(fs(acads1b(0.0), f, LeMethod::Bishop), fs(none, f, LeMethod::Bishop));
+    // el Ordinario dice cómo trata la fuerza del agua
+    const auto o = run(acads1b(), f, LeMethod::Ordinary);
+    EXPECT_NE(std::find_if(o.notes.begin(), o.notes.end(),
+                           [](const std::string& n) { return n.find("crack water force") != std::string::npos; }),
+              o.notes.end());
+}
+
+TEST(LimitEquilibrium, CrackDepthToZeroAndCrackIgnored) {
+    for (LeMethod m : kAllMethods) {
+        const double base = fs(fk(), fk_circle(), m);
+        for (double fill : {0.0, 1.0}) {
+            auto s = fk();
+            s.crack = LeTensionCrack{1e-7, fill};
+            EXPECT_NEAR(fs(s, fk_circle(), m), base, 1e-6) << le_detail::name(m);
+        }
+        // una grieta más honda que la masa no actúa: mismo FS y nota
+        auto deep = fk();
+        deep.crack = LeTensionCrack{100.0, 1.0};
+        const auto r = run(deep, fk_circle(), m);
+        EXPECT_EQ(*r.factor_of_safety, base) << le_detail::name(m);
+        EXPECT_NE(std::find(r.notes.begin(), r.notes.end(), "tension crack does not reach the slip surface: crack ignored"),
+                  r.notes.end());
+    }
+    // la grieta seca acorta la base y quita su resistencia: la masa y el FS cambian
+    auto dry = fk();
+    dry.crack = LeTensionCrack{10.0, 0.0};
+    const auto a = run(dry, fk_circle(), LeMethod::Bishop), b = run(fk(), fk_circle(), LeMethod::Bishop);
+    EXPECT_LT(a.sliding_mass_area, b.sliding_mass_area);
+    EXPECT_GT(a.slices.front().x_left, b.slices.front().x_left);
+    EXPECT_NEAR(a.slices.front().base_y_left, 60.0 - 10.0, 1e-9);
+}
+
+TEST(LimitEquilibrium, PiezometricLine) {
+    // bajo toda la masa (el fondo del círculo está en y = 10): igual que seco
+    for (LeMethod m : kAllMethods) {
+        auto s = fk();
+        s.piezometric = std::vector<Point2>{{0, 0}, {180, 0}};
+        s.water_unit_weight = 62.4;
+        EXPECT_NEAR(fs(s, fk_circle(), m), fs(fk(), fk_circle(), m), 1e-12) << le_detail::name(m);
+    }
+    // sobre la base: u = γw (y_piezo - y_base) en el punto medio, el FS baja, los vértices son bordes, ru ignorado
+    auto s = fk(0.25);
+    s.water_unit_weight = 62.4;
+    s.piezometric = std::vector<Point2>{{0, 40}, {100, 30}, {180, 15}};
+    const auto r = run(s, fk_circle(), LeMethod::Spencer);
+    ASSERT_TRUE(r.factor_of_safety.has_value());
+    EXPECT_LT(*r.factor_of_safety, fs(fk(), fk_circle(), LeMethod::Spencer));
+    int wet = 0, at100 = 0;
+    for (const auto& t : r.slices) {
+        const double xm = 0.5 * (t.x_left + t.x_right), ym = 0.5 * (t.base_y_left + t.base_y_right);
+        const double yp = xm <= 100 ? 40 - 10 * xm / 100 : 30 - 15 * (xm - 100) / 80;
+        EXPECT_NEAR(t.pore_pressure, 62.4 * std::max(yp - ym, 0.0), 1e-9);
+        wet += t.pore_pressure > 0.0;
+        at100 += t.x_left == 100.0;
+    }
+    EXPECT_GT(wet, 10);
+    EXPECT_EQ(at100, 1);
+    EXPECT_NE(std::find(r.notes.begin(), r.notes.end(), "piezometric line given: the ru of the materials is ignored"),
+              r.notes.end());
+    s.materials[0].ru = 0.0;
+    EXPECT_NEAR(fs(s, fk_circle(), LeMethod::Spencer), *r.factor_of_safety, 1e-12);
+    // la piezométrica debe cubrir la masa
+    s.piezometric = std::vector<Point2>{{50, 40}, {180, 15}};
+    EXPECT_NE(error_of([&] { run(s, fk_circle(), LeMethod::Bishop); }).find("piezometric"), std::string::npos);
+}
+
+TEST(LimitEquilibrium, RuPerMaterial) {
+    // dos estratos con el mismo material salvo el índice y el mismo ru: igual que un solo material con ese ru
+    auto two = [](double ru_top, double ru_bottom) {
+        auto s = fk();
+        s.materials = {mc(120, 600, 20, ru_top), mc(120, 600, 20, ru_bottom)};
+        s.layers = {LeLayer{{{0, 35}, {180, 35}}, 0}, LeLayer{{}, 1}};
+        return s;
+    };
+    auto global = two(0.25, 0.25);
+    global.layers[1].material = 0;
+    for (LeMethod m : kAllMethods) {
+        EXPECT_NEAR(fs(two(0.25, 0.25), fk_circle(), m), fs(global, fk_circle(), m), 1e-12) << le_detail::name(m);
+        EXPECT_NE(fs(two(0.0, 0.25), fk_circle(), m), fs(global, fk_circle(), m)) << le_detail::name(m);
+    }
+    // u = ru W/b con el ru del material de la base
+    for (const auto& t : run(two(0.0, 0.25), fk_circle(), LeMethod::Bishop).slices) {
+        const double ru = t.material == 1 ? 0.25 : 0.0;
+        EXPECT_NEAR(t.pore_pressure, ru * t.weight / (t.x_right - t.x_left), 1e-9);
+    }
+}
+
+namespace {
+// d/L independiente: la cuerda entre los extremos de la tabla y el punto más hondo del círculo
+double circle_d_over_l(const LeResult& r, double xc, double yc, double R) {
+    const double ax = r.slices.front().x_left, ay = r.slices.front().base_y_left;
+    const double cx = r.slices.back().x_right, cy = r.slices.back().base_y_right;
+    const double L = std::hypot(cx - ax, cy - ay);
+    const double dc = std::fabs((cy - ay) * (xc - ax) - (cx - ax) * (yc - ay)) / L;  // centro a la cuerda
+    return (R - dc) / L;
+}
+}  // namespace
+
+TEST(LimitEquilibrium, JanbuCorrectedF0) {
+    struct Case { LeMaterial m; double b1; };
+    const Case cases[] = {{mc(120, 600, 20), 0.69}, {mc(120, 0, 30), 0.50}, {mc(120, 1500, 0), 0.31}};
+    for (const auto& c : cases) {
+        const auto s = one_layer({{0, 60}, {60, 60}, {140, 20}, {180, 20}}, c.m);
+        const auto co = run(s, fk_circle(), LeMethod::JanbuCorrected), si = run(s, fk_circle(), LeMethod::JanbuSimplified);
+        ASSERT_TRUE(co.factor_of_safety && si.factor_of_safety) << c.b1;
+        const double r = circle_d_over_l(co, 120, 90, 80);
+        EXPECT_GT(r, 0.05);
+        EXPECT_NEAR(*co.factor_of_safety / *si.factor_of_safety, 1.0 + c.b1 * (r - 1.4 * r * r), 1e-12) << c.b1;
+        for (const auto& n : co.notes) EXPECT_EQ(n.find("b1"), std::string::npos) << n;
+        EXPECT_EQ(co.info.method_id, "Janbu-Corrected");
+        EXPECT_EQ(co.info.verification, Verification::Secondary);
+        // reflejada: mismo FS
+        const auto mi = run(mirrored(s), circle(-120, 90, 80), LeMethod::JanbuCorrected);
+        EXPECT_NEAR(*mi.factor_of_safety, *co.factor_of_safety, 1e-9 * *co.factor_of_safety);
+    }
+    // mezcla de bases cohesivas y friccionantes: b1 = 0.69 con nota
+    auto mix = fk();
+    mix.materials = {mc(120, 600, 0), mc(120, 0, 30)};
+    mix.layers = {LeLayer{{{0, 35}, {180, 35}}, 0}, LeLayer{{}, 1}};
+    const auto co = run(mix, fk_circle(), LeMethod::JanbuCorrected), si = run(mix, fk_circle(), LeMethod::JanbuSimplified);
+    const double r = circle_d_over_l(co, 120, 90, 80);
+    EXPECT_NEAR(*co.factor_of_safety / *si.factor_of_safety, 1.0 + 0.69 * (r - 1.4 * r * r), 1e-12);
+    EXPECT_NE(std::find(co.notes.begin(), co.notes.end(),
+                        "Janbu corrected: the bases mix cohesive and frictional materials, b1 = 0.69"),
+              co.notes.end());
+}
+
+// Slide: Janbu corregido 0.990 en su búsqueda. Círculo de la búsqueda propia de Janbu corregido (malla de 1(a),
+// 21 radios y afinado): (30.121, 52.4, 27.4), FS 1.0039 (+1.4 % de Slide).
+TEST(LimitEquilibrium, Acads1aJanbuCorrected) {
+    const double v = fs(acads1a(), circle(30.121, 52.4, 27.4), LeMethod::JanbuCorrected);
+    EXPECT_NEAR(v, 0.990, 0.02 * 0.990);
+    EXPECT_NEAR(v, 1.0039, 2e-3);
+}
+
+TEST(LimitEquilibrium, ReflectedSectionWithWaterAndCrack) {
+    auto a = acads1b();
+    a.piezometric = std::vector<Point2>{{20, 24}, {45, 27}, {70, 29}};
+    auto b = mirrored(a);
+    b.piezometric = mirror(*a.piezometric);
+    const auto fa = acads1b_circle(), fb = circle(-37.45, 44.5, 20.875);
+    for (LeMethod m : kAllMethods) {
+        const auto ra = run(a, fa, m), rb = run(b, fb, m);
+        ASSERT_TRUE(ra.factor_of_safety && rb.factor_of_safety) << le_detail::name(m);
+        EXPECT_NEAR(*rb.factor_of_safety, *ra.factor_of_safety, 1e-9 * *ra.factor_of_safety) << le_detail::name(m);
+        if (ra.lambda) EXPECT_NEAR(*rb.lambda, *ra.lambda, 1e-9 * std::fabs(*ra.lambda));
+        EXPECT_NEAR(rb.slices.front().x_left, -ra.slices.back().x_right, 1e-9);
+    }
+}
+
+// Spencer con la grieta llena: la masa queda en equilibrio de fuerzas y de momentos, verificado desde la tabla de
+// tajadas (N = N' + u l, S = resistencia / FS, W por el punto medio de la base como en Zhu et al. 2005) más el agua
+// P = ½ γw (f zc)² a f zc / 3 sobre el fondo de la grieta.
+TEST(LimitEquilibrium, SpencerGlobalEquilibriumWithWaterFilledCrack) {
+    auto s = fk(0.1);
+    s.water_unit_weight = 62.4;
+    s.crack = LeTensionCrack{12.0, 1.0};
+    LeOptions o = opts(200);
+    o.tolerance = 1e-12;
+    const auto r = le_factor_of_safety(s, fk_circle(), LeMethod::Spencer, o);
+    ASSERT_TRUE(r.factor_of_safety.has_value());
+    const double F = *r.factor_of_safety, P = 0.5 * 62.4 * 12.0 * 12.0;
+    const double py = r.slices.front().base_y_left + 12.0 / 3.0;
+    EXPECT_NEAR(r.slices.front().base_y_left, 60.0 - 12.0, 1e-9);
+    const double ox = 77.0, oy = 33.0;
+    double H = P, V = 0, M = -(py - oy) * P, W = 0, scale = 0;
+    for (const auto& t : r.slices) {
+        const double a = t.alpha_deg * le_detail::kPi / 180.0;
+        const double N = t.normal_force + t.pore_pressure * t.base_length, S = t.shear_strength / F;
+        const double fx = N * std::sin(a) - S * std::cos(a), fy = N * std::cos(a) + S * std::sin(a);
+        const double mx = 0.5 * (t.x_left + t.x_right), my = 0.5 * (t.base_y_left + t.base_y_right);
+        H += fx;
+        V += fy - t.weight;
+        M += (mx - ox) * fy - (my - oy) * fx - (mx - ox) * t.weight;
+        W += t.weight;
+        scale += t.weight * std::fabs(mx - ox);
+    }
+    EXPECT_NEAR(H / W, 0.0, 1e-8);
+    EXPECT_NEAR(V / W, 0.0, 1e-8);
+    EXPECT_NEAR(M / scale, 0.0, 1e-8);
+    // el agua pesa en el balance: sin ella no cerraría
+    EXPECT_GT(P / W, 1e-3);
 }

@@ -14,8 +14,20 @@
  * Tajadas (R2): bordes en los vértices de la superficie, de las bases de estratos y de la polilínea, y en los cortes de
  * la superficie de falla con los contactos; base en cuerda; peso exacto por trapecios (Simpson por tramos lineales).
  * α > 0 cuando la base baja hacia el pie. Ordinario con N' = W cos α - kh W sin α - u l (F&K, R3).
- * Pendiente de las tareas 2 y 3: línea piezométrica, grieta de tracción, f0 de Janbu corregido y Hoek-Brown: lanzan
- * «not implemented yet» en vez de dar un número.
+ * Agua (R11): con línea piezométrica, u = γw·max(y_piezo - y_base, 0) en el punto medio de la base y el ru de los
+ * materiales se ignora (nota); sin ella, u = ru·W/b con el ru del material de la base. Los vértices de la piezométrica
+ * y sus cortes con la superficie de falla son bordes de tajada.
+ * Grieta de tracción (R8): vertical, de profundidad fija zc bajo la superficie. La superficie de falla se corta donde
+ * la línea a zc bajo el terreno la encuentra por primera vez desde la cresta; la masa termina ahí en una cara
+ * vertical. Con llenado f, el agua es una fuerza horizontal P = ½γw(f·zc)² hacia el pie, a f·zc/3 sobre el fondo de la
+ * grieta, aplicada a la tajada de la grieta como fuerza externa: momento en Bishop, fuerza horizontal en Janbu, R y T
+ * de esa tajada y su momento en Spencer/M-P (equivale a la E de borde sin cortante), y en el Ordinario proyectada sobre
+ * la base de esa tajada como kh·W (nota). Si la línea a zc no corta la superficie de falla, la grieta no actúa (nota).
+ * Janbu corregido (R4): FS = f0·FS_Janbu, f0 = 1 + b1 (d/L - 1.4 (d/L)²); d es la mayor distancia de la superficie de
+ * falla a la cuerda entre sus extremos y L el largo de la cuerda; b1 = 0.69 si todas las bases tienen c > 0 y φ > 0,
+ * 0.50 si todas tienen c = 0, 0.31 si todas tienen φ = 0, y 0.69 con nota si se mezclan. Fuente secundaria (Abramson
+ * et al. 2002, no leído).
+ * Pendiente de la tarea 3: Hoek-Brown lanza «not implemented yet» en vez de dar un número.
  */
 
 #pragma once
@@ -170,6 +182,7 @@ struct Geo {
     std::optional<double> base_y;
     std::optional<Circle> circle;
     std::optional<Poly> polyline;
+    std::optional<Poly> piezo;
 };
 
 inline Geo make_geo(const LeSection& s, const SlipSurface& f, bool reflect) {
@@ -186,6 +199,7 @@ inline Geo make_geo(const LeSection& s, const SlipSurface& f, bool reflect) {
         g.circle = Circle{reflect ? -xc : xc, f.circle->yc - o.y, f.circle->radius};
     }
     if (f.polyline) g.polyline = to_local(*f.polyline, o, reflect);
+    if (s.piezometric) g.piezo = to_local(*s.piezometric, o, reflect);
     return g;
 }
 
@@ -300,6 +314,7 @@ struct Slice {
     int mat = -1;           // -1: aire
     double c = 0.0, tf = 0.0;
     double Np = 0.0, E = 0.0, X = 0.0;
+    double Px = 0.0, Py = 0.0;  // fuerza horizontal externa hacia el pie (agua de la grieta) y la cota de su línea
 };
 
 /// Pesos, centroide y material de la base de la tajada [xa, xb].
@@ -378,9 +393,13 @@ inline Slice build_slice(const Geo& g, const LeSection& s, double xa, double xb)
         }
         if (t.cand.empty()) fail("slip_surface", "passes below the bottom of the last layer");
         t.mat = t.cand.front();
-        double ru = 0.0;
-        for (int m : t.cand) ru = std::max(ru, s.materials[m].ru);
-        t.u = ru * W / t.b;
+        if (g.piezo) {
+            t.u = s.water_unit_weight * std::max(interp(*g.piezo, xm) - ym, 0.0);
+        } else {
+            double ru = 0.0;
+            for (int m : t.cand) ru = std::max(ru, s.materials[m].ru);
+            t.u = ru * W / t.b;
+        }
         const auto& m = s.materials[t.mat];
         t.c = m.cohesion;
         t.tf = std::tan(m.friction_deg * kPi / 180.0);
@@ -475,9 +494,7 @@ inline void validate(const LeSection& s, const SlipSurface& f, const LeOptions& 
         require(fp.back().x == 1.0, at("function_points", fp.size() - 1) + ".x", "must be 1", fp.back().x);
         if (!positive) fail("function_points", "needs some f > 0");
     }
-    // lo que llega en las tareas 2 y 3: nunca un número a medias
-    if (s.piezometric) not_implemented("piezometric", 2);
-    if (s.crack) not_implemented("crack", 2);
+    // lo que llega en la tarea 3: nunca un número a medias
     for (std::size_t i = 0; i < s.materials.size(); ++i)
         if (s.materials[i].model == StrengthModel::HoekBrown) not_implemented(at("materials", i) + ".model HoekBrown", 3);
 }
@@ -486,6 +503,7 @@ struct Built {
     std::vector<Slice> slices;
     bool reflected = false, air = false;
     Point2 origin{};
+    std::vector<std::string> notes;
 };
 
 inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
@@ -500,10 +518,31 @@ inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
     const Geo g = make_geo(s, f, out.reflected);
     if (out.reflected) m = find_mass(g);
     out.air = m.air;
-    const double xl = m.xl, xr = m.xr;
+    double xl = m.xl;
+    const double xr = m.xr;
+    // grieta: la línea a zc bajo el terreno corta la superficie de falla; el primer corte desde la cresta (izquierda)
+    double crack_force = 0.0, crack_y = 0.0;
+    if (s.crack) {
+        const double zc = s.crack->depth_m;
+        Poly line = g.ground;
+        for (auto& q : line) q.y -= zc;
+        double xk = std::numeric_limits<double>::infinity();
+        if (zc > 0.0)
+            for (double x : slip_cuts(g, line))
+                if (x > xl + kTol && x < xr - kTol) xk = std::min(xk, x);
+        if (std::isfinite(xk)) {
+            xl = xk;
+            const double hw = s.crack->water_fill * zc;
+            crack_force = 0.5 * s.water_unit_weight * hw * hw;
+            crack_y = slip_y(g, xk) + hw / 3.0;
+        } else {
+            out.notes.push_back("tension crack does not reach the slip surface: crack ignored");
+        }
+    }
     for (std::size_t k = 0; k < g.bottoms.size(); ++k)
         if (!g.bottoms[k].empty() && !covers(g.bottoms[k], xl, xr))
             fail(at("layers", k) + ".bottom", "does not cover the sliding mass");
+    if (g.piezo && !covers(*g.piezo, xl, xr)) fail("piezometric", "does not cover the sliding mass");
     if (g.base_y) {
         double ymin = std::min(slip_y(g, xl), slip_y(g, xr));
         if (g.circle && g.circle->xc > xl && g.circle->xc < xr) ymin = g.circle->yc - g.circle->radius;
@@ -518,6 +557,7 @@ inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
     std::vector<const Poly*> lines{&g.ground};
     for (const auto& b : g.bottoms)
         if (!b.empty()) lines.push_back(&b);
+    if (g.piezo) lines.push_back(&*g.piezo);
     for (const Poly* p : lines) {
         for (const auto& q : *p)
             if (inside(q.x)) xs.push_back(q.x);
@@ -550,6 +590,8 @@ inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
         edges.push_back(b);
     }
     for (std::size_t i = 0; i + 1 < edges.size(); ++i) out.slices.push_back(build_slice(g, s, edges[i], edges[i + 1]));
+    out.slices.front().Px = crack_force;
+    out.slices.front().Py = crack_y;
     return out;
 }
 
@@ -600,7 +642,9 @@ inline MethodInfo info(LeMethod m) {
         case LeMethod::JanbuSimplified:
             return {"Janbu-Simplified", Verification::Secondary, slide + "; Janbu (1973) not read"};
         case LeMethod::JanbuCorrected:
-            return {"Janbu-Corrected", Verification::Secondary, slide + "; Janbu (1973) not read"};
+            return {"Janbu-Corrected", Verification::Secondary,
+                    slide + "; f0 = 1 + b1 (d/L - 1.4 (d/L)^2), b1 0.69/0.50/0.31 (Abramson et al. 2002, not read); "
+                            "Janbu (1973) not read"};
         case LeMethod::Spencer:
             return {"Spencer", Verification::Secondary,
                     slide + "; Zhu et al. (2005) algorithm with f(x) = 1; Spencer (1967) not read"};
@@ -639,9 +683,12 @@ inline double vertical_normal(const Slice& t, double F) {
     const double ma = t.ca + t.sa * t.tf / F;
     return (t.W - t.u * t.b - t.c * t.l * t.sa / F) / ma;
 }
-/// N' inicial sin fuerzas entre tajadas (la del Ordinario).
+/// N' sin fuerzas entre tajadas (la del Ordinario): peso, sismo y fuerza externa proyectados sobre la normal.
+inline double ordinary_normal(const Slice& t, double kh) {
+    return t.W * t.ca - kh * t.W * t.sa - t.Px * t.sa - t.u * t.l;
+}
 inline void ordinary_normals(std::vector<Slice>& sl, double kh) {
-    for (auto& t : sl) t.Np = std::max(0.0, t.W * t.ca - kh * t.W * t.sa - t.u * t.l);
+    for (auto& t : sl) t.Np = std::max(0.0, ordinary_normal(t, kh));
 }
 /// Ninguna tajada resiste: con fuerza motora, FS = 0.
 inline bool no_strength(const std::vector<Slice>& sl) {
@@ -671,11 +718,14 @@ inline Solve ordinary(std::vector<Slice>& sl, const LeSection& s) {
     int clipped = 0;
     for (const auto& t : sl) {
         num += t.c * t.l + t.Np * t.tf;
-        den += t.W * t.sa + s.kh * t.W * t.ca;
-        clipped += t.mat >= 0 && t.W * t.ca - s.kh * t.W * t.sa - t.u * t.l < 0.0;
+        den += t.W * t.sa + s.kh * t.W * t.ca + t.Px * t.ca;
+        clipped += t.mat >= 0 && ordinary_normal(t, s.kh) < 0.0;
     }
     if (!(den > 0.0)) return backward();
     Solve r;
+    if (sl.front().Px > 0.0)
+        r.notes.push_back("Ordinary: the crack water force acts on the crack slice, projected on its base like the "
+                          "seismic force");
     r.iterations = 1;
     r.F = num / den;
     r.converged = true;
@@ -725,10 +775,10 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
             const double mx = 0.5 * (t.xa + t.xb) - O->x, my = 0.5 * (t.ya + t.yb) - O->y;
             aS[i] = -(mx * t.sa + my * t.ca);
             aN[i] = mx * t.ca - my * t.sa;
-            driving += t.W * (O->x - t.xg) + kh * t.W * (O->y - t.yg);
+            driving += t.W * (O->x - t.xg) + kh * t.W * (O->y - t.yg) + t.Px * (O->y - t.Py);
         }
     } else {
-        for (const auto& t : sl) driving += t.W * t.sa / t.ca + kh * t.W;
+        for (const auto& t : sl) driving += t.W * t.sa / t.ca + kh * t.W + t.Px;
     }
     if (!(driving > 0.0)) return backward();
     if (bishop && g.polyline)
@@ -801,10 +851,10 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
     ordinary_normals(sl, kh);
     choose(sl, s);
     double driving = 0.0;
-    for (const auto& t : sl) driving += t.W * t.sa + kh * t.W * t.ca;
+    for (const auto& t : sl) driving += t.W * t.sa + kh * t.W * t.ca + t.Px * t.ca;
     if (!(driving > 0.0)) return backward();
     if (no_strength(sl)) {
-        for (auto& t : sl) t.Np = t.W * t.ca - kh * t.W * t.sa - t.u * t.l;
+        for (auto& t : sl) t.Np = ordinary_normal(t, kh);
         r.F = 0.0;
         r.lambda = 0.0;
         r.converged = true;
@@ -850,8 +900,8 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         for (std::size_t i = 0; i < n; ++i) {
             const auto& t = sl[i];
             const double El = i ? sl[i - 1].E : 0.0, fl = i ? fb[i - 1] : 0.0;
-            const double hc = t.yg - 0.5 * (t.ya + t.yb);  // altura del centroide sobre el punto medio de la base
-            num += t.b * (t.E + El) * std::tan(t.alpha) + 2.0 * kh * t.W * hc;
+            const double ym = 0.5 * (t.ya + t.yb), hc = t.yg - ym;  // centroide sobre el punto medio de la base
+            num += t.b * (t.E + El) * std::tan(t.alpha) + 2.0 * kh * t.W * hc + 2.0 * t.Px * (t.Py - ym);
             den += t.b * (fb[i] * t.E + fl * El);
         }
         return lam * den - num;
@@ -877,8 +927,8 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
     for (int pass = 0; pass < 3; ++pass) {
         for (std::size_t i = 0; i < n; ++i) {
             const auto& t = sl[i];
-            R[i] = (t.W * t.ca - kh * t.W * t.sa - t.u * t.l) * t.tf + t.c * t.l;
-            T[i] = t.W * t.sa + kh * t.W * t.ca;
+            R[i] = ordinary_normal(t, kh) * t.tf + t.c * t.l;
+            T[i] = t.W * t.sa + kh * t.W * t.ca + t.Px * t.ca;
         }
         const auto p0 = eval(0.0, F0);
         if (!p0) return fail();
@@ -941,7 +991,7 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
             auto& t = sl[i];
             const double El = i ? sl[i - 1].E : 0.0, Xl = i ? best.lam * fb[i - 1] * El : 0.0;
             const double Xr = best.lam * fb[i] * t.E;
-            t.Np = t.W * t.ca - kh * t.W * t.sa - (El - t.E) * t.sa + (Xl - Xr) * t.ca - t.u * t.l;
+            t.Np = ordinary_normal(t, kh) - (El - t.E) * t.sa + (Xl - Xr) * t.ca;
             t.X = Xr;
         }
         r.converged = true;
@@ -954,6 +1004,40 @@ inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
         F0 = best.F;
     }
     return r;
+}
+
+/// f0 de Janbu corregido: d es la mayor distancia de la superficie de falla bajo la cuerda entre sus extremos (en el
+/// círculo, el punto más hondo exacto si cae dentro del arco), L el largo de la cuerda.
+inline double janbu_f0(const Geo& g, const std::vector<Slice>& sl, const LeSection& s, std::vector<std::string>& notes) {
+    const Point2 a{sl.front().xa, sl.front().ya}, c{sl.back().xb, sl.back().yb};
+    const double L = std::hypot(c.x - a.x, c.y - a.y);
+    auto dist = [&](double x, double y) { return ((c.y - a.y) * (x - a.x) - (c.x - a.x) * (y - a.y)) / L; };
+    double d = 0.0;
+    for (const auto& t : sl) d = std::max(d, dist(t.xb, t.yb));
+    if (g.circle) {
+        const Circle& k = *g.circle;
+        const double nx = -(c.y - a.y) / L, ny = (c.x - a.x) / L;  // normal de la cuerda hacia arriba
+        const double px = k.xc - k.radius * nx, py = k.yc - k.radius * ny;
+        if (px > a.x && px < c.x && py <= k.yc) d = std::max(d, dist(px, py));
+    }
+    bool all_both = true, all_no_c = true, all_no_phi = true;
+    for (const auto& t : sl) {
+        if (t.mat < 0) continue;
+        const auto& m = s.materials[t.mat];
+        const bool hb = m.model == StrengthModel::HoekBrown;
+        const bool has_c = hb || m.cohesion > 0.0, has_phi = hb || m.friction_deg > 0.0;
+        all_both = all_both && has_c && has_phi;
+        all_no_c = all_no_c && !has_c;
+        all_no_phi = all_no_phi && !has_phi;
+    }
+    double b1 = 0.69;
+    if (!all_both) {
+        if (all_no_c) b1 = 0.50;
+        else if (all_no_phi) b1 = 0.31;
+        else notes.push_back("Janbu corrected: the bases mix cohesive and frictional materials, b1 = 0.69");
+    }
+    const double r = d / L;
+    return 1.0 + b1 * (r - 1.4 * r * r);
 }
 }  // namespace le_detail
 
@@ -971,15 +1055,22 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
                                     const LeOptions& options = {}) {
     using namespace le_detail;
     validate(section, surface, options);
-    if (method == LeMethod::JanbuCorrected) not_implemented("method JanbuCorrected", 2);
     Built b = build(section, surface, options.n_slices);
     const Geo g = make_geo(section, surface, b.reflected);
     auto& sl = b.slices;
     Solve r;
+    std::optional<double> F_alpha;  // FS con el que se calcularon las N' (Janbu corregido: el simplificado)
     switch (method) {
         case LeMethod::Ordinary: r = ordinary(sl, section); break;
         case LeMethod::Bishop: r = bishop_janbu(sl, section, g, options, true); break;
         case LeMethod::JanbuSimplified: r = bishop_janbu(sl, section, g, options, false); break;
+        case LeMethod::JanbuCorrected:
+            r = bishop_janbu(sl, section, g, options, false);
+            if (r.converged) {
+                F_alpha = r.F;
+                *r.F *= janbu_f0(g, sl, section, r.notes);
+            }
+            break;
         default: {
             auto tmp = sl;
             const Solve bi = bishop_janbu(tmp, section, g, options, true);
@@ -987,7 +1078,14 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
                     bi.F && *bi.F > 0.0 ? *bi.F : 1.0);
         }
     }
-    LeResult out{std::nullopt, method, std::nullopt, r.iterations, r.converged, {}, 0.0, info(method), {}, r.notes};
+    LeResult out{std::nullopt, method, std::nullopt, r.iterations, r.converged, {}, 0.0, info(method), {}, b.notes};
+    out.notes.insert(out.notes.end(), r.notes.begin(), r.notes.end());
+    if (section.piezometric)
+        for (const auto& m : section.materials)
+            if (m.ru > 0.0) {
+                out.notes.push_back("piezometric line given: the ru of the materials is ignored");
+                break;
+            }
     if (b.air)
         out.warnings.push_back("slip surface crosses the ground surface more than twice: the mass is taken between "
                                "the first and the last cut");
@@ -1000,7 +1098,7 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
         out.factor_of_safety = r.F;
         out.lambda = r.lambda;
         if (method != LeMethod::Ordinary && *r.F > 0.0) {
-            const int k = m_alpha_count(sl, *r.F, 0.2, false);
+            const int k = m_alpha_count(sl, F_alpha.value_or(*r.F), 0.2, false);
             if (k > 0)
                 out.warnings.push_back("m-alpha below 0.2 in " + std::to_string(k) +
                                        " slices: results may be unreliable");

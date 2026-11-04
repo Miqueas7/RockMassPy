@@ -266,18 +266,13 @@ def _hb(**kw):
      r"function_points\[1\]\.y"),
     (_hb(), r"materials\[0\]\.hb"),
     (_hb(hb=rm.hb_params(50, 10, 0)), r"materials\[0\]\.sigma_ci"),
-    (_crack(2.0, 0.5), r"not implemented yet \(task 2\)"),
-    (lambda s, f, o: _set(s, piezometric=pts([(0, 50), (180, 10)])), r"not implemented yet \(task 2\)"),
+    (lambda s, f, o: _set(s, piezometric=pts([(0, 50), (180, NAN)])), r"piezometric\[1\]\.y"),
+    (lambda s, f, o: _set(s, piezometric=pts([(50, 50), (180, 10)])), "piezometric"),
     (_hb(hb=rm.hb_params(50, 10, 0), sigma_ci=50.0), r"not implemented yet \(task 3\)"),
 ])
 def test_invalid_inputs_name_the_field(edit, field):
     with pytest.raises(ValueError, match=field):
         _edit(edit)()
-
-
-def test_janbu_corrected_not_implemented_yet():
-    with pytest.raises(ValueError, match=r"not implemented yet \(task 2\)"):
-        run(fk(), circle(*FK_CIRCLE), M.JanbuCorrected)
 
 
 def test_interslice_functions():
@@ -375,3 +370,130 @@ def test_review_option_checks():
         with pytest.raises(ValueError, match="function_points"):
             run(fk(), circle(*FK_CIRCLE), M.MorgensternPrice, function=rm.InterSliceFunction.Points,
                 function_points=pts(p))
+
+
+# --- Tarea 2: agua, grieta de tracción y Janbu corregido ---
+
+ALL_METHODS = METHODS + (M.JanbuCorrected,)
+
+
+def crack(depth, fill):
+    c = rm.LeTensionCrack()
+    c.depth_m, c.water_fill = depth, fill
+    return c
+
+
+def acads1b(fill=1.0, flip=False):
+    # ACADS 1(b): geometría de 1(a), c 32, φ 10, γ 20, grieta de 3.814 m (2c/(γ√Ka)) llena de agua
+    s = section(mirror(ACADS1A) if flip else ACADS1A, [layer([], 0)], [mc(20, 32, 10)], base=20.0)
+    s.crack = crack(3.814, fill)
+    return s
+
+
+# círculo crítico de Bishop de una búsqueda propia: malla de centros (31-47) x (34-49) como la de Slide, 21 radios por
+# centro y afinado por patrón hasta 0.001 m
+ACADS1B_CIRCLE = (37.45, 44.5, 20.875)
+
+
+def test_acads_1b_tension_crack_with_water():
+    # Slide: Bishop 1.596, Spencer y GLE 1.592; recalculado: 1.5915, 1.5879, 1.5885
+    f = circle(*ACADS1B_CIRCLE)
+    for method, slide, re in ((M.Bishop, 1.596, 1.5915), (M.Spencer, 1.592, 1.5879),
+                              (M.MorgensternPrice, 1.592, 1.5885)):
+        v = fs(acads1b(), f, method)
+        assert v == pytest.approx(slide, rel=0.02)
+        assert v == pytest.approx(re, abs=2e-3)
+    r = run(acads1b(), f, M.Bishop)
+    assert r.slices[-1].x_right == pytest.approx(53.528, abs=1e-3)
+    assert r.slices[-1].base_y_right == pytest.approx(35.0 - 3.814, abs=1e-9)
+    assert fs(acads1b(), f, M.Bishop) < fs(acads1b(0.0), f, M.Bishop)
+
+
+@pytest.mark.parametrize("method", ALL_METHODS)
+def test_crack_depth_to_zero_and_ignored(method):
+    base = fs(fk(), circle(*FK_CIRCLE), method)
+    for fill in (0.0, 1.0):
+        s = fk()
+        s.crack = crack(1e-7, fill)
+        assert fs(s, circle(*FK_CIRCLE), method) == pytest.approx(base, abs=1e-6)
+    s = fk()
+    s.crack = crack(100.0, 1.0)
+    r = run(s, circle(*FK_CIRCLE), method)
+    assert r.factor_of_safety == base
+    assert "tension crack does not reach the slip surface: crack ignored" in r.notes
+
+
+@pytest.mark.parametrize("method", ALL_METHODS)
+def test_piezometric_below_the_mass_is_dry(method):
+    s = fk()
+    s.piezometric = pts([(0, 0), (180, 0)])
+    s.water_unit_weight = 62.4
+    assert fs(s, circle(*FK_CIRCLE), method) == pytest.approx(fs(fk(), circle(*FK_CIRCLE), method), abs=1e-12)
+
+
+def test_piezometric_line_pore_pressure():
+    s = fk(0.25)
+    s.water_unit_weight = 62.4
+    s.piezometric = pts([(0, 40), (100, 30), (180, 15)])
+    r = run(s, circle(*FK_CIRCLE), M.Spencer)
+    assert r.factor_of_safety < fs(fk(), circle(*FK_CIRCLE), M.Spencer)
+    assert "piezometric line given: the ru of the materials is ignored" in r.notes
+    for t in r.slices:
+        xm, ym = (t.x_left + t.x_right) / 2, (t.base_y_left + t.base_y_right) / 2
+        yp = 40 - 10 * xm / 100 if xm <= 100 else 30 - 15 * (xm - 100) / 80
+        assert t.pore_pressure == pytest.approx(62.4 * max(yp - ym, 0.0), abs=1e-9)
+    assert 100.0 in {t.x_left for t in r.slices}
+    s.piezometric = pts([(50, 40), (180, 15)])
+    with pytest.raises(ValueError, match="piezometric"):
+        run(s, circle(*FK_CIRCLE), M.Bishop)
+
+
+@pytest.mark.parametrize("method", ALL_METHODS)
+def test_ru_per_material(method):
+    def two(ru_top, ru_bottom, same=False):
+        return section(FK_SURFACE, [layer([(0, 35), (180, 35)], 0), layer([], 0 if same else 1)],
+                       [mc(120, 600, 20, ru_top), mc(120, 600, 20, ru_bottom)])
+    f = circle(*FK_CIRCLE)
+    assert fs(two(0.25, 0.25), f, method) == pytest.approx(fs(two(0.25, 0.25, same=True), f, method), abs=1e-12)
+    assert fs(two(0.0, 0.25), f, method) != fs(two(0.25, 0.25, same=True), f, method)
+
+
+@pytest.mark.parametrize("material,b1", [(mc(120, 600, 20), 0.69), (mc(120, 0, 30), 0.50), (mc(120, 1500, 0), 0.31)])
+def test_janbu_corrected_f0(material, b1):
+    s = section(FK_SURFACE, [layer([], 0)], [material])
+    co, si = run(s, circle(*FK_CIRCLE), M.JanbuCorrected), run(s, circle(*FK_CIRCLE), M.JanbuSimplified)
+    a, c = co.slices[0], co.slices[-1]
+    ax, ay, cx, cy = a.x_left, a.base_y_left, c.x_right, c.base_y_right
+    L = math.hypot(cx - ax, cy - ay)
+    d = 80 - abs((cy - ay) * (120 - ax) - (cx - ax) * (90 - ay)) / L
+    r = d / L
+    assert co.factor_of_safety / si.factor_of_safety == pytest.approx(1 + b1 * (r - 1.4 * r * r), abs=1e-12)
+    assert co.info.method_id == "Janbu-Corrected"
+    assert co.info.verification == rm.Verification.Secondary
+    mi = run(section(mirror(FK_SURFACE), [layer([], 0)], [material]), circle(-120, 90, 80), M.JanbuCorrected)
+    assert mi.factor_of_safety == pytest.approx(co.factor_of_safety, rel=1e-9)
+
+
+def test_janbu_corrected_mixed_bases_note():
+    s = section(FK_SURFACE, [layer([(0, 35), (180, 35)], 0), layer([], 1)], [mc(120, 600, 0), mc(120, 0, 30)])
+    r = run(s, circle(*FK_CIRCLE), M.JanbuCorrected)
+    assert "Janbu corrected: the bases mix cohesive and frictional materials, b1 = 0.69" in r.notes
+
+
+def test_acads_1a_janbu_corrected():
+    # Slide 0.990; círculo de la búsqueda propia de Janbu corregido: 1.0039
+    s = section(ACADS1A, [layer([], 0)], [mc(20, 3, 19.6)], base=20.0)
+    v = fs(s, circle(30.121, 52.4, 27.4), M.JanbuCorrected)
+    assert v == pytest.approx(0.990, rel=0.02)
+    assert v == pytest.approx(1.0039, abs=2e-3)
+
+
+@pytest.mark.parametrize("method", ALL_METHODS)
+def test_reflected_section_with_water_and_crack(method):
+    piezo = [(20, 24), (45, 27), (70, 29)]
+    a, b = acads1b(), acads1b(flip=True)
+    a.piezometric, b.piezometric = pts(piezo), pts(mirror(piezo))
+    ra, rb = run(a, circle(*ACADS1B_CIRCLE), method), run(b, circle(-37.45, 44.5, 20.875), method)
+    assert rb.factor_of_safety == pytest.approx(ra.factor_of_safety, rel=1e-9)
+    if ra.lambda_ is not None:
+        assert rb.lambda_ == pytest.approx(ra.lambda_, rel=1e-9)
