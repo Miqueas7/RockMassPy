@@ -28,6 +28,7 @@
 #include "rockmasspy/smr.hpp"
 #include "rockmasspy/stereonet.hpp"
 #include "rockmasspy/wedge.hpp"
+#include "rockmasspy/yield_coefficient.hpp"
 #include "rockmasspy/toppling.hpp"
 #include "rockmasspy/bench.hpp"
 #include "rockmasspy/newmark.hpp"
@@ -638,6 +639,18 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("search_circular", &search_circular, nb::arg("section"), nb::arg("grid"),
           nb::arg("options") = SearchOptions());
     m.def("search_block", &search_block, nb::arg("section"), nb::arg("block"), nb::arg("options") = SearchOptions());
+
+    // Coeficiente de fluencia ky (bisección de kh sobre una superficie dada)
+    nb::class_<YieldResult>(m, "YieldResult", "Yield coefficient ky (kh giving FS = 1; None if not found) and the static FS.")
+        .def_ro("ky", &YieldResult::ky).def_ro("fs_static", &YieldResult::fs_static).def_ro("info", &YieldResult::info)
+        .def_ro("warnings", &YieldResult::warnings).def_ro("notes", &YieldResult::notes);
+    // LeOptions se registra más abajo: el valor por defecto va como None para no convertirlo antes de tiempo
+    m.def(
+        "le_yield_coefficient",
+        [](const LeSection& s, const SlipSurface& f, LeMethod method, const std::optional<LeOptions>& o) {
+            return le_yield_coefficient(s, f, method, o.value_or(LeOptions{}));
+        },
+        nb::arg("section"), nb::arg("surface"), nb::arg("method"), nb::arg("options") = nb::none());
 
     // Equilibrio límite 2D por tajadas
     nb::class_<Circle>(m, "Circle", "Circular slip surface: centre and radius.")
