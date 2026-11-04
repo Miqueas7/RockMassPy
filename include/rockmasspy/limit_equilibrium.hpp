@@ -4,9 +4,13 @@
  *        Bishop simplificado, Janbu simplificado, Spencer y Morgenstern-Price/GLE.
  *
  * Fuentes (todas Secondary): Slide2 Verification Manual (2022), problemas 1 y 21 (Fredlund y Krahn 1977, ACADS);
- * Morgenstern-Price y Spencer con el algoritmo de Zhu, Lee, Qian y Chen (2005), no leído.
- * Convenciones: x horizontal, y hacia arriba, unidades coherentes. La cara puede mirar a cualquier lado: el núcleo
- * detecta el sentido y refleja (x -> -x) por dentro, así que una sección reflejada da el mismo FS y el mismo λ.
+ * Morgenstern-Price y Spencer: F por la ecuación de fuerzas de Zhu, Lee, Qian y Chen (2005), no leído; λ como raíz
+ * de la ecuación de momentos (barrido desde 0 y regula falsi con bisección).
+ * Convenciones: x horizontal, y hacia arriba, unidades coherentes. Se trabaja con un origen local (UTM sin pérdida de
+ * precisión). La cara puede mirar a cualquier lado: el núcleo detecta el sentido y refleja (x -> -x) por dentro, así
+ * que una sección reflejada da el mismo FS y el mismo λ.
+ * «Hacia atrás» se decide una vez, con la fuerza o el momento motor; sin resistencia, FS = 0; un iterado no positivo o
+ * no finito da FS vacío con el aviso «<method> did not converge».
  * Tajadas (R2): bordes en los vértices de la superficie, de las bases de estratos y de la polilínea, y en los cortes de
  * la superficie de falla con los contactos; base en cuerda; peso exacto por trapecios (Simpson por tramos lineales).
  * α > 0 cuando la base baja hacia el pie. Ordinario con N' = W cos α - kh W sin α - u l (F&K, R3).
@@ -139,9 +143,22 @@ inline double interp(const Poly& p, double x) {
 }
 inline bool covers(const Poly& p, double lo, double hi) { return p.front().x <= lo + kTol && p.back().x >= hi - kTol; }
 
-inline Poly mirror(const Poly& p) {
-    Poly q(p.rbegin(), p.rend());
-    for (auto& v : q) v.x = -v.x;
+/// Origen local: centro del rango x de la superficie y su cota mínima. Se resta al entrar, así las coordenadas UTM no
+/// pierden precisión; reflejar la sección refleja el origen exactamente.
+inline Point2 local_origin(const LeSection& s) {
+    double ymin = s.surface.front().y;
+    for (const auto& q : s.surface) ymin = std::min(ymin, q.y);
+    return {0.5 * (s.surface.front().x + s.surface.back().x), ymin};
+}
+
+/// Traslada al origen local y, si toca, refleja x -> -x (invirtiendo el orden).
+inline Poly to_local(const Poly& p, Point2 o, bool reflect) {
+    Poly q;
+    for (const auto& v : p) q.push_back({v.x - o.x, v.y - o.y});
+    if (reflect) {
+        std::reverse(q.begin(), q.end());
+        for (auto& v : q) v.x = -v.x;
+    }
     return q;
 }
 
@@ -156,15 +173,19 @@ struct Geo {
 };
 
 inline Geo make_geo(const LeSection& s, const SlipSurface& f, bool reflect) {
+    const Point2 o = local_origin(s);
     Geo g;
-    g.ground = reflect ? mirror(s.surface) : s.surface;
+    g.ground = to_local(s.surface, o, reflect);
     for (const auto& l : s.layers) {
-        g.bottoms.push_back(reflect && !l.bottom.empty() ? mirror(l.bottom) : l.bottom);
+        g.bottoms.push_back(l.bottom.empty() ? l.bottom : to_local(l.bottom, o, reflect));
         g.material.push_back(l.material);
     }
-    g.base_y = s.model_base_y;
-    if (f.circle) g.circle = Circle{reflect ? -f.circle->xc : f.circle->xc, f.circle->yc, f.circle->radius};
-    if (f.polyline) g.polyline = reflect ? mirror(*f.polyline) : *f.polyline;
+    if (s.model_base_y) g.base_y = *s.model_base_y - o.y;
+    if (f.circle) {
+        const double xc = f.circle->xc - o.x;
+        g.circle = Circle{reflect ? -xc : xc, f.circle->yc - o.y, f.circle->radius};
+    }
+    if (f.polyline) g.polyline = to_local(*f.polyline, o, reflect);
     return g;
 }
 
@@ -263,10 +284,12 @@ inline Mass find_mass(const Geo& g) {
         else parts.emplace_back(xs[i], xs[i + 1]);
     }
     if (parts.empty()) fail("slip_surface", kNoCut);
-    double scale = 1.0;
-    for (const auto& q : gr) scale = std::max({scale, std::fabs(q.x), std::fabs(q.y)});
+    // tolerancia del corte relativa al tamaño de la superficie de falla, no a las coordenadas
+    const double size = g.circle ? g.circle->radius
+                                 : std::hypot(g.polyline->back().x - g.polyline->front().x,
+                                              g.polyline->back().y - g.polyline->front().y);
     const double xl = parts.front().first, xr = parts.back().second;
-    if (std::fabs(d(xl)) > 1e-7 * scale || std::fabs(d(xr)) > 1e-7 * scale) fail("slip_surface", kNoCut);
+    if (std::fabs(d(xl)) > 1e-7 * size || std::fabs(d(xr)) > 1e-7 * size) fail("slip_surface", kNoCut);
     return {xl, xr, parts.size() > 1};
 }
 
@@ -435,16 +458,22 @@ inline void validate(const LeSection& s, const SlipSurface& f, const LeOptions& 
     }
     require(o.n_slices >= 5, "n_slices", "must be at least 5", o.n_slices);
     require_positive(o.tolerance, "tolerance");
+    require(o.tolerance <= 1e-3, "tolerance", "must be at most 1e-3", o.tolerance);
     require(o.max_iterations >= 1, "max_iterations", "must be at least 1", o.max_iterations);
     if (o.function == InterSliceFunction::Points) {
-        if (o.function_points.empty()) fail("function_points", "must not be empty with the Points function");
-        for (std::size_t i = 0; i < o.function_points.size(); ++i) {
-            const auto& p = o.function_points[i];
+        const auto& fp = o.function_points;
+        if (fp.size() < 2) fail("function_points", "needs at least two points with the Points function");
+        bool positive = false;
+        for (std::size_t i = 0; i < fp.size(); ++i) {
             const std::string n = at("function_points", i);
-            require_in_range(p.x, 0.0, 1.0, n + ".x");
-            require_non_negative(p.y, n + ".y");
-            if (i > 0) require(p.x > o.function_points[i - 1].x, n + ".x", "must be strictly increasing", p.x);
+            require_in_range(fp[i].x, 0.0, 1.0, n + ".x");
+            require_non_negative(fp[i].y, n + ".y");
+            if (i > 0) require(fp[i].x > fp[i - 1].x, n + ".x", "must be strictly increasing", fp[i].x);
+            positive = positive || fp[i].y > 0.0;
         }
+        require(fp.front().x == 0.0, "function_points[0].x", "must be 0", fp.front().x);
+        require(fp.back().x == 1.0, at("function_points", fp.size() - 1) + ".x", "must be 1", fp.back().x);
+        if (!positive) fail("function_points", "needs some f > 0");
     }
     // lo que llega en las tareas 2 y 3: nunca un número a medias
     if (s.piezometric) not_implemented("piezometric", 2);
@@ -456,14 +485,17 @@ inline void validate(const LeSection& s, const SlipSurface& f, const LeOptions& 
 struct Built {
     std::vector<Slice> slices;
     bool reflected = false, air = false;
+    Point2 origin{};
 };
 
 inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
-    Mass m = find_mass(make_geo(s, f, false));
-    const double yl = interp(s.surface, m.xl), yr = interp(s.surface, m.xr);
+    const Geo g0 = make_geo(s, f, false);
+    Mass m = find_mass(g0);
+    const double yl = interp(g0.ground, m.xl), yr = interp(g0.ground, m.xr);
     if (std::fabs(yl - yr) <= kTol)
         fail("surface", "is level at both ends of the sliding mass: the face direction is undefined");
     Built out;
+    out.origin = local_origin(s);
     out.reflected = yr > yl;  // la superficie sube: la cara mira a la izquierda
     const Geo g = make_geo(s, f, out.reflected);
     if (out.reflected) m = find_mass(g);
@@ -521,38 +553,39 @@ inline Built build(const LeSection& s, const SlipSurface& f, int n_slices) {
     return out;
 }
 
-inline LeSlice to_public(const Slice& t, const Slice* left, bool reflected, const LeSection& s) {
-    LeSlice o{};
-    o.alpha_deg = t.alpha * 180.0 / kPi;
-    o.base_length = t.l;
-    o.weight = t.W;
-    o.pore_pressure = t.u;
-    o.cohesion = t.mat >= 0 ? t.c : 0.0;
-    o.friction_deg = t.mat >= 0 ? s.materials[t.mat].friction_deg : 0.0;
-    o.normal_force = t.Np;
-    o.shear_strength = t.c * t.l + t.Np * t.tf;
-    o.material = t.mat;
+inline LeSlice to_public(const Slice& t, const Slice* left, bool reflected, Point2 o, const LeSection& s) {
+    LeSlice out{};
+    out.alpha_deg = t.alpha * 180.0 / kPi;
+    out.base_length = t.l;
+    out.weight = t.W;
+    out.pore_pressure = t.u;
+    out.cohesion = t.mat >= 0 ? t.c : 0.0;
+    out.friction_deg = t.mat >= 0 ? s.materials[t.mat].friction_deg : 0.0;
+    out.normal_force = t.Np;
+    out.shear_strength = t.c * t.l + t.Np * t.tf;
+    out.material = t.mat;
     if (reflected) {
-        o.x_left = -t.xb;
-        o.x_right = -t.xa;
-        o.base_y_left = t.yb;
-        o.base_y_right = t.ya;
-        o.interslice_normal_right = left ? left->E : 0.0;
-        o.interslice_shear_right = left ? left->X : 0.0;
+        out.x_left = o.x - t.xb;
+        out.x_right = o.x - t.xa;
+        out.base_y_left = t.yb + o.y;
+        out.base_y_right = t.ya + o.y;
+        out.interslice_normal_right = left ? left->E : 0.0;
+        out.interslice_shear_right = left ? left->X : 0.0;
     } else {
-        o.x_left = t.xa;
-        o.x_right = t.xb;
-        o.base_y_left = t.ya;
-        o.base_y_right = t.yb;
-        o.interslice_normal_right = t.E;
-        o.interslice_shear_right = t.X;
+        out.x_left = t.xa + o.x;
+        out.x_right = t.xb + o.x;
+        out.base_y_left = t.ya + o.y;
+        out.base_y_right = t.yb + o.y;
+        out.interslice_normal_right = t.E;
+        out.interslice_shear_right = t.X;
     }
-    return o;
+    return out;
 }
 
-inline std::vector<LeSlice> to_public(const std::vector<Slice>& sl, bool reflected, const LeSection& s) {
+inline std::vector<LeSlice> to_public(const std::vector<Slice>& sl, bool reflected, Point2 o, const LeSection& s) {
     std::vector<LeSlice> out;
-    for (std::size_t i = 0; i < sl.size(); ++i) out.push_back(to_public(sl[i], i ? &sl[i - 1] : nullptr, reflected, s));
+    for (std::size_t i = 0; i < sl.size(); ++i)
+        out.push_back(to_public(sl[i], i ? &sl[i - 1] : nullptr, reflected, o, s));
     if (reflected) std::reverse(out.begin(), out.end());
     return out;
 }
@@ -596,6 +629,8 @@ struct Solve {
     std::optional<double> F, lambda;
     int iterations = 0;
     bool converged = false;
+    bool explained = false;  // FS vacío con su nota (masa hacia atrás, polilínea recta): no es «did not converge»
+    int bad_m_alpha = 0;     // tajadas con mα <= 0 en el último iterado de un cálculo que no convergió
     std::vector<std::string> notes;
 };
 
@@ -608,9 +643,28 @@ inline double vertical_normal(const Slice& t, double F) {
 inline void ordinary_normals(std::vector<Slice>& sl, double kh) {
     for (auto& t : sl) t.Np = std::max(0.0, t.W * t.ca - kh * t.W * t.sa - t.u * t.l);
 }
+/// Ninguna tajada resiste: con fuerza motora, FS = 0.
+inline bool no_strength(const std::vector<Slice>& sl) {
+    for (const auto& t : sl)
+        if (t.c > 0.0 || t.tf > 0.0) return false;
+    return true;
+}
+inline int m_alpha_count(const std::vector<Slice>& sl, double F, double limit, bool or_equal) {
+    int k = 0;
+    for (const auto& t : sl) {
+        const double ma = t.ca + t.sa * t.tf / F;
+        if (t.mat >= 0 && (or_equal ? ma <= limit : ma < limit)) ++k;
+    }
+    return k;
+}
+inline Solve backward() {
+    Solve r;
+    r.explained = true;
+    r.notes.push_back(kBackward);
+    return r;
+}
 
 inline Solve ordinary(std::vector<Slice>& sl, const LeSection& s) {
-    Solve r;
     ordinary_normals(sl, s.kh);
     choose(sl, s);
     double num = 0.0, den = 0.0;
@@ -620,11 +674,9 @@ inline Solve ordinary(std::vector<Slice>& sl, const LeSection& s) {
         den += t.W * t.sa + s.kh * t.W * t.ca;
         clipped += t.mat >= 0 && t.W * t.ca - s.kh * t.W * t.sa - t.u * t.l < 0.0;
     }
+    if (!(den > 0.0)) return backward();
+    Solve r;
     r.iterations = 1;
-    if (den <= 0.0 || num / den <= 0.0) {
-        r.notes.push_back(kBackward);
-        return r;
-    }
     r.F = num / den;
     r.converged = true;
     if (clipped > 0)
@@ -634,7 +686,7 @@ inline Solve ordinary(std::vector<Slice>& sl, const LeSection& s) {
 }
 
 /// Centro de momentos de Bishop: el del círculo o, con polilínea, el del círculo por los extremos y el punto más
-/// alejado bajo la cuerda que los une (R7).
+/// alejado bajo la cuerda que los une (R7). Coordenadas locales, así x² + y² no pierde precisión.
 inline std::optional<Point2> bishop_centre(const Geo& g, const std::vector<Slice>& sl) {
     if (g.circle) return Point2{g.circle->xc, g.circle->yc};
     const Point2 a{sl.front().xa, sl.front().ya}, c{sl.back().xb, sl.back().yb};
@@ -649,10 +701,10 @@ inline std::optional<Point2> bishop_centre(const Geo& g, const std::vector<Slice
         }
     }
     if (depth <= kTol * std::max(1.0, L)) return std::nullopt;
-    const double D = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
-    const double a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y;
-    return Point2{(a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / D,
-                  (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / D};
+    // circuncentro con a como origen
+    const double bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y;
+    const double D = 2.0 * (bx * cy - by * cx), b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
+    return Point2{a.x + (cy * b2 - by * c2) / D, a.y + (bx * c2 - cx * b2) / D};
 }
 
 /// Bishop (momentos respecto de O con brazos exactos de la cuerda) o Janbu simplificado (fuerzas horizontales).
@@ -660,30 +712,48 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
     Solve r;
     const double kh = s.kh;
     std::vector<double> aS(sl.size(), 0.0), aN(sl.size(), 0.0);
-    double D = 0.0;
+    double driving = 0.0;
     if (bishop) {
         const auto O = bishop_centre(g, sl);
         if (!O) {
+            r.explained = true;
             r.notes.push_back("Bishop needs a curved slip surface: the polyline is straight");
             return r;
         }
-        if (g.polyline)
-            r.notes.push_back("Bishop on a non-circular surface: moments about the centre of the circle through the "
-                              "ends and the deepest point");
         for (std::size_t i = 0; i < sl.size(); ++i) {
             const auto& t = sl[i];
             const double mx = 0.5 * (t.xa + t.xb) - O->x, my = 0.5 * (t.ya + t.yb) - O->y;
             aS[i] = -(mx * t.sa + my * t.ca);
             aN[i] = mx * t.ca - my * t.sa;
-            D += t.W * (O->x - t.xg) + kh * t.W * (O->y - t.yg);
+            driving += t.W * (O->x - t.xg) + kh * t.W * (O->y - t.yg);
         }
+    } else {
+        for (const auto& t : sl) driving += t.W * t.sa / t.ca + kh * t.W;
     }
+    if (!(driving > 0.0)) return backward();
+    if (bishop && g.polyline)
+        r.notes.push_back("Bishop on a non-circular surface: moments about the centre of the circle through the ends "
+                          "and the deepest point");
     ordinary_normals(sl, kh);
-    double F = 1.0;
+    choose(sl, s);
+    if (no_strength(sl)) {
+        for (auto& t : sl) t.Np = vertical_normal(t, std::numeric_limits<double>::infinity());
+        r.F = 0.0;
+        r.converged = true;
+        r.iterations = 1;
+        return r;
+    }
+    // arranque en el FS del Ordinario: con φ alto, partir de 1 deja mα <= 0 en el primer iterado
+    double F = 1.0, on = 0.0, od = 0.0;
+    for (const auto& t : sl) {
+        on += t.c * t.l + t.Np * t.tf;
+        od += t.W * t.sa + kh * t.W * t.ca;
+    }
+    if (od > 0.0 && on / od > 0.0 && std::isfinite(on / od)) F = on / od;
     for (r.iterations = 1; r.iterations <= o.max_iterations; ++r.iterations) {
         choose(sl, s);
         for (auto& t : sl) t.Np = vertical_normal(t, F);
-        double num = 0.0, den = bishop ? D : 0.0;
+        double num = 0.0, den = driving;
         for (std::size_t i = 0; i < sl.size(); ++i) {
             const auto& t = sl[i];
             const double S = t.c * t.l + t.Np * t.tf;
@@ -692,14 +762,13 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
                 den += aN[i] * (t.Np + t.u * t.l);
             } else {
                 num += S / t.ca;
-                den += t.W * t.sa / t.ca + kh * t.W;
             }
         }
-        if (!(den > 0.0) || !(num / den > 0.0) || !std::isfinite(num / den)) {
-            r.notes.push_back(kBackward);
+        const double Fn = num / den;
+        if (!(den > 0.0) || !(Fn > 0.0) || !std::isfinite(Fn)) {
+            r.bad_m_alpha = m_alpha_count(sl, F, 0.0, true);
             return r;
         }
-        const double Fn = num / den;
         if (std::fabs(Fn - F) < o.tolerance) {
             r.F = Fn;
             r.converged = true;
@@ -709,6 +778,7 @@ inline Solve bishop_janbu(std::vector<Slice>& sl, const LeSection& s, const Geo&
         F = Fn;
     }
     r.iterations = o.max_iterations;
+    r.bad_m_alpha = m_alpha_count(sl, F, 0.0, true);
     return r;
 }
 
@@ -718,8 +788,10 @@ inline double interslice_f(const LeOptions& o, bool spencer, double t, bool refl
     return interp(o.function_points, reflected ? 1.0 - t : t);
 }
 
-/// Spencer y Morgenstern-Price por el algoritmo de Zhu et al. (2005), con kh en R, T y el momento.
-inline Solve zhu(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o, bool spencer, bool reflected,
+/// Spencer y Morgenstern-Price. Para cada λ, F sale de la ecuación de fuerzas con la iteración de Zhu et al. (2005);
+/// λ es la raíz de la ecuación de momentos, buscada barriendo desde 0 hacia afuera hasta un cambio de signo y cerrada
+/// con regula falsi (Illinois) alternada con bisección. kh entra en R, T y el momento (brazo del centroide).
+inline Solve gle(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o, bool spencer, bool reflected,
                  double F0) {
     Solve r;
     const std::size_t n = sl.size();
@@ -727,22 +799,28 @@ inline Solve zhu(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
     std::vector<double> fb(n), R(n), T(n), Phi(n), Psi(n);
     for (std::size_t i = 0; i < n; ++i) fb[i] = interslice_f(o, spencer, (sl[i].xb - x0) / (x1 - x0), reflected);
     ordinary_normals(sl, kh);
-    double F = F0, lam = 0.0;
-    auto phi = [&](const Slice& t, double f, double F_) {
-        return (t.sa - lam * f * t.ca) * t.tf + (t.ca + lam * f * t.sa) * F_;
+    choose(sl, s);
+    double driving = 0.0;
+    for (const auto& t : sl) driving += t.W * t.sa + kh * t.W * t.ca;
+    if (!(driving > 0.0)) return backward();
+    if (no_strength(sl)) {
+        for (auto& t : sl) t.Np = t.W * t.ca - kh * t.W * t.sa - t.u * t.l;
+        r.F = 0.0;
+        r.lambda = 0.0;
+        r.converged = true;
+        r.iterations = 1;
+        return r;
+    }
+    auto phi = [&](const Slice& t, double f, double lam, double F) {
+        return (t.sa - lam * f * t.ca) * t.tf + (t.ca + lam * f * t.sa) * F;
     };
-    for (r.iterations = 1; r.iterations <= o.max_iterations; ++r.iterations) {
-        choose(sl, s);
-        for (std::size_t i = 0; i < n; ++i) {
-            const auto& t = sl[i];
-            R[i] = (t.W * t.ca - kh * t.W * t.sa - t.u * t.l) * t.tf + t.c * t.l;
-            T[i] = t.W * t.sa + kh * t.W * t.ca;
-        }
-        bool ok = false;
+    double last_F = F0;
+    // F de la ecuación de fuerzas para un λ dado
+    auto force_F = [&](double lam, double F) -> std::optional<double> {
         for (int k = 0; k < o.max_iterations; ++k) {
             for (std::size_t i = 0; i + 1 < n; ++i) {
-                Phi[i] = phi(sl[i], fb[i], F);
-                Psi[i] = phi(sl[i + 1], fb[i], F) / Phi[i];
+                Phi[i] = phi(sl[i], fb[i], lam, F);
+                Psi[i] = phi(sl[i + 1], fb[i], lam, F) / Phi[i];
             }
             double num = R[n - 1], den = T[n - 1], p = 1.0;
             for (std::size_t i = n - 1; i-- > 0;) {
@@ -750,24 +828,20 @@ inline Solve zhu(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
                 num += R[i] * p;
                 den += T[i] * p;
             }
-            if (!(den > 0.0) || !(num / den > 0.0) || !std::isfinite(num / den)) {
-                r.notes.push_back(kBackward);
-                return r;
-            }
             const double Fn = num / den;
-            const bool done = std::fabs(Fn - F) < o.tolerance;
+            if (!(den > 0.0) || !(Fn > 0.0) || !std::isfinite(Fn)) break;
+            last_F = Fn;
+            if (std::fabs(Fn - F) < o.tolerance) return Fn;
             F = Fn;
-            if (done) {
-                ok = true;
-                break;
-            }
         }
-        if (!ok) break;
-        // fuerzas entre tajadas en el borde derecho de cada una; E = 0 en los dos extremos
+        return std::nullopt;
+    };
+    // fuerzas entre tajadas (borde derecho; E = 0 en los extremos) y residuo de momentos λ Σ b (f E + f E) - Σ [...]
+    auto residual = [&](double lam, double F) {
         double EPhi = 0.0;
         for (std::size_t i = 0; i + 1 < n; ++i) {
-            Phi[i] = phi(sl[i], fb[i], F);
-            const double psi = i ? phi(sl[i], fb[i - 1], F) / Phi[i - 1] : 0.0;
+            Phi[i] = phi(sl[i], fb[i], lam, F);
+            const double psi = i ? phi(sl[i], fb[i - 1], lam, F) / Phi[i - 1] : 0.0;
             EPhi = psi * EPhi + F * T[i] - R[i];
             sl[i].E = EPhi / Phi[i];
         }
@@ -780,33 +854,106 @@ inline Solve zhu(std::vector<Slice>& sl, const LeSection& s, const LeOptions& o,
             num += t.b * (t.E + El) * std::tan(t.alpha) + 2.0 * kh * t.W * hc;
             den += t.b * (fb[i] * t.E + fl * El);
         }
-        const double lamn = num / den;
-        if (!std::isfinite(lamn)) break;
+        return lam * den - num;
+    };
+    struct Pt {
+        double lam, F, g;
+    };
+    auto eval = [&](double lam, double F) -> std::optional<Pt> {
+        ++r.iterations;
+        const auto f = force_F(lam, F);
+        if (!f) return std::nullopt;
+        const double g = residual(lam, *f);
+        if (!std::isfinite(g)) return std::nullopt;
+        return Pt{lam, *f, g};
+    };
+    auto fail = [&] {
+        r.F.reset();
+        r.lambda.reset();
+        r.converged = false;
+        r.bad_m_alpha = m_alpha_count(sl, last_F, 0.0, true);
+        return r;
+    };
+    for (int pass = 0; pass < 3; ++pass) {
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto& t = sl[i];
+            R[i] = (t.W * t.ca - kh * t.W * t.sa - t.u * t.l) * t.tf + t.c * t.l;
+            T[i] = t.W * t.sa + kh * t.W * t.ca;
+        }
+        const auto p0 = eval(0.0, F0);
+        if (!p0) return fail();
+        // barrido de λ desde 0 hacia afuera (primero el lado positivo) hasta un cambio de signo
+        std::optional<Pt> a, b;
+        if (p0->g == 0.0) {
+            a = b = p0;
+        } else {
+            Pt prev[2] = {*p0, *p0};
+            bool alive[2] = {true, true};
+            for (int k = 1; k <= 40 && !a && (alive[0] || alive[1]); ++k)
+                for (int side = 0; side < 2 && !a; ++side) {
+                    if (!alive[side]) continue;
+                    const auto q = eval((side ? -0.1 : 0.1) * k, prev[side].F);
+                    if (!q) {
+                        alive[side] = false;
+                    } else if ((q->g > 0.0) != (prev[side].g > 0.0)) {
+                        a = prev[side];
+                        b = q;
+                    } else {
+                        prev[side] = *q;
+                    }
+                }
+        }
+        if (!a) return fail();
+        // Illinois alternado con bisección: el intervalo se reduce al menos a la mitad cada dos pasos
+        double ga = a->g, gb = b->g;
+        int keep = 0;
+        for (int it = 0; it < o.max_iterations && std::fabs(b->lam - a->lam) > o.tolerance; ++it) {
+            double lam = 0.5 * (a->lam + b->lam);
+            if (it % 2 == 0 && gb != ga) {
+                const double rf = (a->lam * gb - b->lam * ga) / (gb - ga);
+                if (rf > std::min(a->lam, b->lam) && rf < std::max(a->lam, b->lam)) lam = rf;
+            }
+            const auto q = eval(lam, std::fabs(a->g) < std::fabs(b->g) ? a->F : b->F);
+            if (!q) return fail();
+            if (q->g == 0.0) {
+                a = b = q;
+                break;
+            }
+            if ((q->g > 0.0) == (a->g > 0.0)) {
+                a = q;
+                ga = q->g;
+                if (keep == 1) gb *= 0.5;
+                keep = 1;
+            } else {
+                b = q;
+                gb = q->g;
+                if (keep == -1) ga *= 0.5;
+                keep = -1;
+            }
+        }
+        if (std::fabs(b->lam - a->lam) > o.tolerance) return fail();
+        const Pt best = std::fabs(a->g) <= std::fabs(b->g) ? *a : *b;
+        r.F = best.F;
+        r.lambda = best.lam;
+        residual(best.lam, best.F);
         // N' con las fuerzas entre tajadas, para el material de los contactos y la tabla
         for (std::size_t i = 0; i < n; ++i) {
             auto& t = sl[i];
-            const double El = i ? sl[i - 1].E : 0.0, Xl = i ? lam * fb[i - 1] * El : 0.0, Xr = lam * fb[i] * t.E;
+            const double El = i ? sl[i - 1].E : 0.0, Xl = i ? best.lam * fb[i - 1] * El : 0.0;
+            const double Xr = best.lam * fb[i] * t.E;
             t.Np = t.W * t.ca - kh * t.W * t.sa - (El - t.E) * t.sa + (Xl - Xr) * t.ca - t.u * t.l;
             t.X = Xr;
         }
-        const bool done = std::fabs(lamn - lam) < o.tolerance;
-        if (done) {
-            r.F = F;
-            r.lambda = lam;
-            r.converged = true;
-            return r;
-        }
-        lam = lamn;
+        r.converged = true;
+        std::vector<int> mats;
+        for (const auto& t : sl) mats.push_back(t.mat);
+        choose(sl, s);
+        bool same = true;
+        for (std::size_t i = 0; i < n; ++i) same = same && mats[i] == sl[i].mat;
+        if (same) break;
+        F0 = best.F;
     }
-    r.iterations = std::min(r.iterations, o.max_iterations);
     return r;
-}
-
-inline int low_m_alpha(const std::vector<Slice>& sl, double F) {
-    int k = 0;
-    for (const auto& t : sl)
-        if (t.mat >= 0 && t.ca + t.sa * t.tf / F < 0.2) ++k;
-    return k;
 }
 }  // namespace le_detail
 
@@ -817,7 +964,7 @@ inline std::vector<LeSlice> make_slices(const LeSection& section, const SlipSurf
     o.n_slices = n_slices;
     validate(section, surface, o);
     const Built b = build(section, surface, n_slices);
-    return to_public(b.slices, b.reflected, section);
+    return to_public(b.slices, b.reflected, b.origin, section);
 }
 
 inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface& surface, LeMethod method,
@@ -836,26 +983,44 @@ inline LeResult le_factor_of_safety(const LeSection& section, const SlipSurface&
         default: {
             auto tmp = sl;
             const Solve bi = bishop_janbu(tmp, section, g, options, true);
-            r = zhu(sl, section, options, method == LeMethod::Spencer, b.reflected, bi.F ? *bi.F : 1.0);
+            r = gle(sl, section, options, method == LeMethod::Spencer, b.reflected,
+                    bi.F && *bi.F > 0.0 ? *bi.F : 1.0);
         }
     }
     LeResult out{std::nullopt, method, std::nullopt, r.iterations, r.converged, {}, 0.0, info(method), {}, r.notes};
     if (b.air)
         out.warnings.push_back("slip surface crosses the ground surface more than twice: the mass is taken between "
                                "the first and the last cut");
-    if (!r.converged && r.notes.empty()) out.warnings.push_back(std::string(name(method)) + " did not converge");
+    if (!r.converged && !r.explained) {
+        std::string w = std::string(name(method)) + " did not converge";
+        if (r.bad_m_alpha > 0) w += " (m-alpha <= 0 in " + std::to_string(r.bad_m_alpha) + " slices)";
+        out.warnings.push_back(w);
+    }
     if (r.converged) {
         out.factor_of_safety = r.F;
         out.lambda = r.lambda;
-        if (method != LeMethod::Ordinary) {
-            const int k = low_m_alpha(sl, *r.F);
+        if (method != LeMethod::Ordinary && *r.F > 0.0) {
+            const int k = m_alpha_count(sl, *r.F, 0.2, false);
             if (k > 0)
                 out.warnings.push_back("m-alpha below 0.2 in " + std::to_string(k) +
                                        " slices: results may be unreliable");
+            int neg = 0;
+            for (const auto& t : sl) neg += t.mat >= 0 && t.Np < 0.0;
+            if (neg > 0) out.notes.push_back("effective normal force below zero in " + std::to_string(neg) + " slices");
         }
     }
-    for (const auto& t : sl) out.sliding_mass_area += t.area;
-    out.slices = to_public(sl, b.reflected, section);
+    double thick = 0.0;
+    for (const auto& t : sl) {
+        out.sliding_mass_area += t.area;
+        thick = std::max(thick, t.area / t.b);
+    }
+    const double width = sl.back().xb - sl.front().xa;
+    const double chord = std::hypot(width, sl.back().yb - sl.front().ya);
+    if (out.sliding_mass_area < 1e-6 * width * width || thick < 1e-6 * chord) out.notes.push_back("negligible sliding mass");
+    out.slices = to_public(sl, b.reflected, b.origin, section);
+    if (!out.factor_of_safety)
+        for (auto& t : out.slices)
+            t.normal_force = t.shear_strength = t.interslice_normal_right = t.interslice_shear_right = 0.0;
     return out;
 }
 

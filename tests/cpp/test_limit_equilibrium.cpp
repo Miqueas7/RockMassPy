@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <random>
 
 #include "error_of.hpp"
 #include "rockmasspy/limit_equilibrium.hpp"
@@ -265,7 +267,7 @@ TEST(LimitEquilibrium, SpencerGlobalEquilibriumWithKh) {
     o.tolerance = 1e-12;
     auto b = build(s, fk_circle(), o.n_slices);
     auto& sl = b.slices;
-    const Solve r = zhu(sl, s, o, true, false, 1.5);
+    const Solve r = gle(sl, s, o, true, false, 1.5);
     ASSERT_TRUE(r.converged);
     double H = 0, V = 0, M = 0, scale = 0;
     const double ox = 77.0, oy = 33.0;  // un punto cualquiera
@@ -375,4 +377,185 @@ TEST(LimitEquilibrium, MethodInfoIsSecondary) {
     EXPECT_EQ(run(fk(), fk_circle(), LeMethod::Bishop).info.method_id, "Bishop-Simplified");
     EXPECT_EQ(run(fk(), fk_circle(), LeMethod::MorgensternPrice).info.method_id, "Morgenstern-Price-GLE");
     EXPECT_NE(run(fk(), fk_circle(), LeMethod::Spencer).info.source.find("Zhu"), std::string::npos);
+}
+
+// --- Correcciones de la revisión de la tarea 1 ---
+
+namespace {
+LeSection reviewer_slope(double kh) {
+    auto s = one_layer({{0, 30}, {40, 30}, {80, 0}, {120, 0}}, mc(20, 20, 35));
+    s.kh = kh;
+    return s;
+}
+}  // namespace
+
+// C1: sin resistencia y con fuerza motora, FS = 0 (falla), no la nota de la masa hacia atrás
+TEST(LimitEquilibrium, ZeroStrengthGivesZero) {
+    auto s = one_layer({{0, 60}, {60, 60}, {140, 20}, {180, 20}}, mc(120, 0, 0));
+    for (LeMethod m : kMethods) {
+        const auto r = run(s, fk_circle(), m);
+        ASSERT_TRUE(r.factor_of_safety.has_value()) << le_detail::name(m);
+        EXPECT_EQ(*r.factor_of_safety, 0.0) << le_detail::name(m);
+        EXPECT_TRUE(r.converged);
+        EXPECT_TRUE(r.warnings.empty());
+    }
+}
+
+// C1: un iterado no positivo o con mα <= 0 da el aviso, nunca solo la nota
+TEST(LimitEquilibrium, BadIteratesWarnInsteadOfNote) {
+    const LeSection cases[] = {one_layer({{0, 60}, {60, 60}, {140, 20}, {180, 20}}, mc(120, 0, 20, 0.99)),
+                               one_layer({{0, 60}, {60, 60}, {140, 20}, {180, 20}}, mc(120, 600, 89.9))};
+    for (const auto& s : cases)
+        for (LeMethod m : kMethods) {
+            const auto r = run(s, fk_circle(), m);
+            EXPECT_TRUE(r.factor_of_safety.has_value() || !r.warnings.empty()) << le_detail::name(m);
+            for (const auto& n : r.notes) EXPECT_EQ(n.find("does not move towards the face"), std::string::npos);
+            if (!r.factor_of_safety) EXPECT_NE(r.warnings[0].find("did not converge"), std::string::npos);
+        }
+}
+
+// I1: λ como raíz de la ecuación de momentos; la sustitución directa divergía aquí (valores del revisor, solver propio)
+TEST(LimitEquilibrium, LambdaRootWithStrongKh) {
+    const auto f = circle(70, 45, 50);
+    const auto sp = run(reviewer_slope(0.2), f, LeMethod::Spencer);
+    ASSERT_TRUE(sp.factor_of_safety.has_value());
+    EXPECT_NEAR(*sp.factor_of_safety, 1.4389, 2e-3);
+    EXPECT_NEAR(*sp.lambda, 0.5748, 2e-3);
+    EXPECT_NEAR(fs(reviewer_slope(0.2), f, LeMethod::Bishop), 1.4118, 2e-3);
+    EXPECT_NEAR(fs(reviewer_slope(0.2), f, LeMethod::MorgensternPrice), 1.4346, 2e-3);
+    const auto sp25 = run(reviewer_slope(0.25), f, LeMethod::Spencer);
+    ASSERT_TRUE(sp25.factor_of_safety.has_value());
+    EXPECT_NEAR(*sp25.factor_of_safety, 1.346, 2e-3);
+    EXPECT_NEAR(*sp25.lambda, 0.597, 2e-3);
+}
+
+// I1: barrido con semilla fija; Spencer y M-P convergen cuando Bishop da un FS razonable, y si no, avisan
+TEST(LimitEquilibrium, RandomSectionsConvergeOrWarn) {
+    std::mt19937 rng(20261104);
+    auto U = [&](double a, double b) { return std::uniform_real_distribution<double>(a, b)(rng); };
+    int checked = 0, good_cases = 0;
+    for (int k = 0; k < 50; ++k) {
+        const double H = U(10, 60), cotb = 1.0 / std::tan(U(25, 60) * le_detail::kPi / 180.0), toe = H * cotb;
+        const double x0 = -3 * H, x1 = toe + 3 * H;
+        LeSection s;
+        s.surface = {{x0, H}, {0, H}, {toe, 0}, {x1, 0}};
+        const int nl = U(0, 1) < 0.5 ? 2 : 3;
+        double y = H;
+        for (int i = 0; i < nl; ++i) {
+            s.materials.push_back(mc(U(18, 26), U(0, 60), U(15, 40)));
+            if (i + 1 == nl) {
+                s.layers.push_back(LeLayer{{}, i});
+            } else {
+                y = U(y - 0.6 * H, y - 0.1 * H);
+                s.layers.push_back(LeLayer{{{x0, y}, {x1, y}}, i});
+            }
+        }
+        s.kh = U(0, 0.3);
+        const Point2 A{U(-2 * H, -0.1 * H), H};
+        const double xb = U(0.3 * toe, toe + H);
+        const Point2 B{xb, xb < toe ? H * (1 - xb / toe) : 0.0};
+        const double vx = B.x - A.x, vy = B.y - A.y, L = std::hypot(vx, vy), t = U(0.2, 1.5) * L;
+        const double xc = 0.5 * (A.x + B.x) - vy / L * t, yc = 0.5 * (A.y + B.y) + vx / L * t;
+        const double rad = std::hypot(A.x - xc, A.y - yc);
+        const bool flip = U(0, 1) < 0.5;
+        const LeSection sec = flip ? mirrored(s) : s;
+        const auto sf = circle(flip ? -xc : xc, yc, rad);
+        LeResult bi;
+        try {
+            bi = run(sec, sf, LeMethod::Bishop);
+        } catch (const std::invalid_argument&) {
+            continue;
+        }
+        ++checked;
+        const bool good = bi.factor_of_safety && *bi.factor_of_safety >= 0.3 && *bi.factor_of_safety <= 5.0;
+        good_cases += good;
+        for (LeMethod m : {LeMethod::Spencer, LeMethod::MorgensternPrice}) {
+            const auto r = run(sec, sf, m);
+            if (good) EXPECT_TRUE(r.factor_of_safety.has_value()) << "case " << k << " " << le_detail::name(m);
+            EXPECT_TRUE(r.factor_of_safety.has_value() || !r.warnings.empty()) << "case " << k;
+        }
+    }
+    EXPECT_GE(checked, 40);
+    EXPECT_GE(good_cases, 30);
+}
+
+// I2: la nota de Bishop con polilínea no tapa el aviso de no convergencia
+TEST(LimitEquilibrium, PolylineBishopWarnsWhenNotConverged) {
+    auto o = opts(50);
+    o.max_iterations = 1;
+    const auto r = le_factor_of_safety(fk(), polyline({{30, 60}, {70, 35}, {110, 25}, {150, 20}}), LeMethod::Bishop, o);
+    EXPECT_FALSE(r.factor_of_safety.has_value());
+    ASSERT_EQ(r.warnings.size(), 1u);
+    EXPECT_EQ(r.warnings[0].rfind("Bishop did not converge", 0), 0u);
+    EXPECT_EQ(r.notes.size(), 1u);
+}
+
+// M1: masa minúscula, FS informado con nota
+TEST(LimitEquilibrium, NegligibleMassNote) {
+    const auto r = run(fk(), polyline({{80, 50}, {90, 45 - 1e-7}, {100, 40}}), LeMethod::Ordinary);
+    ASSERT_TRUE(r.factor_of_safety.has_value());
+    EXPECT_NE(std::find(r.notes.begin(), r.notes.end(), "negligible sliding mass"), r.notes.end());
+    for (const auto& n : run(fk(), fk_circle(), LeMethod::Ordinary).notes) EXPECT_NE(n, "negligible sliding mass");
+}
+
+// M2 y M3: coordenadas UTM dan el mismo FS y no aceptan cortes falsos
+TEST(LimitEquilibrium, TranslatedCoordinates) {
+    const double dx = 5e5, dy = 8.5e6;
+    auto shift = [&](std::vector<Point2> p) {
+        for (auto& v : p) v = {v.x + dx, v.y + dy};
+        return p;
+    };
+    auto shifted = [&](LeSection s) {
+        s.surface = shift(s.surface);
+        for (auto& l : s.layers)
+            if (!l.bottom.empty()) l.bottom = shift(l.bottom);
+        if (s.model_base_y) *s.model_base_y += dy;
+        return s;
+    };
+    for (LeMethod m : kMethods) {
+        const double a = fs(fk(), fk_circle(), m), b = fs(shifted(fk()), circle(120 + dx, 90 + dy, 80), m);
+        EXPECT_NEAR(b, a, 1e-9 * a) << le_detail::name(m);
+        const double c = fs(acads3b(), polyline(acads3b_slip()), m),
+                     d = fs(shifted(acads3b()), polyline(shift(acads3b_slip())), m);
+        EXPECT_NEAR(d, c, 1e-9 * c) << le_detail::name(m);
+    }
+    const std::vector<Point2> ground{{0, 24.386}, {40, 24.386}, {59.550, 0}, {99.550, 0}};
+    for (double ox : {0.0, 8.5e6}) {
+        auto g = ground;
+        for (auto& v : g) v.x += ox;
+        const auto sec = one_layer(g, mc(20, 10, 30));
+        EXPECT_NE(error_of([&] { run(sec, circle(58.480 + ox, 23.905, 24.011), LeMethod::Bishop); }).find("does not cut"),
+                  std::string::npos)
+            << ox;
+    }
+}
+
+TEST(LimitEquilibrium, ReviewOptionChecks) {
+    auto o = opts(50);
+    o.tolerance = 1e-2;
+    EXPECT_NE(error_of([&] { le_factor_of_safety(fk(), fk_circle(), LeMethod::Bishop, o); }).find("tolerance"),
+              std::string::npos);
+    // M5: N' < 0 en Bishop se anota, sin recortar
+    const auto bi = run(fk(0.25), fk_circle(), LeMethod::Bishop);
+    EXPECT_NE(std::find(bi.notes.begin(), bi.notes.end(), "effective normal force below zero in 3 slices"),
+              bi.notes.end());
+    // M6: sin convergencia, la tabla no trae fuerzas
+    o = opts(50);
+    o.max_iterations = 1;
+    for (const auto& t : le_factor_of_safety(fk(), fk_circle(), LeMethod::Spencer, o).slices) {
+        EXPECT_EQ(t.normal_force, 0.0);
+        EXPECT_EQ(t.shear_strength, 0.0);
+        EXPECT_EQ(t.interslice_normal_right, 0.0);
+        EXPECT_EQ(t.interslice_shear_right, 0.0);
+    }
+    // M7: función por puntos de 0 a 1, al menos dos puntos y algún f > 0
+    const std::vector<std::vector<Point2>> bad{{{0, 1}}, {{0.1, 1}, {1, 1}}, {{0, 1}, {0.9, 1}}, {{0, 0}, {1, 0}}};
+    for (const auto& p : bad) {
+        o = opts(50);
+        o.function = InterSliceFunction::Points;
+        o.function_points = p;
+        EXPECT_NE(error_of([&] { le_factor_of_safety(fk(), fk_circle(), LeMethod::MorgensternPrice, o); })
+                      .find("function_points"),
+                  std::string::npos);
+    }
 }

@@ -296,3 +296,82 @@ def test_method_info_is_secondary(method):
     assert r.info.verification == rm.Verification.Secondary
     assert r.method == method
     assert "Fredlund" in r.info.source
+
+
+# --- Correcciones de la revisión de la tarea 1 ---
+
+
+def reviewer_slope(kh):
+    s = section([(0, 30), (40, 30), (80, 0), (120, 0)], [layer([], 0)], [mc(20, 20, 35)])
+    s.kh = kh
+    return s
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_zero_strength_gives_zero(method):
+    r = run(section(FK_SURFACE, [layer([], 0)], [mc(120, 0, 0)]), circle(*FK_CIRCLE), method)
+    assert r.factor_of_safety == 0.0
+    assert r.converged and not r.warnings
+
+
+@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("material", [mc(120, 0, 20, 0.99), mc(120, 600, 89.9)])
+def test_bad_iterates_warn_instead_of_note(method, material):
+    r = run(section(FK_SURFACE, [layer([], 0)], [material]), circle(*FK_CIRCLE), method)
+    assert r.factor_of_safety is not None or r.warnings
+    assert not any("does not move towards the face" in n for n in r.notes)
+    if r.factor_of_safety is None:
+        assert "did not converge" in r.warnings[0]
+
+
+def test_lambda_root_with_strong_kh():
+    # valores del revisor con su propio solver; la sustitución directa de λ divergía aquí
+    f = circle(70, 45, 50)
+    sp = run(reviewer_slope(0.2), f, M.Spencer)
+    assert sp.factor_of_safety == pytest.approx(1.4389, abs=2e-3)
+    assert sp.lambda_ == pytest.approx(0.5748, abs=2e-3)
+    assert fs(reviewer_slope(0.2), f, M.Bishop) == pytest.approx(1.4118, abs=2e-3)
+    assert fs(reviewer_slope(0.2), f, M.MorgensternPrice) == pytest.approx(1.4346, abs=2e-3)
+    sp = run(reviewer_slope(0.25), f, M.Spencer)
+    assert sp.factor_of_safety == pytest.approx(1.346, abs=2e-3)
+    assert sp.lambda_ == pytest.approx(0.597, abs=2e-3)
+
+
+def test_polyline_bishop_warns_when_not_converged():
+    r = run(fk(), polyline([(30, 60), (70, 35), (110, 25), (150, 20)]), M.Bishop, max_iterations=1)
+    assert r.factor_of_safety is None
+    assert len(r.warnings) == 1 and r.warnings[0].startswith("Bishop did not converge")
+
+
+def test_negligible_mass_note():
+    r = run(fk(), polyline([(80, 50), (90, 45 - 1e-7), (100, 40)]), M.Ordinary)
+    assert r.factor_of_safety is not None
+    assert "negligible sliding mass" in r.notes
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_translated_coordinates(method):
+    dx, dy = 5e5, 8.5e6
+    moved = fk(surface=[(x + dx, y + dy) for x, y in FK_SURFACE])
+    assert fs(moved, circle(120 + dx, 90 + dy, 80), method) == pytest.approx(
+        fs(fk(), circle(*FK_CIRCLE), method), rel=1e-9)
+
+
+@pytest.mark.parametrize("ox", [0.0, 8.5e6])
+def test_false_cut_is_rejected(ox):
+    g = [(x + ox, y) for x, y in [(0, 24.386), (40, 24.386), (59.550, 0), (99.550, 0)]]
+    with pytest.raises(ValueError, match="does not cut"):
+        run(section(g, [layer([], 0)], [mc(20, 10, 30)]), circle(58.480 + ox, 23.905, 24.011), M.Bishop)
+
+
+def test_review_option_checks():
+    with pytest.raises(ValueError, match="tolerance"):
+        run(fk(), circle(*FK_CIRCLE), M.Bishop, tolerance=1e-2)
+    assert "effective normal force below zero in 3 slices" in run(fk(0.25), circle(*FK_CIRCLE), M.Bishop).notes
+    r = run(fk(), circle(*FK_CIRCLE), M.Spencer, max_iterations=1)
+    assert all(t.normal_force == t.shear_strength == t.interslice_normal_right == t.interslice_shear_right == 0.0
+               for t in r.slices)
+    for p in ([(0, 1)], [(0.1, 1), (1, 1)], [(0, 1), (0.9, 1)], [(0, 0), (1, 0)]):
+        with pytest.raises(ValueError, match="function_points"):
+            run(fk(), circle(*FK_CIRCLE), M.MorgensternPrice, function=rm.InterSliceFunction.Points,
+                function_points=pts(p))
