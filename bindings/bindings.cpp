@@ -29,6 +29,7 @@
 #include "rockmasspy/wedge.hpp"
 #include "rockmasspy/toppling.hpp"
 #include "rockmasspy/bench.hpp"
+#include "rockmasspy/newmark.hpp"
 
 namespace nb = nanobind;
 using namespace rockmasspy;
@@ -592,6 +593,21 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("interramp_angle", &interramp_angle, nb::arg("bench_height_m"), nb::arg("berm_width_m"),
           nb::arg("face_angle_deg"));
     m.def("berm_reliability", &berm_reliability, nb::arg("widths_m"), nb::arg("required_width_m"));
+
+    // Newmark de bloque rígido
+    nb::class_<NewmarkInput>(m, "NewmarkInput", "Acceleration record (g), time step, yield coefficient ky and options.")
+        .def(nb::init<>())
+        .def_rw("dt_s", &NewmarkInput::dt_s).def_rw("acceleration_g", &NewmarkInput::acceleration_g)
+        .def_rw("ky", &NewmarkInput::ky).def_rw("scale", &NewmarkInput::scale)
+        .def_rw("both_directions", &NewmarkInput::both_directions);
+    nb::class_<NewmarkResult>(m, "NewmarkResult", "Rigid-block Newmark displacement, peak relative velocity and history.")
+        .def_ro("displacement_m", &NewmarkResult::displacement_m)
+        .def_ro("max_velocity_m_s", &NewmarkResult::max_velocity_m_s)
+        .def_ro("time_of_max_s", &NewmarkResult::time_of_max_s)
+        .def_ro("displacement_history_m", &NewmarkResult::displacement_history_m)
+        .def_ro("info", &NewmarkResult::info).def_ro("warnings", &NewmarkResult::warnings)
+        .def_ro("notes", &NewmarkResult::notes);
+    m.def("newmark_rigid_block", &newmark_rigid_block, nb::arg("input"));
 
     // Equilibrio límite 2D por tajadas
     nb::class_<Circle>(m, "Circle", "Circular slip surface: centre and radius.")
