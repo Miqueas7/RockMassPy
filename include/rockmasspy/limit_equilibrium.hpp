@@ -7,6 +7,9 @@
  * Morgenstern-Price y Spencer: para cada λ, F es la raíz con intervalo de la ecuación de fuerzas de Zhu, Lee, Qian y
  * Chen (2005), no leído; λ como raíz de la ecuación de momentos (barrido desde 0 mientras el residuo baje y regula
  * falsi con bisección).
+ * Límite conocido del barrido de λ: cada lado avanza solo mientras |g| (residuo de momentos) baje, porque más allá de un
+ * máximo de |g| aparecían raíces espurias (ACADS 3(a): λ -2.0, F 0.22 con Bishop 3.7). Una raíz física que esté más
+ * allá de un máximo de |g| no se encuentra; en ese caso el resultado es FS vacío con el aviso de no convergencia.
  * Convenciones: x horizontal, y hacia arriba, unidades coherentes. Se trabaja con un origen local (UTM sin pérdida de
  * precisión). La cara puede mirar a cualquier lado: el núcleo detecta el sentido y refleja (x -> -x) por dentro, así
  * que una sección reflejada da el mismo FS y el mismo λ.
