@@ -713,7 +713,7 @@ def newmark_figure(r, lang: str):
 
 def _le_blocks(le, lang: str, figures: bool) -> tuple:
     """Tabla «Equilibrio límite» (una fila por método, como el archivo), la de la superficie crítica y las figuras."""
-    from ..limit_equilibrium import _points
+    from ..limit_equilibrium import _points, le_static_fs
     from ..probabilistic import is_failure
     from ..viz.style import text
 
@@ -721,12 +721,13 @@ def _le_blocks(le, lang: str, figures: bool) -> tuple:
     for r in le:
         ky = None if r.yield_ is None else r.yield_.ky
         nm = None if r.newmark is None else r.newmark.displacement_m
-        for x in r.results:
+        for k, (x, fs0) in enumerate(zip(r.results, le_static_fs(r))):
             fs = x.factor_of_safety
             rows.append((r.id_analisis, r.id_seccion, t(f"le_surf_{r.surface_type}", lang),
-                         text(f"le_method_{x.method.name}", lang), _num(fs),
+                         text(f"le_method_{x.method.name}", lang), _num(r.kh), _num(fs), _num(fs0),
                          "-" if fs is None else t("sl_yes" if is_failure(fs) else "sl_no", lang),
-                         _num(x.lambda_), _num(ky), _num(nm)))
+                         # ky y Newmark solo en la fila del primer método, el que los calcula (como el archivo)
+                         _num(x.lambda_), *((_num(ky), _num(nm)) if k == 0 else ("-", "-"))))
         c = None if r.surface is None else r.surface.circle
         s = r.search
         surf.append((r.id_analisis, t(f"le_surf_{r.surface_type}", lang),
@@ -734,8 +735,8 @@ def _le_blocks(le, lang: str, figures: bool) -> tuple:
                      _points(r.surface) or "-", "-" if s is None else str(s.evaluated),
                      "-" if s is None else str(s.discarded)))
     out = [Table(t("cap_le", lang), ("id_analisis", "id_seccion", t("h_le_surface", lang), t("h_le_method", lang),
-                                     t("h_fs", lang), t("h_fs_le1", lang), t("h_lambda", lang), t("h_ky", lang),
-                                     t("h_newmark", lang)), tuple(rows)),
+                                     "kh", t("h_fs", lang), t("h_fs_static", lang), t("h_fs_le1", lang),
+                                     t("h_lambda", lang), t("h_ky", lang), t("h_newmark", lang)), tuple(rows)),
            Table(t("cap_le_surface", lang), ("id_analisis", t("h_le_surface", lang), "xc (m)", "yc (m)", "R (m)",
                                              t("h_points", lang), t("h_evaluated", lang), t("h_discarded", lang)),
                  tuple(surf))]
@@ -763,8 +764,7 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     results, blocks, le = list(results), list(blocks), list(le)
     if not results and not le:
         raise ValueError("results is empty: nothing to report")
-    methods = tuple({(m.method_id, m.source): MethodRef(m.method_id, m.verification.name, m.source)
-                     for r in (*results, *blocks, *le) for m in r.methods}.values())
+    methods = _dedup_methods(m for r in (*results, *blocks, *le) for m in r.methods)
     counts = Counter(w for r in results for w in set(r.warnings))
     bcounts = warning_counts(blocks)
     lcounts = le_warning_counts(le)
@@ -791,8 +791,8 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
     if notes:
         s4 += (Paragraph(t("h_notes", lang) + ":"), *(Paragraph(n) for n in notes))
     sections = (
-        Section("1", t("sl_s1", lang), (Paragraph(t("sl_scope", lang)),)
-                + ((Paragraph(t("le_scope", lang)),) if le else ())),
+        Section("1", t("sl_s1", lang), ((Paragraph(t("sl_scope", lang)),) if results else ())
+                + ((Paragraph(t("le_scope" if results else "le_scope_only", lang)),) if le else ())),
         Section("2", t("sl_s2", lang), (Table(
             t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
             tuple((m.method_id, m.verification, m.source) for m in methods)),)),
@@ -803,8 +803,25 @@ def build_slope_report(results, *, title: str, lang: str = "es", author: str = "
         Section("4", t("sl_s4", lang), s4),
         Section("5", t("sl_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
     )
-    return Report(title, _subtitle(t("slope_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang],
-                  __version__, date or datetime.date.today().isoformat())
+    return Report(title, _subtitle(t(slope_title_key(bool(results)), lang), author, lang), lang, sections, methods,
+                  DISCLAIMER[lang], __version__, date or datetime.date.today().isoformat())
+
+
+def slope_title_key(rock_slopes: bool) -> str:
+    """Título del informe de taludes: «en roca» solo con taludes de la 3A; con solo equilibrio límite, sin «en roca»."""
+    return "slope_title" if rock_slopes else "slope_title_le"
+
+
+def _dedup_methods(methods) -> tuple:
+    """Una fila por method_id; si las fuentes difieren, se unen con « · »."""
+    out: dict[str, MethodRef] = {}
+    for m in methods:
+        prev = out.get(m.method_id)
+        if prev is None:
+            out[m.method_id] = MethodRef(m.method_id, m.verification.name, m.source)
+        elif m.source not in prev.source.split(" · "):
+            out[m.method_id] = MethodRef(prev.method_id, prev.verification, f"{prev.source} · {m.source}")
+    return tuple(out.values())
 
 
 def build_verification_report(verification: "VerificationResult", *, title: str, lang: str = "es", author: str = "",

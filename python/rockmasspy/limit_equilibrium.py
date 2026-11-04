@@ -18,7 +18,7 @@ ni a un repr; el archivo de resultados lleva solo `id_analisis` e `id_seccion`. 
 import math
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -357,6 +357,8 @@ def _index(inp: LeInputs):
                 bad(c, "no line with this name in Geometria for this id_seccion")
         if a.registro is not None and a.registro not in accs:
             bad("registro", "no record with this id in Sismos")
+        if a.base_modelo_m is not None and a.base_modelo_m >= min(p.y for p in s.lines[s.ground]):
+            bad("base_modelo_m", "must be below the ground surface")
         if a.superficie != "dada" and s.piezometric is not None:
             # una piezométrica corta descartaría en silencio las superficies que la cruzan (como en el núcleo)
             g, p = s.lines[s.ground], s.lines[s.piezometric]
@@ -407,7 +409,11 @@ def load_le_inputs(source, *, sheets: Mapping[str, str] | None = None) -> LeInpu
         an = leer(ANALYSES_SHEET, ANALYSIS_COLUMNS, _AN_TEXT, ("id_analisis", "id_seccion", "metodos", "superficie"),
                   "id_analisis", _analysis)
         rec = ()
-        if any(a.registro is not None for a in an) or names[RECORDS_SHEET] in src.sheetnames:
+        need = next((a for a in an if a.registro is not None), None)
+        if need is not None and names[RECORDS_SHEET] not in src.sheetnames:
+            raise ValueError(f"{_where(need.hoja, need.fila, 'registro')}: no accelerogram given "
+                             "(use --records or a Sismos sheet)")
+        if need is not None or names[RECORDS_SHEET] in src.sheetnames:
             rec = leer(RECORDS_SHEET, RECORD_COLUMNS, _REC_TEXT, RECORD_COLUMNS, None, _record)
     finally:
         if close is not None:
@@ -468,6 +474,17 @@ class LeAnalysisResult:
     section: "rm.LeSection | None" = field(default=None, repr=False)
     record: "Accelerogram | None" = field(default=None, repr=False)  # el registro escalado que usó Newmark
     yield_surface: "rm.SlipSurface | None" = field(default=None, repr=False)  # la de ky (R17), si se calculó
+    # con kh > 0: los mismos métodos con kh = 0 sobre `surface`, paralelo a `results`; con kh = 0, vacío
+    static_results: tuple = field(default=(), repr=False)
+
+    @property
+    def kh(self) -> float | None:
+        return None if self.section is None else self.section.kh
+
+    @property
+    def ky_on_critical(self) -> bool:
+        """ky se calculó sobre la superficie crítica (la que se dibuja); con R17 puede ser otra, la crítica sísmica."""
+        return _same_surface(self.yield_surface, self.surface)
 
     @property
     def fs_min(self) -> float | None:
@@ -542,23 +559,39 @@ def _has_surface(f) -> bool:
     return f is not None and (f.circle is not None or f.polyline is not None)
 
 
+def _same_surface(a, b) -> bool:
+    if a is None or b is None:
+        return a is b
+    if a.circle is not None or b.circle is not None:
+        return (a.circle is not None and b.circle is not None
+                and (a.circle.xc, a.circle.yc, a.circle.radius) == (b.circle.xc, b.circle.yc, b.circle.radius))
+    return [(p.x, p.y) for p in a.polyline or []] == [(p.x, p.y) for p in b.polyline or []]
+
+
 # prefijos de método: el del núcleo («Ordinary: ...») y el de la hoja («ordinario: ...»)
-_CORE_PREFIX = re.compile(r"^(Ordinary|Bishop|Janbu simplified|Janbu corrected|Spencer|Morgenstern-Price): ")
+_CORE_NAMES = "Ordinary|Bishop|Janbu simplified|Janbu corrected|Spencer|Morgenstern-Price"
+_CORE_PREFIX = re.compile(rf"^({_CORE_NAMES}): ")
+_CORE_NAMED = re.compile(rf"^({_CORE_NAMES}) ")  # «Spencer did not converge»: ya nombra su método
 _WORD_PREFIX = re.compile(rf"^({'|'.join(_METHODS)}): ")
 
 
 def _add_messages(out: list, word: str, messages) -> None:
     """Agrega «<método>: mensaje» sin el prefijo del núcleo, si el mensaje sin prefijo no está ya (de otro método o de
-    la búsqueda)."""
+    la búsqueda). Un mensaje que ya empieza con el nombre de su método va tal cual, sin la palabra de la hoja."""
     seen = {_WORD_PREFIX.sub("", x) for x in out}
     for m in messages:
         m = _CORE_PREFIX.sub("", m)
         if m not in seen:
-            out.append(f"{word}: {m}")
+            out.append(m if _CORE_NAMED.match(m) else f"{word}: {m}")
             seen.add(m)
 
 
+def _ky(msg: str) -> str:
+    return f"ky: {msg.removeprefix('ky ')}"  # «ky: ky not found: ...» -> «ky: not found: ...»
+
+
 _KY_ROUNDS, _KY_CHANGE = 4, 1e-4
+_KY_OTHER_NOTE = "ky computed on a different slip surface (the one with the lowest ky), not on the critical one shown"
 _KY_ROUNDS_NOTE = ("ky: up to 4 rounds, searching first with kh = 0 and then with kh = the last ky, until ky changes "
                    "by less than 1e-4; the lowest ky found and its slip surface are reported")
 
@@ -569,7 +602,7 @@ def _yield_rounds(a, s, materials, static, so, opts, method, surface, warnings, 
     con su superficie. `surface` es la crítica con kh = 0 si `searched` (la búsqueda principal ya fue sin sismo)."""
     def search(kh):
         found = _search(a, s, _section(s, a, materials, kh, [], []) if kh else static, so)
-        warnings.extend(f"ky search: {w}" for w in found.warnings)
+        warnings.extend(f"ky search: {w}" for w in found.warnings if w not in warnings)  # sin repetir la principal
         return found.surface if _has_surface(found.surface) else None
 
     best = best_surface = prev = None
@@ -580,7 +613,7 @@ def _yield_rounds(a, s, materials, static, so, opts, method, surface, warnings, 
         if surface is None:
             break
         y = rm.le_yield_coefficient(static, surface, method, opts)
-        warnings.extend(f"ky: {w}" for w in y.warnings)
+        warnings.extend(_ky(w) for w in y.warnings)
         if best is None or (y.ky is not None and (best.ky is None or y.ky < best.ky)):
             best, best_surface = y, surface
         if y.ky is None or y.ky <= 0 or (prev is not None and abs(y.ky - prev) < _KY_CHANGE):
@@ -621,19 +654,27 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
         methods.append(r.info)
 
     yld = nm = record = ysurf = None
+    static_results = ()
     if kh > 0 or a.registro is not None:
         static = _section(s, a, materials, 0.0, [], [])  # le_yield_coefficient reemplaza el kh de la sección
+        if kh > 0 and surface is not None:  # el FS sin sismo sobre la misma superficie, con cada método
+            static_results = tuple(rm.le_factor_of_safety(static, surface, m, opts) for m in methods_le)
+            for m, r in zip(methods_le, static_results):
+                _add_messages(warnings, _METHOD_WORD[m], r.warnings)
         if search is None:  # superficie dada: ky sobre ella
             ysurf = surface
             yld = rm.le_yield_coefficient(static, surface, first, opts)
-            warnings += [f"ky: {w}" for w in yld.warnings]
+            warnings += [_ky(w) for w in yld.warnings]
         else:
             yld, ysurf = _yield_rounds(a, s, materials, static, so, opts, first, surface, warnings, searched=kh == 0)
-            notes.append(_KY_ROUNDS_NOTE)
+            if yld is not None and yld.ky is not None:
+                notes.append(_KY_ROUNDS_NOTE)
+                if not _same_surface(ysurf, surface):
+                    notes.append(_KY_OTHER_NOTE)
         if yld is None:
             notes.append("ky not computed: no valid static slip surface")
         else:
-            notes += [f"ky: {t}" for t in yld.notes]
+            notes += [_ky(t) for t in yld.notes]
             methods.append(yld.info)
     if a.registro is not None:
         if yld is None or yld.ky is None:
@@ -653,13 +694,15 @@ def _assess_one(order, a: AnalysisRow, s: _Section, materials, accs):
             methods.append(nm.info)
     uniq = {m.method_id: m for m in methods}
     return LeAnalysisResult(a.id_analisis, a.id_seccion, order, _SURFACES[a.superficie], results, search, yld, nm,
-                            _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record, ysurf)
+                            _unique(warnings), _unique(notes), tuple(uniq.values()), surface, sec, record, ysurf,
+                            static_results)
 
 
 # nombres del núcleo que pueden salir en un error -> columna de Analisis_LE
 _ERR_NAMES = {"model_base_y": "base_modelo_m", "water_unit_weight": "peso_agua_kn_m3", "crack.depth_m": "grieta_m",
               "crack.water_fill": "grieta_llenado", "n_slices": "tajadas", "weak_line": "linea_debil",
-              "polyline": "linea_superficie", "grid.x_min": "malla_x_min", "grid.x_max": "malla_x_max",
+              "polyline": "linea_superficie", "slip_surface": "linea_superficie", "grid.x_min": "malla_x_min",
+              "grid.x_max": "malla_x_max",
               "grid.y_min": "malla_y_min", "grid.y_max": "malla_y_max", "scale": "escala_registro"}
 
 
@@ -671,12 +714,18 @@ def _clean(msg: str) -> str:
     return re.sub(rf"(?<![\w.])({pat})(?![\w])", lambda m: _ERR_NAMES[m.group(1)], msg)
 
 
-def assess_le(source, *, sheets: Mapping[str, str] | None = None) -> list[LeAnalysisResult]:
-    """Evalúa cada fila de `Analisis_LE` (ver la cabecera del módulo). Un dato imposible lanza con hoja y fila."""
+def assess_le(source, *, sheets: Mapping[str, str] | None = None,
+              progress: Callable[[int, int], None] | None = None) -> list[LeAnalysisResult]:
+    """Evalúa cada fila de `Analisis_LE` (ver la cabecera del módulo). Un dato imposible lanza con hoja y fila.
+
+    `progress(k, n)` se llama antes de evaluar el análisis k de n (con las hojas ya validadas).
+    """
     inp = load_le_inputs(source, sheets=sheets)
     sections, materials, accs = _index(inp)
     out = []
     for order, a in enumerate(inp.analyses, start=1):
+        if progress is not None:
+            progress(order, len(inp.analyses))
         try:
             out.append(_assess_one(order, a, sections[a.id_seccion], materials, accs))
         except ValueError as e:
@@ -709,9 +758,9 @@ def le_warning_counts(results: Iterable[LeAnalysisResult]) -> Counter:
     return Counter(w for r in results for w in {_norm(x) for x in r.warnings})
 
 
-RESULT_COLUMNS = ("id_analisis", "id_seccion", "superficie", "metodo", "fs", "fs_menor_o_igual_1", "lambda",
-                  "convergio", "xc_m", "yc_m", "radio_m", "puntos_superficie", "evaluadas", "descartadas", "ky",
-                  "desplazamiento_newmark_m", "avisos", "notas")
+RESULT_COLUMNS = ("id_analisis", "id_seccion", "superficie", "metodo", "kh", "fs", "fs_estatico",
+                  "fs_menor_o_igual_1", "lambda", "convergio", "xc_m", "yc_m", "radio_m", "puntos_superficie",
+                  "evaluadas", "descartadas", "ky", "desplazamiento_newmark_m", "avisos", "notas")
 
 
 def _points(f) -> str | None:
@@ -720,19 +769,26 @@ def _points(f) -> str | None:
     return "; ".join(f"{p.x:.3f} {p.y:.3f}" for p in f.polyline)
 
 
+def le_static_fs(r: LeAnalysisResult) -> list:
+    """FS sin sismo de cada método, paralelo a `results`: con kh > 0 el de `static_results`; con kh = 0, el mismo FS."""
+    return [x.factor_of_safety for x in (r.static_results or r.results)]
+
+
 def save_le_results(results: Iterable[LeAnalysisResult], path) -> Path:
-    """Escribe .xlsx (hoja `Analisis_LE_resultados`) o .csv, una fila por método. Lleva id_analisis e id_seccion."""
+    """Escribe .xlsx (hoja `Analisis_LE_resultados`) o .csv, una fila por método. Lleva id_analisis e id_seccion.
+
+    ky y el desplazamiento de Newmark van solo en la fila del primer método, que es el que los calcula.
+    """
     rows = []
     for r in results:
         c = r.surface.circle if r.surface is not None else None
         s, y, nm = r.search, r.yield_, r.newmark
-        tail = [None if s is None else s.evaluated, None if s is None else s.discarded,
-                None if y is None else y.ky, None if nm is None else nm.displacement_m,
-                " | ".join(r.warnings), " | ".join(r.notes)]
-        for x in r.results:
+        ky_nm = [None if y is None else y.ky, None if nm is None else nm.displacement_m]
+        for k, (x, fs0) in enumerate(zip(r.results, le_static_fs(r))):
             fs = x.factor_of_safety
-            rows.append([r.id_analisis, r.id_seccion, _SHEET_SURFACE[r.surface_type], _METHOD_WORD[x.method], fs,
-                         None if fs is None else _yes(is_failure(fs)), x.lambda_, _yes(x.converged),
+            rows.append([r.id_analisis, r.id_seccion, _SHEET_SURFACE[r.surface_type], _METHOD_WORD[x.method], r.kh,
+                         fs, fs0, None if fs is None else _yes(is_failure(fs)), x.lambda_, _yes(x.converged),
                          None if c is None else c.xc, None if c is None else c.yc, None if c is None else c.radius,
-                         _points(r.surface), *tail])
+                         _points(r.surface), None if s is None else s.evaluated, None if s is None else s.discarded,
+                         *(ky_nm if k == 0 else [None, None]), " | ".join(r.warnings), " | ".join(r.notes)])
     return write_table(path, RESULT_COLUMNS, rows, sheet="Analisis_LE_resultados")

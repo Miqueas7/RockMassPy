@@ -405,7 +405,8 @@ Las hojas son `Geometria` (una fila por vértice: `id_seccion`, `linea`, `x_m`, 
 obligatoria y `piezometrica` opcional), `Estratos` (`orden` 1 arriba, `material`, `linea_base`), `Materiales_LE`
 (`mohr_coulomb` o `hoek_brown`), `Analisis_LE` (`metodos` separados por `;`, el primero busca; `superficie` =
 `circular`, `bloque` o `dada`; `kh`, `registro`) y `Sismos` (`registro`, `t_s`, `a_g` en g, paso constante), en un
-xlsx o en un CSV por hoja. `rm.le_counts` da los conteos, `rm.save_le_results` escribe una fila por método,
+xlsx o en un CSV por hoja. `rm.le_counts` da los conteos, `rm.save_le_results` escribe una fila por método (con
+`kh` y `fs_estatico`, el FS sin kh sobre la misma superficie y con el mismo método),
 `report.build_slope_report(..., le=...)` agrega las tablas de equilibrio límite y `report.le_figure` /
 `report.newmark_figure` dibujan la sección y el registro de Newmark. Desde la línea de comandos (0 si todo está bien, 1
 si hay un error de entrada, 2 si algo pide atención):
@@ -416,7 +417,11 @@ rockmass le --geometry Geometria.csv --layers Estratos.csv --materials Materiale
 ```
 
 Opciones: `--workbook LIBRO.xlsx` (en lugar de los CSV), `--records`, `-o/--output RES.csv|.xlsx`,
-`--report OUT.docx|.html`, `--charts DIR`, `--title`, `--author`, `--lang es|en` y `--no-figures`.
+`--report OUT.docx|.html`, `--charts DIR`, `--title`, `--author`, `--lang es|en` y `--no-figures`. Con más de un
+análisis, `rockmass le` imprime `analysis <k> of <n>...` en stderr.
+
+Tiempos: con Hoek-Brown, una búsqueda circular de 20×20×11 tarda unos 10 a 15 s; con kh, ky por vueltas puede
+repetirla hasta 5 veces.
 
 Mira `examples/10-equilibrio-limite-newmark/`.
 

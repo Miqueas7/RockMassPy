@@ -189,6 +189,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "le_no_surface": {"es": "La búsqueda no encontró una superficie válida",
                       "en": "The search found no valid slip surface"},
     "le_no_fs": {"es": "sin FS", "en": "no FS"},
+    "le_ky_other": {"es": "ky = {ky:.3f} (otra superficie)", "en": "ky = {ky:.3f} (other surface)"},
     "le_method_Ordinary": {"es": "Ordinario", "en": "Ordinary"},
     "le_method_Bishop": {"es": "Bishop", "en": "Bishop"},
     "le_method_JanbuSimplified": {"es": "Janbu simplificado", "en": "Janbu simplified"},

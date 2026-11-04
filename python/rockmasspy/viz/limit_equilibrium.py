@@ -119,8 +119,9 @@ def plot_le_section(result, *, title: str = "", style: Style = Style()):
                                                        else f"FS = {r.factor_of_safety:.3f}") for r in result.results]
     if sec.kh > 0:
         fs_lines.append(f"kh = {sec.kh:g}")
-    if result.yield_ is not None and result.yield_.ky is not None:
-        fs_lines.append(f"ky = {result.yield_.ky:.3f}")
+    if result.yield_ is not None and result.yield_.ky is not None:  # ky de otra superficie (R17): se dice
+        ky = result.yield_.ky
+        fs_lines.append(f"ky = {ky:.3f}" if result.ky_on_critical else text("le_ky_other", lang).format(ky=ky))
     fig.text(0.765, 0.70, "\n".join(fs_lines), ha="left", va="top",  # fuera de los ejes: no tapa el centro
              fontsize=style.font_size + 1, fontweight="bold",
              bbox=dict(facecolor="white", edgecolor="black", linewidth=0.6))

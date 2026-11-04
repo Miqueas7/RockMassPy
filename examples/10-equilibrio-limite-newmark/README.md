@@ -13,9 +13,11 @@ Escribe las cinco hojas como CSV (`Geometria.csv`, `Estratos.csv`, `Materiales_L
 `Sismos.csv`), las evalúa con `rm.assess_le` y guarda `equilibrio_resultados.csv` (una fila por método). Con
 matplotlib dibuja la sección de cada análisis (`seccion_le_1.png`, `seccion_le_2.png`) y el Newmark del botadero
 (`newmark_2.png`). Escribe el informe `equilibrio.html` (y `equilibrio.docx` si tienes python-docx) y corre
-`rockmass le` con los mismos CSV. **La CLI termina con 0**: ningún FS llega a 1 y no hay avisos.
+`rockmass le` con los mismos CSV. **La CLI termina con 0**: ningún FS llega a 1 y no hay avisos. Como hay dos
+análisis, la CLI escribe el avance (`analysis 1 of 2...`) en stderr.
 
-Tarda unos 12 s, casi todo en la búsqueda circular con Hoek-Brown.
+Tarda unos 12 s, casi todo en la búsqueda circular con Hoek-Brown. Con Hoek-Brown, una búsqueda circular de 20×20×11
+tarda unos 10 a 15 s; con kh, ky por vueltas puede repetirla hasta 5 veces.
 
 ## Las dos secciones
 
@@ -30,19 +32,25 @@ Tarda unos 12 s, casi todo en la búsqueda circular con Hoek-Brown.
 |---|---|---|
 | FS del primer método | Bishop **1.485** | Spencer **1.108** (con kh 0.1) |
 | FS del segundo método | GLE **1.480** (λ 0.886) | GLE **1.106** (λ 0.927) |
-| FS estático | el mismo | Spencer **1.315** |
+| FS estático en la misma superficie (`fs_estatico`) | el mismo (kh 0) | Spencer **1.343**, GLE **1.349** |
+| FS de la crítica estática | el mismo | Spencer **1.315** (otra superficie: la de ky) |
 | ky | no se pide | **0.156** |
 | Newmark | no se pide | **4.6 cm** (gobierna el registro tal como está, no el invertido) |
 | Superficies evaluadas / descartadas | 6515 / 1353 | 4545 / 1845 |
 
-`le_counts` da 2 análisis, 2 con FS, 0 con FS ≤ 1, 1 circular, 1 de bloque, 1 con Newmark, 0 avisos y 3 notas. Las
+`le_counts` da 2 análisis, 2 con FS, 0 con FS ≤ 1, 1 circular, 1 de bloque, 1 con Newmark, 0 avisos y 4 notas. Las
 notas no piden atención:
 - en el tajo, Bishop dice que en una tajada la fuerza normal efectiva sale negativa. Es una nota, no un aviso: el FS
   converge y GLE, que no la tiene, da casi lo mismo;
-- en el botadero, cómo se buscó ky (por vueltas, abajo) y que en Newmark gobierna el sentido original del registro.
+- en el botadero, cómo se buscó ky (por vueltas, abajo), que ky salió en otra superficie (la crítica estática, que
+  es la de menor ky) y no en la crítica con kh 0.1 que se dibuja, y que en Newmark gobierna el sentido original del
+  registro. Por eso la figura dice «ky = 0.156 (otra superficie)».
 
-El círculo crítico del tajo corta el suelo residual arriba y entra en la roca: pasa justo por el pie (su punto más
-bajo está en la cota 20). La superficie crítica del botadero baja por el desmonte a unos 45° desde la cresta, corre
+En `equilibrio_resultados.csv`, ky y Newmark van solo en la fila del primer método (Spencer), que es el que los calcula.
+
+El círculo crítico del tajo (centro 162.10, 143.15 y radio 123.13) corta el suelo residual arriba y entra en la roca.
+No pasa por el pie: sale por la cara en (137.5, 22.5), 2.5 m sobre el pie, y su punto más bajo (cota 20.02 en
+x 162.1) cae fuera de la masa, delante del pie. La superficie crítica del botadero baja por el desmonte a unos 45° desde la cresta, corre
 por la arcilla y sale al pie.
 
 ## Qué calcula cada método

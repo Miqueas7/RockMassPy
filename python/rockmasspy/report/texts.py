@@ -217,6 +217,7 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_missing": {"es": "Dato que falta", "en": "Missing data"},
     # --- Informe de taludes (cinemática, SMR, Q-slope) ---
     "slope_title": {"es": "Estabilidad de taludes en roca", "en": "Rock slope stability"},
+    "slope_title_le": {"es": "Estabilidad de taludes", "en": "Slope stability"},  # solo equilibrio límite
     "sl_s1": {"es": "Alcance", "en": "Scope"},
     "sl_s2": {"es": "Métodos y ediciones", "en": "Methods and editions"},
     "sl_s3": {"es": "Resultados", "en": "Results"},
@@ -339,7 +340,20 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "yield coefficient ky and the rigid-block Newmark displacement. The FS and the displacement are "
               "reported without judging their acceptance.",
     },
+    "le_scope_only": {
+        "es": "Este documento reúne el equilibrio límite 2D por tajadas (Ordinario, Bishop, Janbu, Spencer y "
+              "Morgenstern-Price/GLE) sobre la superficie crítica de cada análisis y, si se da un registro, el "
+              "coeficiente de fluencia ky y el desplazamiento de Newmark de bloque rígido. El FS y el desplazamiento "
+              "se informan sin juzgar su aceptación: los criterios de aceptación llegan en la etapa 3D de la "
+              "librería, y el ingeniero decide.",
+        "en": "This document gathers 2D limit equilibrium by slices (Ordinary, Bishop, Janbu, Spencer and "
+              "Morgenstern-Price/GLE) on the critical surface of each analysis and, when a record is given, the "
+              "yield coefficient ky and the rigid-block Newmark displacement. The FS and the displacement are "
+              "reported without judging their acceptance: acceptance criteria come in stage 3D of the library, and "
+              "the engineer decides.",
+    },
     "cap_le": {"es": "Equilibrio límite", "en": "Limit equilibrium"},
+    "h_fs_static": {"es": "FS estático", "en": "Static FS"},
     "cap_le_surface": {"es": "Superficie crítica por análisis", "en": "Critical surface per analysis"},
     "cap_le_warnings": {"es": "Avisos y cantidad de análisis de equilibrio límite que los tienen",
                         "en": "Warnings and number of limit equilibrium analyses that have them"},

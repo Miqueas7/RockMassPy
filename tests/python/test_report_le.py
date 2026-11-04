@@ -42,10 +42,15 @@ def test_tablas_y_figuras_en_su_orden(les):
                                         ("A3B-ZZSENT", "S3B-ZZSENT", "dada", "Spencer"),
                                         ("A3B-ZZSENT", "S3B-ZZSENT", "dada", "M-P (GLE)")]
     fk, b = les
-    assert eq.rows[0][4] == f"{fk.results[0].factor_of_safety:.3f}" and eq.rows[0][5] == "no"
-    assert eq.rows[0][6] == "-" and eq.rows[1][6] != "-"  # λ solo en Spencer
-    assert eq.rows[2][7] == f"{b.yield_.ky:.3f}" and eq.rows[2][8] == f"{b.newmark.displacement_m:.3f}"
-    assert eq.rows[0][7] == eq.rows[0][8] == "-"
+    assert eq.header[4:7] == ("kh", t("h_fs", "es"), t("h_fs_static", "es"))
+    assert eq.rows[0][4] == "0.000" and eq.rows[2][4] == "0.050"
+    assert eq.rows[0][5] == eq.rows[0][6] == f"{fk.results[0].factor_of_safety:.3f}" and eq.rows[0][7] == "no"
+    assert eq.rows[2][5] == f"{b.results[0].factor_of_safety:.3f}"
+    assert eq.rows[2][6] == f"{b.static_results[0].factor_of_safety:.3f}" != eq.rows[2][5]  # sin kh, más alto
+    assert eq.rows[0][8] == "-" and eq.rows[1][8] != "-"  # λ solo en Spencer
+    assert eq.rows[2][9] == f"{b.yield_.ky:.3f}" and eq.rows[2][10] == f"{b.newmark.displacement_m:.3f}"
+    assert eq.rows[0][9] == eq.rows[0][10] == "-"
+    assert eq.rows[3][9] == eq.rows[3][10] == "-"  # ky y Newmark solo en la fila del primer método
     sup = tabla(rep, "cap_le_surface").rows
     c = fk.surface.circle
     assert sup[0][:5] == ("AFK-ZZSENT", "circular", f"{c.xc:.2f}", f"{c.yc:.2f}", f"{c.radius:.2f}")
@@ -61,9 +66,34 @@ def test_sin_taludes_la_seccion_3a_lo_dice(les):
     rep = rp.build_slope_report([], title="T", figures=False, le=les)
     assert sec3(rep)[0] == rp.Paragraph(t("sl_no_slopes", "es"))
     assert t("cap_slopes", "es") not in [b.caption for b in sec3(rep) if isinstance(b, rp.Table)]
-    assert rep.sections[0].blocks == (rp.Paragraph(t("sl_scope", "es")), rp.Paragraph(t("le_scope", "es")))
     with pytest.raises(ValueError, match="empty"):
         rp.build_slope_report([], title="T")
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_solo_le_alcance_y_titulo_propios(les, lang):
+    rep = rp.build_slope_report([], title="T", lang=lang, figures=False, le=les)
+    assert rep.sections[0].blocks == (rp.Paragraph(t("le_scope_only", lang)),)  # sin cinemática ni «Además»
+    assert rep.subtitle == t("slope_title_le", lang) == {"es": "Estabilidad de taludes", "en": "Slope stability"}[lang]
+    assert "roca" not in rep.subtitle and "Rock" not in rep.subtitle
+    assert not t("le_scope_only", lang).startswith(("Además", "It also"))
+
+
+def test_con_taludes_alcance_y_titulo_como_antes(slopes, les):
+    _, sl = slopes
+    rep = rp.build_slope_report(sl, title="T", figures=False, le=les)
+    assert rep.sections[0].blocks == (rp.Paragraph(t("sl_scope", "es")), rp.Paragraph(t("le_scope", "es")))
+    assert rep.subtitle == t("slope_title", "es") == "Estabilidad de taludes en roca"
+    assert rp.build_slope_report(sl, title="T", figures=False).subtitle == t("slope_title", "es")
+
+
+def test_metodos_sin_repetir(les):
+    rep = rp.build_slope_report([], title="T", figures=False, le=les)
+    ids = [r[0] for r in rep.sections[1].blocks[0].rows]
+    assert len(ids) == len(set(ids)) and ids.count("Morgenstern-Price-GLE") == 1
+    a = SimpleNamespace(method_id="X", verification=SimpleNamespace(name="Secondary"), source="F1")
+    b = SimpleNamespace(method_id="X", verification=SimpleNamespace(name="Secondary"), source="F2")
+    assert rp._dedup_methods([a, b, a]) == (rp.MethodRef("X", "Secondary", "F1 · F2"),)
 
 
 def test_sin_le_el_informe_no_cambia(slopes, tmp_path):
@@ -105,7 +135,7 @@ def test_en_ingles(les):
 
 
 def test_claves_en_los_dos_idiomas():
-    for k in ("sl_no_slopes", "le_scope", "cap_le", "cap_le_surface", "cap_le_warnings", "h_analyses",
+    for k in ("sl_no_slopes", "le_scope", "le_scope_only", "slope_title_le", "h_fs_static", "cap_le", "cap_le_surface", "cap_le_warnings", "h_analyses",
               "h_le_surface", "h_le_method", "h_lambda", "h_ky", "h_newmark", "h_points", "h_evaluated",
               "h_discarded", "le_surf_circular", "le_surf_block", "le_surf_given", "fig_le_section", "fig_newmark",
               "att_le_fs_below_1", "att_le_warnings", "le_attention"):
@@ -121,10 +151,10 @@ def _fake(fs, warnings=(), notes=(), order=1):
 def test_paridad_de_conteos_informe_y_archivo(tmp_path):
     rs = [_fake(x, order=i) for i, x in enumerate((0.5, 1.0, 1 + 1e-12, 1.2, None), 1)]
     rep = rp.build_slope_report([], title="T", figures=False, le=rs)
-    si = sum(r[5] == "sí" for r in tabla(rep, "cap_le").rows)
+    si = sum(r[7] == "sí" for r in tabla(rep, "cap_le").rows)
     _, filas = tl.leer(le.save_le_results(rs, tmp_path / "p.csv"))
     assert si == le.le_counts(rs)["fs_below_1"] == sum(f["fs_menor_o_igual_1"] == "si" for f in filas) == 3
-    assert [r[5] for r in tabla(rep, "cap_le").rows][-1] == "-"
+    assert [r[7] for r in tabla(rep, "cap_le").rows][-1] == "-"
 
 
 @pytest.mark.parametrize("case", ["fs", "warning", "note", "quiet"])

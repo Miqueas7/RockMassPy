@@ -395,7 +395,11 @@ def _le(a) -> int:
         raise ValueError("report must end in .docx or .html")
     if a.output and Path(a.output).suffix.lower() not in (".csv", ".xlsx"):
         raise ValueError("--output must end in .csv or .xlsx")
-    rs = le.assess_le(_le_source(a))  # antes del primer print: un error deja stdout vacío
+    def progress(k, n):  # avance en stderr, sin ids; stdout queda para el resumen
+        if n > 1:
+            print(f"analysis {k} of {n}...", file=sys.stderr, flush=True)
+
+    rs = le.assess_le(_le_source(a), progress=progress)  # antes del primer print: un error deja stdout vacío
     if not rs:
         raise ValueError("no analyses in Analisis_LE")
     c = le.le_counts(rs)
@@ -419,8 +423,8 @@ def _le(a) -> int:
             if r.newmark is not None and r.record is not None:
                 print(f"chart: {save_figure(rp.newmark_figure(r, a.lang), Path(a.charts) / f'newmark_{r.order}.png')}")
     if a.report:
-        rep = rp.build_slope_report([], title=a.title or t("slope_title", a.lang), lang=a.lang, author=a.author or "",
-                                    figures=not a.no_figures, le=rs)
+        rep = rp.build_slope_report([], title=a.title or t(rp.slope_title_key(False), a.lang), lang=a.lang,
+                                    author=a.author or "", figures=not a.no_figures, le=rs)
         out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
         print(f"report: {out}")
     print("the library recommends, the engineer decides")

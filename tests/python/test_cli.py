@@ -894,6 +894,14 @@ def run_le(capsys, files, *extra):
     return code, cap.out, cap.err
 
 
+_PROGRESS_2 = "analysis 1 of 2...\nanalysis 2 of 2...\n"
+
+
+def clean_err(err):
+    """En éxito, stderr lleva a lo más el avance de `rockmass le` (con más de un análisis): sin `error:` ni traceback."""
+    return "error:" not in err and "Traceback" not in err
+
+
 def fk_kh(kh):
     import test_limit_equilibrium as tl
 
@@ -907,7 +915,7 @@ def fk_kh(kh):
 def test_le_summary_and_privacy(tmp_path, capsys):
     code, out, err = run_le(capsys, le_files(tmp_path))
     lines = out.splitlines()
-    assert code == 0 and err == ""
+    assert code == 0 and clean_err(err) and err == _PROGRESS_2  # avance en stderr, sin ids
     for ln in ("analyses: 2 (circular 1, block 0, given 1)", "FS at or below 1: 0 of 2", "Newmark: 1 analysis",
                "warnings: 0 in 0 analyses"):
         assert ln in lines
@@ -945,12 +953,13 @@ def test_le_files_charts_report(tmp_path, capsys):
 
     res, html, ch = tmp_path / "r.csv", tmp_path / "x.html", tmp_path / "ch"
     code, out, err = run_le(capsys, le_files(tmp_path), "--output", res, "--report", html, "--charts", ch)
-    assert code == 0 and err == "" and "ZZSENT" not in out
+    assert code == 0 and clean_err(err) and "ZZSENT" not in out + err
     for p in (res, html, ch / "seccion_le_1.png", ch / "seccion_le_2.png", ch / "newmark_2.png"):
         assert p.exists(), p
     assert f"chart: {ch / 'newmark_2.png'}" in out and f"results: {res}" in out and f"report: {html}" in out
     txt = html.read_text(encoding="utf-8")
     assert t("cap_le", "es") in txt and t("sl_no_slopes", "es") in txt
+    assert f"<title>{t('slope_title_le', 'es')}</title>" in txt and t("slope_title", "es") not in txt
     assert len(re.findall("ZZSENT", txt)) == len(re.findall(r"<td>[AS](?:FK|3B)-ZZSENT</td>", txt)) > 0
 
 
@@ -1048,3 +1057,32 @@ def test_help_lists_le_options(capsys):
     for opt in ("--workbook", "--geometry", "--layers", "--materials", "--analyses", "--records", "--output",
                 "--report", "--charts", "--lang", "--title", "--author", "--no-figures"):
         assert opt in out
+
+
+def test_le_one_analysis_no_progress(tmp_path, capsys):
+    code, _, err = run_le(capsys, le_files(tmp_path, fk_kh("")))
+    assert code == 0 and err == ""
+
+
+@pytest.mark.parametrize("case", ["base_dada", "base_circular", "sin_records"])
+def test_le_base_and_records_errors(tmp_path, capsys, case):
+    import test_limit_equilibrium as tl
+
+    if case == "sin_records":
+        files = le_files(tmp_path, tl.acads3b_data(registro="R-ZZSENT"))
+        files.pop("Sismos", None)
+        want = ("error: sheet 'Analisis_LE', row 2, column 'registro': no accelerogram given "
+                "(use --records or a Sismos sheet)\n")
+    else:
+        d = tl.fk_data()
+        an = dict(id_analisis="AFK-ZZSENT", id_seccion="SFK-ZZSENT", metodos="bishop", base_modelo_m=70.25)
+        if case == "base_dada":
+            d["Geometria"] += tl.G("SFK-ZZSENT", "ZZSENTLg", [(40, 60), (90, 32), (130, 22), (150, 20)])
+            an.update(superficie="dada", linea_superficie="ZZSENTLg")
+        else:
+            an.update(superficie="circular", malla_x_min=110, malla_x_max=130, malla_y_min=80, malla_y_max=100)
+        d["Analisis_LE"] = [tl.ana(**an)]
+        files = le_files(tmp_path, d)
+        want = "error: sheet 'Analisis_LE', row 2, column 'base_modelo_m': must be below the ground surface\n"
+    code, out, err = run_le(capsys, files)
+    assert code == 1 and out == "" and err == want

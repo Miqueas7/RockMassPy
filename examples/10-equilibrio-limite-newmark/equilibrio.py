@@ -123,7 +123,7 @@ if __name__ == "__main__":
           c["with_newmark"], "| con FS <= 1:", c["fs_below_1"], "| avisos", c["warnings"], "| notas", c["notes"])
     for k, fs in enumerate(r["fs"], start=1):
         print(f"análisis {k}:", ", ".join(f"{m} {v:.3f}" for m, v in fs.items()))
-    print(f"botadero: FS estático {r['fs_static_botadero']:.3f}, ky {r['ky']:.4f}, "
+    print(f"botadero: FS de la crítica estática {r['fs_static_botadero']:.3f}, ky {r['ky']:.4f}, "
           f"Newmark {r['newmark_m'] * 100:.1f} cm")
     print(f"código de salida de la CLI: {r['cli_exit']}")
     print("archivos:", ", ".join(r["files"]), "->", destino)

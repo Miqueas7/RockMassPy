@@ -197,7 +197,9 @@ def test_conteos_y_archivo_de_resultados(publicados):
     assert c == {**c, "analyses": 3, "with_fs": 3, "fs_below_1": 1, "circular": 2, "block": 0, "given": 1,
                  "with_newmark": 0}
     cab, filas = leer(le.save_le_results(rs, tmp / "res.csv"))
-    assert cab == list(le.RESULT_COLUMNS) and len(cab) == 18
+    assert cab == list(le.RESULT_COLUMNS) and len(cab) == 20
+    assert cab[3:7] == ["metodo", "kh", "fs", "fs_estatico"]
+    assert all(f["kh"] == "0.0" and f["fs_estatico"] == f["fs"] for f in filas)  # sin kh, el estático es el mismo
     assert [f["metodo"] for f in filas] == ["bishop", "spencer", "bishop", "spencer", "gle", "spencer", "gle"]
     assert [f["superficie"] for f in filas] == ["circular"] * 5 + ["dada"] * 2
     assert [f["fs_menor_o_igual_1"] for f in filas] == ["no", "no", "si", "si", "si", "no", "no"]
@@ -379,7 +381,7 @@ def test_fuente_mal_dada(tmp_path):
     with pytest.raises(ValueError, match="expected a .xlsx"):
         rm.assess_le(tmp_path / "x.csv")
     p = hojas(tmp_path, acads3b_data(registro="R-ZZSENT"))
-    with pytest.raises(ValueError, match="missing file 'Sismos.csv'"):
+    with pytest.raises(ValueError, match="no accelerogram given"):
         rm.assess_le(p)
 
 
@@ -539,5 +541,51 @@ def test_mensajes_sin_doble_prefijo_ni_repetidos(tmp_path):
     le._add_messages(out, "bishop", ["m-alpha below 0.2 in 3 slices", "Bishop did not converge"])
     le._add_messages(out, "janbu_corregido", ["Janbu corrected: the bases mix", "Bishop did not converge"])
     le._add_messages(out, "spencer", ["the bases mix"])
-    assert out == ["m-alpha below 0.2 in 3 slices", "bishop: Bishop did not converge",
+    assert out == ["m-alpha below 0.2 in 3 slices", "Bishop did not converge",  # sin «bishop: Bishop ...»
                    "janbu_corregido: the bases mix"]
+    assert le._ky("ky not found: Spencer gave no factor of safety at some kh") == \
+        "ky: not found: Spencer gave no factor of safety at some kh"
+
+
+def test_kh_da_fs_estatico_y_ky_solo_en_la_primera_fila(tmp_path):
+    (r,) = rm.assess_le(hojas(tmp_path, acads3b_data(kh=0.05)))
+    assert r.kh == 0.05 and len(r.static_results) == len(r.results) == 2
+    (tmp_path / "sin").mkdir()
+    (r0,) = rm.assess_le(hojas(tmp_path / "sin", acads3b_data()))
+    assert [x.factor_of_safety for x in r.static_results] == [x.factor_of_safety for x in r0.results]
+    assert r0.static_results == () and le.le_static_fs(r0) == [x.factor_of_safety for x in r0.results]
+    assert all(s.factor_of_safety > p.factor_of_safety for s, p in zip(r.static_results, r.results))
+    assert r.ky_on_critical and not any(n.startswith("ky computed on a different") for n in r.notes)
+    _, filas = leer(le.save_le_results([r], tmp_path / "res.csv"))
+    assert [f["kh"] for f in filas] == ["0.05", "0.05"]
+    assert [float(f["fs_estatico"]) for f in filas] == pytest.approx(le.le_static_fs(r))
+    assert filas[0]["ky"] != "" and filas[1]["ky"] == "" and filas[1]["desplazamiento_newmark_m"] == ""
+
+
+@pytest.mark.parametrize("superficie", ["dada", "circular"])
+def test_base_del_modelo_sobre_el_terreno(tmp_path, superficie):
+    d = fk_data()
+    an = dict(id_analisis="AFK-ZZSENT", id_seccion="SFK-ZZSENT", metodos="bishop", base_modelo_m=70.25)
+    if superficie == "dada":
+        d["Geometria"] += G("SFK-ZZSENT", "ZZSENTLg", [(40, 60), (90, 32), (130, 22), (150, 20)])
+        an.update(superficie="dada", linea_superficie="ZZSENTLg")
+    else:
+        an.update(superficie="circular", malla_x_min=110, malla_x_max=130, malla_y_min=80, malla_y_max=100)
+    d["Analisis_LE"] = [ana(**an)]
+    with pytest.raises(ValueError, match=r"^sheet 'Analisis_LE', row 2, column 'base_modelo_m': must be below the "
+                                         r"ground surface$"):
+        rm.assess_le(hojas(tmp_path, d))
+
+
+def test_registro_sin_sismos(tmp_path):
+    files = hojas(tmp_path, acads3b_data(registro="R-ZZSENT"))
+    files.pop("Sismos", None)
+    with pytest.raises(ValueError, match=r"^sheet 'Analisis_LE', row 2, column 'registro': no accelerogram given "
+                                         r"\(use --records or a Sismos sheet\)$"):
+        rm.assess_le(files)
+
+
+def test_avance_por_analisis(tmp_path):
+    vistos = []
+    rm.assess_le(hojas(tmp_path, merge(fk_data(), acads3b_data())), progress=lambda k, n: vistos.append((k, n)))
+    assert vistos == [(1, 2), (2, 2)]

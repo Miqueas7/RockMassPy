@@ -137,3 +137,19 @@ def test_textos_en_los_dos_idiomas():
     for k, v in TEXTS.items():
         if k.startswith(("le_", "newmark_")):
             assert set(v) == {"es", "en"} and all(v.values()), k
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_ky_de_otra_superficie_se_dice(casos, lang):
+    import dataclasses
+
+    _, b = casos  # superficie dada: ky sobre ella
+    ky = b.yield_.ky
+    t = " ".join(_textos(plot_le_section(b, style=Style(lang=lang))))
+    assert b.ky_on_critical and f"ky = {ky:.3f}" in t and TEXTS["le_ky_other"][lang].format(ky=ky) not in t
+    otra = rm.SlipSurface()
+    otra.polyline = [rm.Point2(p.x, p.y - 0.1) for p in b.surface.polyline]
+    b2 = dataclasses.replace(b, yield_surface=otra)
+    assert not b2.ky_on_critical
+    t = " ".join(_textos(plot_le_section(b2, style=Style(lang=lang))))
+    assert TEXTS["le_ky_other"][lang].format(ky=ky) in t
