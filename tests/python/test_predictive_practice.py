@@ -63,16 +63,24 @@ def test_practica_que_ignora_el_macizo_no_es_significativa():
     assert not any(v[name] == "coherent" for v in verdicts for name in v)  # nunca «coherente» sin evidencia
 
 
-def test_cobertura_del_conjunto_conforme(coherent):
+def test_colinealidad_avisada(coherent):
     _, a = coherent
-    with_set = [t for t in a.tramos if t.conformal_set is not None]
-    n = len(with_set)
-    assert n == a.n  # ningún pliegue falló
-    cov = sum(t.installed in t.conformal_set for t in with_set) / n
-    assert cov == pytest.approx(a.coverage)
-    # banda binomial a 3 desviaciones alrededor del nivel (+1/n por la corrección de muestra finita)
-    assert abs(cov - 0.9) <= 3 * math.sqrt(0.9 * 0.1 / n) + 1 / n
-    assert 0 < a.conformal_threshold < 1
+    # en el generador Tajeo = Temporal: con Galería de referencia, la columna de Tajeo repite la vida útil
+    assert a.dropped_columns == ("tipo_labor=Tajeo",)
+    assert "columns dropped for collinearity: tipo_labor=Tajeo; remaining coefficients are contrasts" in a.warnings
+    assert set(a.coefficients) == {"ln_q", "ln_de", "permanent", "tipo_labor=Rampa"}
+
+
+def test_sin_convergencia_no_hay_conjuntos():
+    h = _history(0.0, seed=1)
+    med = float(np.median([t.q_valor for t in h.tramos]))
+    sep = _edit(h, lambda i, t: dataclasses.replace(t, sost_instalado="I" if t.q_valor > med else "V"))
+    a = audit_practice(sep, n_boot=10)  # Q separa las clases: el MLE no existe
+    assert not a.converged and math.isnan(a.conformal_threshold)
+    assert not a.outside_set and all(t.conformal_set is None for t in a.tramos)
+    assert "conformal sets not computed: the final ordinal fit did not converge" in a.warnings
+    with pytest.raises(ValueError, match="no conformal threshold"):
+        a.conformal_set(h.tramos[0])
 
 
 def test_tramos_fuera_del_conjunto(coherent):
@@ -108,6 +116,7 @@ def test_datos_insuficientes_quedan_marcados():
     assert set(a.coefficients) >= {"ln_q", "ln_de"}  # igual se ajusta
     assert all(v in VERDICTS for v in a.verdicts.values())
     assert "zone" in a.validation.skipped  # una sola zona: la partición se omite, no se cae
+    assert not a.beyond_chart and set(a.validation.warnings) <= set(a.warnings)
 
 
 def test_vida_util_faltante_y_errores():
@@ -169,5 +178,7 @@ def test_tramo_nuevo_incompleto_o_con_tipo_de_labor_no_visto(coherent):
                        (dict(vida_util=None), "vida_util"), (dict(tipo_labor="ZZSENT"), "tipo_labor")):
         with pytest.raises(ValueError, match=match) as e:
             a.conformal_set(dataclasses.replace(t, **bad))
-        assert "ZZSENT" not in str(e.value)
+        assert "ZZSENT" not in str(e.value) and "position" not in str(e.value)
+    with pytest.raises(ValueError, match="tramo at position 1: esr"):
+        a.predict_proba([t, dataclasses.replace(t, esr=None)])
     assert a.conformal_set(t)  # con todo, funciona
