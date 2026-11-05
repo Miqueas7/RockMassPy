@@ -1170,18 +1170,264 @@ def _hist_methods(results, lang) -> tuple[Table, tuple[MethodRef, ...]]:
             (*stats, *priors.values()))
 
 
-def build_history_report(audit, correlations=(), *, history=None, title: str | None = None, lang: str = "es",
+# --- niveles 2 y 3 (Fase 4B y 4C): solo conteos, coeficientes y códigos de tipo; el id_tramo solo en tablas ---
+
+_PARTITIONS = ("labor", "zone", "temporal", "random")
+_VERDICT_KEYS = {"coherent": "verdict_coherent", "not significant": "verdict_not_significant",
+                 "practice incoherent with rock quality": "verdict_rock",
+                 "practice incoherent with span": "verdict_span", "not estimable": "verdict_not_estimable"}
+
+
+def _f(v, fmt: str = ".3f") -> str:
+    """Celda numérica; «-» sin dato o no finita."""
+    return "-" if v is None or not (v == v and abs(v) != float("inf")) else format(v, fmt)
+
+
+def recommendation_blockers(model) -> tuple[str, ...]:
+    """Motivos globales por los que `recommend` nunca elegiría un tipo con este modelo (vacío: puede elegir)."""
+    return tuple(model.recommendation_blockers)
+
+
+def gain_text(i, fmt: str = ".3f") -> str:
+    """Mejora con su IC: «valor (inferior; superior)». La usan el informe y la CLI."""
+    return f"{_f(i.value, fmt)} ({_f(i.ci_low, fmt)}; {_f(i.ci_high, fmt)})"
+
+
+def _blockers_cell(partition, c, lang) -> str:
+    """Cómo pesa la partición en la decisión: labor y zona por superioridad (sus motivos para no recomendar), la
+    temporal por no inferioridad (mejora puntual ≥ 0) y la aleatoria no cuenta."""
+
+    if partition == "temporal":
+        return t("noninf_met" if c.noninferior else "noninf_not", lang)
+    if partition == "random":
+        return t("random_no_weight", lang)
+    return "; ".join(c.blockers) or "-"
+
+
+def _validation_table(caption_key, report, refs, fmt, lang) -> list:
+    """Una fila por partición (métricas, mejoras con IC y motivos para no recomendar) y los avisos de la validación.
+    `refs`: los nombres de las referencias en el orden de las columnas."""
+    main = next((c.main for c in report.results.values()), "-")
+    head = (t("h_partition", lang), t("h_rows", lang), t("h_groups", lang), main, *refs,
+            *(t("h_gain_vs", lang).format(ref=r) for r in refs), t("h_blockers", lang))
+    rows = []
+    for p in _PARTITIONS:
+        c = report.results.get(p)
+        if c is not None:
+            rows.append((t(f"part_{p}", lang), str(c.n_rows), str(c.n_groups),
+                         *(_f(c.metrics[m], fmt) for m in (c.main, *refs)),
+                         *(gain_text(c.improvements[r], fmt) for r in refs), _blockers_cell(p, c, lang)))
+        elif p in report.skipped:
+            rows.append((t(f"part_{p}", lang), "-", "-", *("-" for _ in range(2 * len(refs) + 1)),
+                         t("part_skipped", lang).format(reason=report.skipped[p])))
+    out = [Table(t(caption_key, lang), head, tuple(rows))]
+    if report.warnings:
+        out.append(Table(t("cap_val_warnings", lang), (t("h_warning", lang),), tuple((w,) for w in report.warnings)))
+    return out
+
+
+def _warnings_table(warnings, validation, lang) -> list:
+    """Avisos del nivel sin repetir los de la validación (ya van en su tabla)."""
+    ws = [w for w in warnings if validation is None or w not in validation.warnings]
+    return [Table(t("cap_level_warnings", lang), (t("h_warning", lang),), tuple((w,) for w in ws))] if ws else []
+
+
+def _dd_table(rows, lang) -> Table:
+    return Table(t("cap_dd", lang), (t("h_item", lang), t("h_value", lang)), tuple(rows))
+
+
+def _practice_section(number, a, lang) -> Section:
+    from ..history import MIN_LABORS_PER_TYPE_LEVEL2, MIN_TRAMOS_PER_TYPE_LEVEL2
+    from ..predictive.validation import MAX_DISCARDED_FRACTION_DECISION
+
+    none = t("none", lang)
+    blocks = [Paragraph(t("l2_text", lang)),
+              Table(t("cap_l2_data", lang), (t("h_item", lang), t("h_value", lang)), (
+                  (t("l2_n", lang), str(a.n)), (t("l2_labors", lang), str(a.labors)),
+                  (t("l2_types", lang), ", ".join(a.types)),
+                  (t("l2_status", lang), t("l2_ready" if a.status == "ready" else "l2_insufficient", lang)),
+                  (t("l2_missing", lang), ", ".join(a.missing_types) or none),
+                  (t("l2_dropped", lang), ", ".join(a.dropped_columns) or none),
+                  (t("l2_reference", lang), a.design.labor_levels[0] if a.design.labor_levels else none))),
+              Table(t("cap_l2_coef", lang), (t("h_variable", lang), t("h_coef", lang), t("h_se", lang),
+                                             t("h_ci95", lang), t("h_verdict", lang)),
+                    tuple((name, _f(c.value), _f(c.se), f"{_f(c.ci_low)}; {_f(c.ci_high)}",
+                           t(_VERDICT_KEYS[a.verdicts[name]], lang) if name in a.verdicts else "-")
+                          for name, c in a.coefficients.items())
+                    + tuple((name, "-", "-", "-", t(_VERDICT_KEYS[v], lang)) for name, v in a.verdicts.items()
+                            if name not in a.coefficients)),
+              Paragraph(t("l2_val_text", lang)),
+              *_validation_table("cap_l2_val", a.validation, ("dummy", "ngi"), ".3f", lang),
+              Paragraph(t("l2_beyond_yes" if a.beyond_chart else "l2_beyond_no", lang))]
+    cc = a.concordance
+    if cc is None:
+        blocks.append(Paragraph(t("l2_conc_none", lang)))
+    else:
+        blocks += [Paragraph(t("l2_conc_text", lang).format(n=cc.n, kappa=_f(cc.kappa))),
+                   Table(t("cap_l2_conc", lang), (t("h_recommended_installed", lang), *cc.types),
+                         tuple((r, *map(str, cc.matrix[i])) for i, r in enumerate(cc.types)))]
+    n_sets = sum(x.conformal_set is not None for x in a.tramos)
+    blocks.append(Paragraph(t("l2_conformal", lang).format(level=a.conformal_level, q=_f(a.conformal_threshold),
+                                                            k=len(a.outside_set), n=n_sets)))
+    outside = [x for x in a.tramos if x.outside]
+    blocks.append(Table(t("cap_l2_outside", lang), ("id_tramo", t("h_installed", lang), t("h_most_probable", lang),
+                                                    t("h_conformal_set", lang)),
+                        tuple((x.id_tramo, x.installed, x.most_probable or "-", ", ".join(x.conformal_set))
+                              for x in outside)) if outside else Paragraph(t("l2_none_outside", lang)))
+    blocks.append(_dd_table((
+        (t("dd_l2_min", lang), t("dd_l2_min_v", lang).format(t=MIN_TRAMOS_PER_TYPE_LEVEL2,
+                                                              l=MIN_LABORS_PER_TYPE_LEVEL2)),
+        (t("dd_conformal", lang), f"{a.conformal_level:.0%}"),
+        (t("dd_gain_ci", lang), t("dd_gain_ci_v", lang)),
+        (t("dd_discarded", lang), f"≤ {MAX_DISCARDED_FRACTION_DECISION:.0%}")), lang))
+    blocks += _warnings_table(a.warnings, a.validation, lang)
+    return Section(number, t("hs_l2", lang), tuple(blocks))
+
+
+def _iso_blocks(m, history, exposure_days, lang, figures) -> list:
+    """Una figura por tipo en el plano Q–De, dentro del rango de entrenamiento, con los tramos de ese tipo si hay
+    histórico. Horizonte: `exposure_days` o, sin él, la mediana de la exposición del histórico."""
+    import math
+    import statistics
+
+    from ..history import level3_rows
+    from ..predictive.performance import isoprobability_grid
+    from ..viz.style import Style
+
+    if m.quality != "q":
+        return [Paragraph(t("l3_iso_rmr", lang))]
+    rows = level3_rows(history) if history is not None else ()
+    days = exposure_days or (statistics.median(o.exposure_days for o, _ in rows) if rows else None)
+    if days is None:
+        return [Paragraph(t("l3_iso_no_horizon", lang))]
+    iq, idx = m.features.index("ln_q"), m.features.index("ln_de")
+    q_range = (math.exp(m.train_min[iq]), math.exp(m.train_max[iq]))
+    de_range = (math.exp(m.train_min[idx]), math.exp(m.train_max[idx]))
+    pts = {}
+    for o, x in rows:
+        pts.setdefault((x.sost_instalado, o.failed), []).append((x.q_valor, x.luz_m / x.esr))
+    out = [Paragraph(t("l3_iso_text", lang).format(days=days))]
+    for code, _ in m.support_types:
+        def draw(code=code):
+            from ..viz import plot_isoprobability  # sin matplotlib: ImportError y _fig deja la nota
+
+            g = isoprobability_grid(m, support_code=code, exposure_days=days, q_range=q_range, de_range=de_range)
+            return plot_isoprobability(g, stable=pts.get((code, False), ()), failed=pts.get((code, True), ()),
+                                       style=Style(lang=lang))
+        out.append(_fig(t("fig_l3_iso", lang).format(code=code), draw, lang, figures))
+    return out
+
+
+def _performance_section(number, m, history, threshold, exposure_days, lang, figures) -> Section:
+    from ..history import MIN_EVENTS_PER_PARAMETER_LEVEL3, MIN_ZONES_LEVEL3
+    from ..predictive.performance import MAHALANOBIS_PERCENTILE
+    from ..predictive.validation import MAX_DISCARDED_FRACTION_DECISION
+    from ..viz.style import Style
+
+    c = m.counts
+    blocks = [Paragraph(t("l3_text", lang)), Paragraph(t("l3_model", lang)), Paragraph(t("l3_rule_val", lang)),
+              Table(t("cap_l3_state", lang), (t("h_item", lang), t("h_value", lang)), (
+                  (t("l3_calibration", lang), t(f"cal_{m.calibration}", lang)),
+                  (t("l3_reason", lang), m.calibration_reason),
+                  (t("l3_quality", lang), "ln Q" if m.quality == "q" else "RMR"),
+                  (t("l3_tramos", lang), str(c["tramos"])), (t("l3_failures", lang), str(c["failures"])),
+                  (t("l3_non_failures", lang), str(c["non_failures"])), (t("l3_labors", lang), str(c["labors"])),
+                  (t("l3_zones", lang), str(c["zones"])), (t("l3_params", lang), str(c["parameters"])),
+                  (t("l3_minority", lang), f"{c['minority_class']} / {c['minority_class_minimum']}")))]
+    rb = recommendation_blockers(m)
+    if rb:  # destacado: aunque el modelo quede «site», recommend no elegirá ningún tipo
+        blocks.append(Paragraph(t("l3_rec_blocked", lang).format(reasons="; ".join(rb))))
+    if not m.coefficients:
+        blocks.append(Paragraph(t("l3_no_fit", lang)))
+    else:
+        sign = {1: "sign_up", -1: "sign_down", 0: "sign_free"}
+        blocks.append(Table(t("cap_l3_coef", lang), (t("h_variable", lang), t("h_coef", lang), t("h_ci95", lang),
+                                                     t("h_sign", lang), t("h_bound_active", lang)),
+                            tuple((name, _f(m.coefficients[name], ".4g"), f"{_f(lo, '.4g')}; {_f(hi, '.4g')}",
+                                   t(sign[s], lang), t("yes" if name in m.active_bounds else "no", lang))
+                                  for name, (lo, hi), s in zip(m.features, m.coef_ci, m.signs))))
+    if m.validation is not None:
+        blocks += _validation_table("cap_l3_val", m.validation, ("dummy", "baseline_ngi"), ".4f", lang)
+    mt = m.metrics
+    if mt.get("n"):
+        blocks.append(Table(t("cap_l3_oof", lang), (t("h_item", lang), t("h_value", lang)), (
+            ("n", str(mt["n"])), (t("m_deviance", lang), _f(mt.get("poisson_deviance"), ".4f")),
+            (t("m_oe", lang), _f(mt.get("observed_expected"))),
+            (t("m_cal_b", lang), _f(mt.get("calibration_slope"))), (t("m_c_index", lang), _f(mt.get("c_index"))))))
+    if m.calibration_curve:
+        from ..viz import plot_calibration
+
+        blocks.append(_fig(t("fig_l3_cal", lang), lambda: plot_calibration(m.calibration_curve, metrics=mt,
+                                                                           style=Style(lang=lang)), lang, figures))
+    if m.coefficients:
+        blocks += _iso_blocks(m, history, exposure_days, lang, figures)
+    blocks += [Paragraph(t("l3_rule", lang)),
+               Paragraph(t("l3_threshold_none", lang) if threshold is None
+                         else t("l3_threshold", lang).format(thr=threshold)),
+               _dd_table((
+                   (t("dd_l3_min", lang), t("dd_l3_min_v", lang).format(e=MIN_EVENTS_PER_PARAMETER_LEVEL3,
+                                                                         z=MIN_ZONES_LEVEL3)),
+                   (t("dd_signs", lang), t("dd_signs_v", lang)), (t("dd_baseline", lang), t("dd_baseline_v", lang)),
+                   (t("dd_gain_ci", lang), t("dd_gain_ci_v", lang)), (t("dd_temporal", lang), t("dd_temporal_v", lang)),
+                   (t("dd_discarded", lang), f"≤ {MAX_DISCARDED_FRACTION_DECISION:.0%}"),
+                   (t("dd_interval", lang), t("dd_interval_v", lang)),
+                   (t("dd_maha", lang), t("dd_maha_v", lang).format(p=MAHALANOBIS_PERCENTILE)),
+                   (t("dd_threshold", lang), t("dd_threshold_v", lang))), lang)]
+    blocks += _warnings_table(m.warnings, m.validation, lang)
+    return Section(number, t("hs_l3", lang), tuple(blocks))
+
+
+def _tripod_section(number, lang) -> Section:
+    from .texts import TRIPOD_ITEMS
+
+    return Section(number, t("hs_tripod", lang), (
+        Paragraph(t("tripod_text", lang)),
+        Table(t("cap_tripod", lang), (t("h_tripod_item", lang), t("h_tripod_covered", lang),
+                                      t("h_tripod_where", lang)),
+              tuple((txt[lang][0], t(f"tr_{status}", lang), txt[lang][1]) for status, txt in TRIPOD_ITEMS))))
+
+
+def _level_methods(practice, performance, lang) -> tuple[MethodRef, ...]:
+    es = lang == "es"
+    out = []
+    if practice is not None:
+        out += [MethodRef("ordinal logit (proportional odds)", "V2", "Bürkner y Vuorre (2019)" if es
+                          else "Bürkner and Vuorre (2019)"),
+                MethodRef("quadratic weighted kappa", "V2", "Cohen (1968)"),
+                MethodRef("grouped conformal set", "V2", "Angelopoulos y Bates (2023)" if es
+                          else "Angelopoulos and Bates (2023)")]
+    if performance is not None:
+        out += [MethodRef("MAP model with sign bounds, Cauchy prior, Laplace", "V2", "Gelman et al. (2008)"),
+                MethodRef("calibration curve, intercept and slope", "V2", "Van Calster et al. (2019)"),
+                MethodRef("isoprobability contours", "V2", "Mawdesley et al. (2001)")]
+    out += [MethodRef("grouped cross-validation", "V2", "Roberts et al. (2017)"),
+            MethodRef("TRIPOD+AI", "V2", "Collins et al. (2024)")]
+    return tuple(out)
+
+
+def build_history_report(audit, correlations=(), *, history=None, practice=None, performance=None,
+                         threshold: float | None = None, exposure_days: float | None = None,
+                         title: str | None = None, lang: str = "es",
                          author: str = "", date: str = "", figures: bool = True) -> Report:
-    """Informe del histórico (Fase 4A): datos, auditoría de ingesta, preparación por nivel, nivel 1 y limitaciones.
+    """Informe del histórico: datos, auditoría de ingesta, preparación por nivel, nivel 1, niveles 2 y 3 (si se
+    pasan), TRIPOD+AI (con algún nivel 2 o 3) y limitaciones.
 
     - `audit`: el `HistoryAudit` de `audit_history`.
     - `correlations`: los `SiteCorrelationResult` de `fit_site_correlation`; un par que no se pudo ajustar va como
       la tupla (tipo, razón). Vacío: la sección del nivel 1 dice que no se pidieron.
     - `history`: el `History` leído; da los años cubiertos y los puntos de las figuras (sin él no van).
+    - `practice`: el `PracticeAudit` de `audit_practice` (nivel 2: describe la práctica, no recomienda).
+    - `performance`: el `PerformanceModel` de `fit_performance` (nivel 3).
+    - `threshold`: el umbral de P(falla) que fijó el ingeniero, si lo hay; solo se cita (no tiene valor por defecto).
+    - `exposure_days`: el horizonte de las isoprobabilidades; sin él, la mediana de la exposición del histórico.
     Nunca lleva el nombre del archivo, la labor, la zona ni la litología: los dominios van como D1, D2…; el
-    `id_tramo` y la fila solo en la tabla de hallazgos.
+    `id_tramo` solo en la tabla de hallazgos y en la de tramos fuera del conjunto conforme.
     """
     _check_lang(lang)
+    if threshold is not None and not 0 < threshold < 1:
+        raise ValueError("threshold must be a probability strictly between 0 and 1")
+    if exposure_days is not None and not exposure_days > 0:
+        raise ValueError("exposure_days must be a positive number of days")
     correlations = list(correlations)
     if correlations:
         methods_table, methods = _hist_methods(correlations, lang)
@@ -1189,14 +1435,26 @@ def build_history_report(audit, correlations=(), *, history=None, title: str | N
               *(_hist_kind(k, r, history, lang, figures) for k, r in enumerate(correlations, 1)))
     else:
         s4, methods = (Paragraph(t("hist_l1_none", lang)),), ()
-    sections = (
+    sections = [
         _hist_data(audit, history, lang),
         _hist_audit(audit, lang),
         _hist_readiness(audit, lang),
         Section("4", t("hs_4", lang), s4),
-        Section("5", t("hs_5", lang), (Paragraph(t("hist_limits", lang)), Paragraph(DISCLAIMER[lang]))),
-    )
-    return Report(title or t("hist_title", lang), _subtitle(t("hist_subtitle", lang), author, lang), lang, sections,
+    ]
+    levels = practice is not None or performance is not None
+    if practice is not None:
+        sections.append(_practice_section(str(len(sections) + 1), practice, lang))
+    if performance is not None:
+        sections.append(_performance_section(str(len(sections) + 1), performance, history, threshold,
+                                                 exposure_days, lang, figures))
+    if levels:
+        sections.append(_tripod_section(str(len(sections) + 1), lang))
+        methods = (*methods, *_level_methods(practice, performance, lang))
+    sections.append(Section(str(len(sections) + 1), t("hs_5", lang), (
+        Paragraph(t("hist_limits", lang)), Paragraph(t("hist_limits_l23" if levels else "hist_limits_none", lang)),
+        Paragraph(DISCLAIMER[lang]))))
+    subtitle = t("hist_subtitle_full" if levels else "hist_subtitle", lang)
+    return Report(title or t("hist_title", lang), _subtitle(subtitle, author, lang), lang, tuple(sections),
                   methods, DISCLAIMER[lang], __version__, date or datetime.date.today().isoformat())
 
 

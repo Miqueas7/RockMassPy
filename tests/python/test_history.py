@@ -450,13 +450,13 @@ def test_preparacion_nivel_3_clase_menor_y_parametros():
     ins = [insp(f"T{k:04d}", "2026-03-01", "Falla" if k < 15 else "Estable") for k in range(50)]
     p = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2)), tuple(ins))).readiness[-1]
     assert p.counts == {"minority_class": 14, "zones": 3, "usable": 49, "failures": 14, "non_failures": 35,
-                        "parameters": 4, "failures_total": 15, "tramos": 60, "tramos_with_inspections": 50,
+                        "parameters": 3, "failures_total": 15, "tramos": 60, "tramos_with_inspections": 50,
                         "tramos_without_inspections": 10, "start_from_evaluation": 0, "without_exposure": 0}
-    assert p.minimums == {"minority_class": 40, "zones": 3} and p.missing == {"minority_class": 26, "zones": 0}
+    assert p.minimums == {"minority_class": 30, "zones": 3} and p.missing == {"minority_class": 16, "zones": 0}
     # profundidad en todas las filas usables: +1; tres tipos de labor: +2
     ts = [_usable(k, profundidad_m=300, tipo_labor=("Galería", "Rampa", "Crucero")[k % 3]) for k in range(60)]
     p = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2)), tuple(ins))).readiness[-1]
-    assert p.counts["parameters"] == 7 and p.minimums["minority_class"] == 70
+    assert p.counts["parameters"] == 6 and p.minimums["minority_class"] == 60
 
 
 def test_centinela_no_aparece_en_mensajes(libro):

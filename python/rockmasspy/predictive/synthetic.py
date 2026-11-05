@@ -12,12 +12,15 @@ Mecanismo (u = calidad latente del macizo = efecto de zona + efecto de labor + r
   el GSI, a través del RMR). Los componentes del RMR quedan vacíos: la auditoría no lo recalcula.
 - Nivel 2: latente s = k·(γ_q·ln Q + γ_de·ln De) + efecto de labor + ruido logístico; rango = 1 + #(cortes < s),
   con k = 1 − 2·incoherencia (0 coherente, 0.5 la práctica ignora el macizo, 1 la invierte).
-- Nivel 3: logit P(falla) = β0 + β_q·ln Q + β_de·ln De + β_rank·rango + β_exp·ln(exposición) + efecto de zona
-  + efecto de labor. Con `site_effect=False`, logit P(falla) = β0_cat + β_cat·categoría de `read_q_chart(Q, De)`,
-  sin efectos de zona ni de labor: la P(falla) depende solo de la categoría y el modelo del sitio no agrega nada
-  sobre la línea base de nivel 0 (pruebas de 4B y 4C).
-  La falla se registra en la última inspección: la exposición que calcula `tramo_outcomes` es exactamente la del
-  modelo verdadero.
+- Nivel 3: tasa de falla constante. El tiempo hasta la falla es Exponencial(λ), con log λ (por día) = β0
+  + β_q·ln Q + β_de·ln De + β_rank·rango + efecto de zona + efecto de labor; la censura es la última inspección
+  (un plazo uniforme en `exposure_days`). Con `site_effect=False`, log λ = β0_cat + β_cat·categoría de
+  `read_q_chart(Q, De)`, sin efectos de zona ni de labor: la tasa depende solo de la categoría y el modelo del sitio
+  no agrega nada sobre la línea base de nivel 0 (pruebas de 4B y 4C).
+  Las inspecciones van cada ~4 meses; si el tramo falla, la falla se registra en su fecha real (día entero, al
+  menos 1) y ya no hay inspecciones después. Así la exposición de `tramo_outcomes` (hasta la primera falla o la
+  última inspección) es exactamente la del modelo verdadero, y los tramos fallados tienen exposiciones más cortas,
+  como en una mina real.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.special import expit, ndtr
+from scipy.special import ndtr
 
 from .. import _rockmasspy_core as rm
 from ..history import HISTORY_TRAMO_COLUMNS, INSPECTION_COLUMNS, History, HistoryTramo, Inspection, SupportTypeDef
@@ -61,6 +64,9 @@ SUPPORT_TYPES = tuple(SupportTypeDef(code, order, desc, SupportType(code, order,
      None, 3.5),
     ("V", 5, "Shotcrete, pernos y cimbra", Bolt("helicoidal", 3.0, 1.0), Shotcrete(100.0, True), None,
      "perfil H @1.0 m", 6.0)))
+# interceptos de log λ por día (recalibrados para la tasa constante: ~45 % de fallas en los dos modos)
+FAIL_BETA0 = -5.3
+FAIL_CATEGORY_BETA0 = -7.7
 _CATEGORY_TO_TYPE = {1: "I", 2: "I", 3: "II", 4: "III", 5: "IV"}  # 6 o más: V (lo que pediría la carta Q)
 
 
@@ -86,18 +92,17 @@ class SyntheticTruth:
     practice_cuts: tuple[float, ...] = (-2.5, -1.0, 0.5, 2.0)
     sd_labor_practice: float = 0.5
     practice_incoherence: float = 0.0
-    # nivel 3: β_q < 0, β_de > 0, β_rank < 0, β_exp > 0
-    fail_beta0: float = -3.3  # ~45 % de fallas: la clase menor alcanza el mínimo del nivel 3 con 240 tramos
+    # nivel 3, log λ por día: β_q < 0, β_de > 0, β_rank < 0
+    fail_beta0: float = FAIL_BETA0  # ~45 % de fallas: la clase menor alcanza el mínimo del nivel 3 con 240 tramos
     fail_beta_lnq: float = -0.5
     fail_beta_lnde: float = 1.0
     fail_beta_rank: float = -0.6
-    fail_beta_lnexp: float = 0.8
     sd_zone_failure: float = 0.4
     sd_labor_failure: float = 0.5
     site_effect: bool = True
-    fail_category_beta0: float = -1.2  # solo con site_effect=False; prevalencia parecida a la del modo con efecto
+    fail_category_beta0: float = FAIL_CATEGORY_BETA0  # solo con site_effect=False; prevalencia parecida
     fail_category_beta: float = 0.5
-    # exposición: días desde la instalación hasta la última inspección
+    # censura: días desde la instalación hasta la última inspección
     exposure_days: tuple[int, int] = (30, 900)
 
     def __post_init__(self):
@@ -173,13 +178,15 @@ def synthetic_history(*, n_zones: int = 4, labors_per_zone: int = 5, tramos_per_
                     + rng.logistic(0, 1)
                 rank = 1 + sum(s > c for c in tr.practice_cuts)
                 category = read_q_chart(q, de).category
-                exposure = int(rng.integers(tr.exposure_days[0], tr.exposure_days[1] + 1))
+                censor = int(rng.integers(tr.exposure_days[0], tr.exposure_days[1] + 1))
                 if tr.site_effect:
                     eta = (tr.fail_beta0 + tr.fail_beta_lnq * lnq + tr.fail_beta_lnde * lnde + tr.fail_beta_rank * rank
-                           + tr.fail_beta_lnexp * math.log(exposure) + zone_f + labor_f)
+                           + zone_f + labor_f)
                 else:
                     eta = tr.fail_category_beta0 + tr.fail_category_beta * category
-                failed = bool(rng.random() < expit(eta))
+                fail_day = max(1, math.ceil(rng.exponential(math.exp(-eta))))  # media 1/λ
+                failed = fail_day <= censor
+                exposure = fail_day if failed else censor
                 length = int(rng.integers(3, 9))  # metros enteros: tramos contiguos sin solape ni deriva de redondeo
                 installed = date + datetime.timedelta(days=int(rng.integers(1, 5)))
                 tid = f"T{len(tramos) + 1:04d}"
@@ -195,12 +202,15 @@ def synthetic_history(*, n_zones: int = 4, labors_per_zone: int = 5, tramos_per_
                     gsi_celda=None, sost_recomendado=_CATEGORY_TO_TYPE.get(category, "V"),
                     sost_instalado=SUPPORT_TYPES[rank - 1].codigo_tipo, fecha_instalacion=installed.isoformat(),
                     tiempo_sin_sostener_h=None, fila=len(tramos) + 2))
-                n_insp = max(1, math.ceil(exposure / 120))  # una inspección cada ~4 meses; la última al final
-                for k in range(1, n_insp + 1):
+                # una inspección cada ~4 meses hasta la censura; si falla, las de antes de la falla y la falla
+                n_censor = max(1, math.ceil(censor / 120))
+                days = [round(censor * k / n_censor) for k in range(1, n_censor + 1)]
+                days = [x for x in days if x < exposure] + [exposure] if failed else days
+                n_insp = len(days)
+                for k, day in enumerate(days, start=1):
                     last = k == n_insp
                     inspections.append(Inspection(
-                        id_tramo=tid, fecha_inspeccion=(installed + datetime.timedelta(
-                            days=round(exposure * k / n_insp))).isoformat(),
+                        id_tramo=tid, fecha_inspeccion=(installed + datetime.timedelta(days=day)).isoformat(),
                         estado="Falla" if last and failed else "Estable",
                         tipo_falla="Desprendimiento" if last and failed else None, volumen_m3=None,
                         sobreexcavacion_pct=None, convergencia_mm=None, reparacion_tipo=None,

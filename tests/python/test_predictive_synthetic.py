@@ -99,7 +99,8 @@ def test_resultados_por_tramo(historicos):
 
 
 def test_sin_efecto_del_sitio_depende_solo_de_la_categoria():
-    # condicionado a la categoría NGI, ln Q, ln De, rango y exposición no aportan nada (oráculo: statsmodels Logit)
+    # condicionado a la categoría NGI, ln Q, ln De y rango no aportan nada a la tasa de falla (oráculo: statsmodels
+    # GLM Poisson con offset log t, la verosimilitud de la exponencial censurada)
     sm = pytest.importorskip("statsmodels.api")
     from rockmasspy.q_support import read_q_chart
     h, _ = synthetic_history(n_zones=8, labors_per_zone=10, tramos_per_labor=25, seed=0,
@@ -107,11 +108,30 @@ def test_sin_efecto_del_sitio_depende_solo_de_la_categoria():
     out = {o.id_tramo: o for o in tramo_outcomes(h)}
     rank = {s.codigo_tipo: s.orden for s in h.support_types}
     rows = [(read_q_chart(t.q_valor, t.luz_m / t.esr).category, math.log(t.q_valor), math.log(t.luz_m / t.esr),
-             rank[t.sost_instalado], math.log(out[t.id_tramo].exposure_days)) for t in h.tramos]
+             rank[t.sost_instalado]) for t in h.tramos]
     y = np.array([out[t.id_tramo].failed for t in h.tramos], dtype=float)
-    fit = sm.Logit(y, sm.add_constant(np.array(rows))).fit(disp=0)
+    offset = np.log([out[t.id_tramo].exposure_days for t in h.tramos])
+    fit = sm.GLM(y, sm.add_constant(np.array(rows)), family=sm.families.Poisson(), offset=offset).fit()
     assert fit.params[1] > 0 and fit.pvalues[1] < 1e-6  # la categoría sí cuenta
     assert all(p > 0.01 for p in fit.pvalues[2:])  # semilla fija; con otras, ~1 de 40 cae bajo 0.01 por azar
+
+
+def test_tasa_constante_recupera_los_coeficientes_verdaderos():
+    # con efecto: GLM Poisson con offset sobre ln Q, ln De y rango recupera β (atenuado por zona y labor)
+    sm = pytest.importorskip("statsmodels.api")
+    h, tr = synthetic_history(n_zones=8, labors_per_zone=10, tramos_per_labor=25, seed=1)
+    out = {o.id_tramo: o for o in tramo_outcomes(h)}
+    rank = {s.codigo_tipo: s.orden for s in h.support_types}
+    X = np.array([(math.log(t.q_valor), math.log(t.luz_m / t.esr), rank[t.sost_instalado]) for t in h.tramos])
+    y = np.array([out[t.id_tramo].failed for t in h.tramos], dtype=float)
+    offset = np.log([out[t.id_tramo].exposure_days for t in h.tramos])
+    fit = sm.GLM(y, sm.add_constant(X), family=sm.families.Poisson(), offset=offset).fit()
+    for got, true in zip(fit.params[1:], (tr.fail_beta_lnq, tr.fail_beta_lnde, tr.fail_beta_rank)):
+        assert np.sign(got) == np.sign(true) and 0.5 * abs(true) < abs(got) < 1.5 * abs(true), (got, true)
+    # los fallados tienen exposiciones más cortas (la falla corta la exposición)
+    exp_f = [o.exposure_days for o in out.values() if o.failed]
+    exp_s = [o.exposure_days for o in out.values() if not o.failed]
+    assert np.median(exp_f) < np.median(exp_s)
 
 
 def test_nivel1_ic_bootstrap_cubre_la_pendiente_verdadera(historicos):

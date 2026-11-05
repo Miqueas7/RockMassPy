@@ -554,6 +554,45 @@ The CLI and the report print counts and codes (domains as D1, D2…), never the 
 lithology, and never the input file name. Result files do carry `id_tramo` and the domain: keep them in the mine's
 protected folder, like the history. See `examples/12-historico-prediccion/`.
 
+### Practice audit (level 2) and failure model with recommendation (level 3)
+
+```python
+from rockmasspy.predictive import audit_practice, fit_performance, recommend, save_model
+
+practice = audit_practice(h)                  # ordinal logit of the installed type: describes, never recommends
+model = fit_performance(h)                    # "site", "partial" or "not_calibrated"
+recs = recommend(model, new_tramos, threshold=0.10, exposure_days=365, practice=practice)
+save_model(model, "model.json")               # coefficients, ranges and counts; never rows or ids
+```
+
+- **Level 2** fits a cumulative logit of the installed support type on ln Q, ln De (span/ESR), service life and
+  excavation type. It says whether the practice is coherent with rock quality and span, whether it is more
+  predictable than the NGI Q chart, and which tramos have an installed type outside their 90 % conformal set.
+- **Level 3** models the failure rate with a constant hazard and a gamma frailty per excavation (exposure as offset),
+  with sign constraints (worse rock or a larger span never lowers the risk; more support never raises it) and a
+  zone-clustered robust covariance. P(failure within H days) for a new excavation is 1 − (1 + θλH)^(−1/θ).
+- **Validation** is grouped by excavation, leave-one-zone-out and temporal, against a constant-rate dummy and the
+  NGI-category baseline, with a bootstrap over excavations. The model is `site` only if the excavation and zone
+  partitions beat both references (95 % CI of the Poisson-deviance gain above zero, no failed folds) and the
+  temporal one is not worse.
+- **Recommendation:** the lightest type whose upper bound (upper λ and the frailty quantile, for a new excavation)
+  stays under the threshold. The threshold and the horizon are set by the engineer: there are no defaults. Nothing
+  is chosen when the model is not `site`, the tramo extrapolates, a type has too little history, the support effect
+  is not identified, or a sign constraint on rock quality or span is active; the options are still shown, with the
+  reason.
+
+```bash
+rockmass history historico.xlsx --practice --performance --model-output model.json --output results/ \
+    --threshold 0.10 --exposure-days 365 --report historico.docx
+rockmass recommend new_tramos.xlsx --model model.json --threshold 0.10 --exposure-days 365 \
+    --practice-from historico.xlsx --output recommendations.csv
+```
+
+`recommend` prints each tramo by position; `recommendations.csv` carries `id_tramo` and two empty columns,
+`decision_ingeniero` and `motivo`, where the engineer records what was decided. The minimum data per level were
+checked by simulation (`docs/investigacion/SIMULACION_MINIMOS.md` in the repository). The library recommends, the
+engineer decides.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a

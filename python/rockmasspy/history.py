@@ -33,7 +33,7 @@ MIN_LABORS_LEVEL1 = 5
 MIN_TRAMOS_PER_TYPE_LEVEL2 = 10
 MIN_LABORS_PER_TYPE_LEVEL2 = 5
 MIN_EVENTS_PER_PARAMETER_LEVEL3 = 10  # se aplica a la clase menor: min(fallas, no fallas)
-LEVEL3_BASE_PARAMETERS = 4  # ln Q, ln De, rango del sostenimiento y ln exposición (R9); decisión de diseño
+LEVEL3_BASE_PARAMETERS = 3  # ln Q, ln De y rango del sostenimiento; la exposición entra como offset (R9); decisión de diseño
 MIN_ZONES_LEVEL3 = 3
 
 # Tolerancias de la auditoría (R3)
@@ -570,6 +570,28 @@ def level1_rows(history: History, kind: str, *, rmr_edition: str | None = None) 
                       bad_x, bad_ed)
 
 
+def level2_rows(history: History) -> tuple[HistoryTramo, ...]:
+    """Tramos usables en los niveles 2 y 3: Q, luz y ESR > 0 (se usan ln Q y ln De) y un tipo instalado definido
+    en Tipos_sostenimiento. Fuente única para la preparación y los ajustes."""
+    codes = {s.codigo_tipo for s in history.support_types}
+    return tuple(t for t in history.tramos
+                 if t.sost_instalado in codes and _pos(t.q_valor) and _pos(t.luz_m) and _pos(t.esr))
+
+
+def level3_rows(history: History) -> tuple[tuple[TramoOutcome, HistoryTramo], ...]:
+    """(resultado, tramo) usables en el nivel 3: los de `level2_rows` con inspección y exposición conocida."""
+    by_id = {t.id_tramo: t for t in level2_rows(history)}
+    return tuple((o, by_id[o.id_tramo]) for o in tramo_outcomes(history)
+                 if o.exposure_days is not None and o.id_tramo in by_id)
+
+
+def level3_parameters(rows) -> int:
+    """Parámetros del modelo de desempeño: los base, +1 si todas las filas traen profundidad, + (tipos de labor − 1)."""
+    labor_types = {t.tipo_labor for _, t in rows} - {None}
+    return (LEVEL3_BASE_PARAMETERS + (bool(rows) and all(t.profundidad_m is not None for _, t in rows))
+            + (len(labor_types) - 1 if len(labor_types) >= 2 else 0))
+
+
 def _readiness(history):
     """Solo cuenta filas completas para las variables base de cada nivel; los totales van aparte."""
     out = []
@@ -578,23 +600,16 @@ def _readiness(history):
         ts = level1_rows(history, kind).tramos  # los mismos pares que usa el ajuste por defecto
         out.append(LevelReadiness(1, kind, {"pairs": len(ts), "labors": _labors(ts), "total": n_all},
                                   {"pairs": MIN_PAIRS_LEVEL1, "labors": MIN_LABORS_LEVEL1}))
-    codes = {s.codigo_tipo for s in history.support_types}
-
-    def base(t):  # ln Q, ln De (luz/ESR) y un tipo instalado definido: lo común a los niveles 2 y 3
-        return t.sost_instalado in codes and _pos(t.q_valor) and _pos(t.luz_m) and _pos(t.esr)
-
+    rows2 = level2_rows(history)
     for s in sorted(history.support_types, key=lambda s: s.orden):
         total = [t for t in history.tramos if t.sost_instalado == s.codigo_tipo]
-        ts = [t for t in total if base(t)]
+        ts = [t for t in rows2 if t.sost_instalado == s.codigo_tipo]
         out.append(LevelReadiness(2, s.codigo_tipo, {"tramos": len(ts), "labors": _labors(ts), "total": len(total)},
                                   {"tramos": MIN_TRAMOS_PER_TYPE_LEVEL2, "labors": MIN_LABORS_PER_TYPE_LEVEL2}))
     outcomes = tramo_outcomes(history)
-    by_id = {t.id_tramo: t for t in history.tramos}
-    usable = [(o, by_id[o.id_tramo]) for o in outcomes if o.exposure_days is not None and base(by_id[o.id_tramo])]
+    usable = level3_rows(history)
     failures = sum(o.failed for o, _ in usable)
-    labor_types = {t.tipo_labor for _, t in usable} - {None}
-    params = (LEVEL3_BASE_PARAMETERS + (bool(usable) and all(t.profundidad_m is not None for _, t in usable))
-              + (len(labor_types) - 1 if len(labor_types) >= 2 else 0))
+    params = level3_parameters(usable)
     out.append(LevelReadiness(3, "performance", {
         "minority_class": min(failures, len(usable) - failures),
         "zones": len({t.zona_nivel for _, t in usable} - {None}),
