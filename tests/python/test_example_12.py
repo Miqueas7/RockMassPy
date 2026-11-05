@@ -22,7 +22,6 @@ def test_historico(tmp_path, capsys):
     r = cargar().main(tmp_path)
     salida = capsys.readouterr().out
     assert r["counts"]["findings"] == 0 and all(r["ready"].values())
-    assert r["cli"] == 2  # sin hallazgos, pero D3 queda «no calibrada al sitio» (README)
     for kind, fits in r["fits"].items():
         assert fits[0][0] == "mine" and fits[0][3] == "site", kind
         assert [f[0] for f in fits if f[3] == "not_calibrated"] == ["D3"], kind
@@ -31,8 +30,12 @@ def test_historico(tmp_path, capsys):
         assert ci[0] <= a_true <= ci[1], kind
     for nombre in r["files"]:
         assert (tmp_path / nombre).stat().st_size > 0, nombre
+    assert r["files"][-3:] == ["resultados/history_findings.csv", "resultados/site_correlations.csv",
+                               "resultados/site_correlations.json"]
     js = json.loads((tmp_path / "resultados" / "site_correlations.json").read_text(encoding="utf-8"))
-    assert len(js["correlations"]) == 15  # 3 pares × (mina + 4 dominios)
+    # solo los ajustes «sitio»: 3 pares × (mina + 4 dominios), menos D3 («no calibrada al sitio») en cada par
+    sitio = sum(f[3] == "site" for fits in r["fits"].values() for f in fits)
+    assert len(js["correlations"]) == sitio == 12
     html = (tmp_path / "historico.html").read_text(encoding="utf-8")
     for lit in pred.synthetic.LITHOLOGIES:  # ni en la salida de la CLI ni en el informe
         assert lit not in salida and lit not in html

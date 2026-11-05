@@ -10,8 +10,7 @@ from pathlib import Path
 
 import rockmasspy as rm
 import rockmasspy.report as rp
-from rockmasspy.cli import main as cli
-from rockmasspy.predictive import KINDS, fit_site_correlation, synthetic_history
+from rockmasspy.predictive import KINDS, fit_site_correlation, save_site_correlations, synthetic_history
 
 SEMILLA = 12
 
@@ -34,17 +33,18 @@ def main(out_dir: Path) -> dict:
         archivos.append(rp.write_docx(rep, out_dir / "historico.docx").name)
     except ImportError:
         pass
-    # 5. Lo mismo por la CLI, que escribe los resultados: hallazgos, correlaciones y el JSON para las tablas
-    codigo = cli(["history", str(xlsx), "--correlations", "--output", str(out_dir / "resultados")])
-    archivos += [f"resultados/{n}" for n in ("history_findings.csv", "site_correlations.csv",
-                                             "site_correlations.json")]
+    # 5. Los resultados, como los escribe `rockmass history --output`: hallazgos, correlaciones y el JSON (solo
+    #    los ajustes «sitio») para pegar en las tablas por labor
+    res = out_dir / "resultados"
+    res.mkdir(exist_ok=True)
+    escritos = [rm.save_history_findings(audit, res / "history_findings.csv"), *save_site_correlations(ajustes, res)]
+    archivos += [f"resultados/{p.name}" for p in escritos]
     return {
         "counts": rm.history_audit_counts(audit),
         "ready": {f"{r.level} {r.item}": r.ready for r in audit.readiness},
         "fits": {r.kind: [(f.label, f.n, f.n_labors, f.status) for f in rp.site_fits(r)] for r in ajustes},
         "mine": {r.kind: (r.mine.a, r.mine.b, r.mine.a_ci) for r in ajustes},
         "truth": {"rmr_from_q": (verdad.rmr_a, verdad.rmr_b), "gsi_from_rmr": (verdad.gsi_c, verdad.gsi_d)},
-        "cli": codigo,
         "files": archivos,
     }
 
@@ -61,4 +61,4 @@ if __name__ == "__main__":
         verdad = r["truth"].get(kind)
         extra = f" (verdad a {verdad[0]:g}, b {verdad[1]:g})" if verdad else ""
         print(f"{kind} mina: a {a:.3f} (IC {ci[0]:.3f}; {ci[1]:.3f}), b {b:.2f}{extra}")
-    print("código de la CLI:", r["cli"], "| archivos en", destino)
+    print("archivos en", destino)

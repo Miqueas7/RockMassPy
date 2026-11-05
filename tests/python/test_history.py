@@ -1,8 +1,10 @@
 # Histórico de la mina (Fase 4, tareas 2 y 5): lectura de la plantilla, resultados de desempeño y auditoría.
 # Solo datos sintéticos (L001, Z1, T0001); ZZSENT es el centinela de privacidad (R13).
+import contextlib
 import datetime
 import importlib.util
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -172,33 +174,88 @@ def test_mapeo_de_columnas(tmp_path):
         rm.load_history(tmp_path / "m.xlsx", column_map={"ID": "codigo_mina"})  # no se lee: no es un nombre válido
 
 
-def test_errores_con_fila_y_columna_sin_ids(libro):
-    casos = [({"Tramos": [{"id_tramo": "ZZSENT-T1", "labor_codigo": "ZZSENT", "este_m": "ZZSENT"}]},
-              "sheet 'Tramos', row 2, column 'este_m': invalid value"),
-             ({"Tramos": [{"id_tramo": "ZZSENT-T1", "zona_nivel": "ZZSENT", "norte_m": "ZZSENT"}]},
-              "sheet 'Tramos', row 2, column 'norte_m': invalid value"),
-             ({"Tramos": [{"id_tramo": "ZZSENT-T1", "cota_m": "ZZSENT"}]},
-              "sheet 'Tramos', row 2, column 'cota_m': invalid value"),
-             ({"Tramos": [{"id_tramo": "ZZSENT-T1", "litologia": "ZZSENT", "luz_m": "x"}]},
-              "sheet 'Tramos', row 2, column 'luz_m': expected a number, got 'x'"),
-             ({"Tramos": [{"id_tramo": "ZZSENT-T1", "fecha_instalacion": "31/31/2026"}]},
-              "sheet 'Tramos', row 2, column 'fecha_instalacion': expected a date yyyy-mm-dd"),
-             ({"Tramos": [{"id_tramo": "ZZSENT-T1", "labor_codigo": "ZZSENT"}, {"id_tramo": "ZZSENT-T1"}]},
-              "sheet 'Tramos': duplicate id_tramo in rows 2 and 3"),
-             ({"Tramos": [{"labor_codigo": "ZZSENT", "luz_m": 4}]},
-              "sheet 'Tramos', row 2, column 'id_tramo': required value is empty"),
-             ({"Tramos": [{"id_tramo": "T1"}], "Desempeno": [{"id_tramo": "ZZSENT-T1", "fecha_inspeccion": "2026-1-1",
-                                                               "estado": "Estable"}]},
-              "sheet 'Desempeno', row 2, column 'fecha_inspeccion': expected a date"),
-             ({"Tramos": [{"id_tramo": "T1"}], "Desempeno": [{"id_tramo": "ZZSENT-T1",
-                                                               "fecha_inspeccion": "2026-01-01", "estado": "Roto"}]},
-              "sheet 'Desempeno', row 2, column 'estado': expected one of Estable, Falla, Reparado, Abandonado"),
-             ({"Tramos": [{"id_tramo": "T1"}], "Desempeno": [{"id_tramo": "ZZSENT-T1", "estado": "Falla"}]},
-              "sheet 'Desempeno', row 2, column 'fecha_inspeccion': required value is empty")]
-    for hojas, msg in casos:
-        with pytest.raises(ValueError, match=msg) as e:
-            rm.load_history(libro(hojas))
-        assert "ZZSENT" not in str(e.value)
+_ERRORES = [({"Tramos": [{"id_tramo": "ZZSENT-T1", "zona_nivel": "ZZSENT", "norte_m": "ZZSENT"}]},
+             "sheet 'Tramos', row 2, column 'norte_m': invalid value"),
+            ({"Tramos": [{"id_tramo": "ZZSENT-T1", "cota_m": "ZZSENT"}]},
+             "sheet 'Tramos', row 2, column 'cota_m': invalid value"),
+            ({"Tramos": [{"id_tramo": "ZZSENT-T1", "litologia": "ZZSENT", "luz_m": "x"}]},
+             "sheet 'Tramos', row 2, column 'luz_m': expected a number, got 'x'"),
+            ({"Tramos": [{"id_tramo": "ZZSENT-T1", "fecha_instalacion": "31/31/2026"}]},
+             "sheet 'Tramos', row 2, column 'fecha_instalacion': expected a date yyyy-mm-dd"),
+            ({"Tramos": [{"id_tramo": "ZZSENT-T1", "labor_codigo": "ZZSENT"}, {"id_tramo": "ZZSENT-T1"}]},
+             "sheet 'Tramos': duplicate id_tramo in rows 2 and 3"),
+            ({"Tramos": [{"labor_codigo": "ZZSENT", "luz_m": 4}]},
+             "sheet 'Tramos', row 2, column 'id_tramo': required value is empty"),
+            ({"Tramos": [{"id_tramo": "T1"}], "Desempeno": [{"id_tramo": "ZZSENT-T1", "fecha_inspeccion": "2026-1-1",
+                                                              "estado": "Estable"}]},
+             "sheet 'Desempeno', row 2, column 'fecha_inspeccion': expected a date"),
+            ({"Tramos": [{"id_tramo": "T1"}], "Desempeno": [{"id_tramo": "ZZSENT-T1",
+                                                              "fecha_inspeccion": "2026-01-01", "estado": "Roto"}]},
+             "sheet 'Desempeno', row 2, column 'estado': expected one of Estable, Falla, Reparado, Abandonado"),
+            ({"Tramos": [{"id_tramo": "T1"}], "Desempeno": [{"id_tramo": "ZZSENT-T1", "estado": "Falla"}]},
+             "sheet 'Desempeno', row 2, column 'fecha_inspeccion': required value is empty")]
+
+
+def carpeta_csv(d, hojas):
+    """Una carpeta con un CSV por hoja; la cabecera lleva las columnas obligatorias aunque vengan vacías."""
+    base = {"Tramos": ["id_tramo"], "Desempeno": ["id_tramo", "fecha_inspeccion", "estado"]}
+    d.mkdir()
+    for hoja, filas in hojas.items():
+        cab = list(dict.fromkeys([*base.get(hoja, []), *(k for f in filas for k in f)]))
+        lineas = [",".join(cab)] + [",".join(str(f.get(k, "")) for k in cab) for f in filas]
+        (d / f"{hoja}.csv").write_text("".join(f"{x}\n" for x in lineas), encoding="utf-8")
+    return d
+
+
+def test_errores_con_fila_y_columna_sin_ids_xlsx(libro):
+    with pytest.raises(ValueError, match="sheet 'Tramos', row 2, column 'este_m': invalid value") as e:
+        rm.load_history(libro({"Tramos": [{"id_tramo": "ZZSENT-T1", "labor_codigo": "ZZSENT", "este_m": "ZZSENT"}]}))
+    assert "ZZSENT" not in str(e.value)
+
+
+@pytest.mark.parametrize("hojas, msg", _ERRORES)
+def test_errores_con_fila_y_columna_sin_ids(tmp_path, hojas, msg):
+    with pytest.raises(ValueError, match=msg) as e:
+        rm.load_history(carpeta_csv(tmp_path / "csv", hojas))
+    assert "ZZSENT" not in str(e.value)
+
+
+@contextlib.contextmanager
+def bloqueado(path):
+    """Abre `path` en exclusiva (sin compartir), como Excel con el libro abierto. Solo en Windows."""
+    if sys.platform != "win32":
+        pytest.skip("the exclusive lock uses CreateFileW (Windows only)")
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                wintypes.DWORD, wintypes.HANDLE)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    # GENERIC_READ, share mode 0 (nadie más lo abre), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL
+    h = k32.CreateFileW(str(path), 0x80000000, 0, None, 3, 0x80, None)
+    if h in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield
+    finally:
+        k32.CloseHandle(h)
+
+
+def test_archivo_bloqueado_sin_ruta(libro, tmp_path):
+    p = tmp_path / "ZZSENT-mina" / "ZZSENT.xlsx"
+    p.parent.mkdir()
+    p.write_bytes(libro({"Tramos": [{"id_tramo": "T1"}]}).read_bytes())
+    with bloqueado(p), pytest.raises(OSError) as e:
+        rm.load_history(p)
+    assert str(e.value) == "history file could not be read (in use or no permission)"
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+    d = carpeta_csv(tmp_path / "ZZSENT-csv", {"Tramos": [{"id_tramo": "T1"}]})
+    with bloqueado(d / "Tramos.csv"), pytest.raises(OSError) as e:
+        rm.load_history(d)
+    assert str(e.value) == "history folder could not be read (in use or no permission)"
+    assert rm.load_history(p).tramos[0].id_tramo == "T1"  # sin el bloqueo se lee bien
 
 
 def test_tipos_de_sostenimiento_unicos_y_orden_entero(libro):

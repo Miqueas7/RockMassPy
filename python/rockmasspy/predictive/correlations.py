@@ -13,14 +13,18 @@ conteos y métodos, nunca un valor de una columna de identificación ni la litol
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
 from .. import _rockmasspy_core as rm
-from ..history import (LEVEL1_KINDS, LEVEL1_RMR_EDITIONS, MIN_LABORS_LEVEL1, MIN_PAIRS_LEVEL1, History, HistoryTramo,
-                       labor_key, level1_rows)
+from ..batch import write_table
+from ..history import (LEVEL1_KINDS, LEVEL1_RMR_EDITIONS, MIN_LABORS_LEVEL1, MIN_PAIRS_LEVEL1, History,
+                       check_group_by, labor_key, level1_rows)
+from ..table_io import correlation_to_dict
 from .stats import (BayesLinearFit, BootstrapResult, DemingFit, OlsFit, _positive, bayes_linear_fit, deming_fit,
                     group_bootstrap, ols_fit)
 
@@ -156,9 +160,9 @@ def _fit(kind, label, domain, rows, x, y, groups, edition, prior, deming_ratio, 
     status = "not_calibrated"
     below = n < MIN_PAIRS_LEVEL1 or n_labors < MIN_LABORS_LEVEL1
     if n_labors < MIN_LABORS_LEVEL1:
-        warns.append(f"few labors: {n_labors} (needs {MIN_LABORS_LEVEL1})")
+        warns.append(f"few excavations: {n_labors} (needs {MIN_LABORS_LEVEL1})")
     if below:
-        warns.append(f"not calibrated to the site: {n} pairs from {n_labors} labors (needs {MIN_PAIRS_LEVEL1} "
+        warns.append(f"not calibrated to the site: {n} pairs from {n_labors} excavations (needs {MIN_PAIRS_LEVEL1} "
                      f"from {MIN_LABORS_LEVEL1}); Bayesian fit only, close to the global correlation")
     else:
         try:
@@ -227,8 +231,7 @@ def fit_site_correlation(history: History, kind: str, *, group_by: str | None = 
       más 10 % de réplicas descartadas y pendiente con el signo de la global), "unstable" (cumple el mínimo pero
       no lo demás) y "not_calibrated" (bajo el mínimo: solo el bayesiano).
     """
-    if group_by is not None and (group_by == "fila" or group_by not in HistoryTramo.__dataclass_fields__):
-        raise ValueError(f"group_by must be None or a HistoryTramo attribute, got '{group_by}'")
+    check_group_by(group_by)
     if deming_ratio is not None:
         _positive("deming_ratio", deming_ratio)
     sel = level1_rows(history, kind, rmr_edition=rmr_edition)  # valida kind y rmr_edition
@@ -279,3 +282,39 @@ def fit_site_correlation(history: History, kind: str, *, group_by: str | None = 
                                  prior_correlation=info.method_id, prior_verification=info.verification.name,
                                  prior_mean=(a_g, b_g), prior_sd=tuple(float(s) for s in sd),
                                  prior_sigma=float(sigma), warnings=tuple(warns))
+
+
+CORRELATION_RESULT_COLUMNS = ("par", "etiqueta", "dominio", "n", "labores", "estado", "metodo", "a", "b",
+                              "a_ic95_inf", "a_ic95_sup", "b_ic95_inf", "b_ic95_sup", "x_min", "x_max", "desde",
+                              "hacia", "prior", "avisos")
+
+
+def save_site_correlations(results, folder) -> tuple[Path, Path]:
+    """Escribe `site_correlations.csv` y `site_correlations.json` en `folder` (la crea si falta).
+
+    `results`: un `SiteCorrelationResult` o una secuencia de ellos; un par que no se pudo ajustar va como la tupla
+    (tipo, razón) y queda en el CSV con estado `not_fitted`. El CSV lleva todos los ajustes con su estado (y el
+    dominio: es un archivo de resultados). El JSON, en el formato `correlations` de las tablas por labor, lleva solo
+    los ajustes con estado `site`: los `unstable` y `not_calibrated` no se pegan en una tabla.
+    """
+    if isinstance(results, SiteCorrelationResult):
+        results = (results,)
+    out = Path(folder)
+    out.mkdir(parents=True, exist_ok=True)
+    rows, corrs = [], []
+    for r in results:
+        if isinstance(r, tuple):
+            rows.append((r[0], *[None] * 4, "not_fitted", *[None] * 12, r[1]))
+            continue
+        for f in (r.mine, *r.domains.values()):
+            a_ci, b_ci = (f.a_ci, f.b_ci) if f.method == "OLS" else (None, None)
+            rows.append((r.kind, f.label, f.domain, f.n, f.n_labors, f.status, f.method, f.a, f.b,
+                         *(a_ci or (None, None)), *(b_ci or (None, None)), f.x_min, f.x_max, f.x_from, f.y_to,
+                         r.prior_correlation, "; ".join((*r.warnings, *f.warnings))))
+            c = f.to_custom_correlation() if f.status == "site" else None
+            if c is not None:
+                corrs.append(correlation_to_dict(c))
+    csv_path = write_table(out / "site_correlations.csv", CORRELATION_RESULT_COLUMNS, rows)
+    js = out / "site_correlations.json"
+    js.write_text(json.dumps({"correlations": corrs}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return csv_path, js

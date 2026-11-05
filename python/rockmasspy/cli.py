@@ -597,12 +597,6 @@ def _mrmr(a) -> int:
     return 2 if warnings else 0
 
 
-FINDING_RESULT_COLUMNS = ("hallazgo", "hoja", "fila", "id_tramo", "mensaje")
-CORRELATION_RESULT_COLUMNS = ("par", "etiqueta", "dominio", "n", "labores", "estado", "metodo", "a", "b",
-                              "a_ic95_inf", "a_ic95_sup", "b_ic95_inf", "b_ic95_sup", "x_min", "x_max", "desde",
-                              "hacia", "prior", "avisos")
-
-
 def _fit_correlations(history, group_by, deming_ratio) -> list:
     """Los tres pares; uno que no se puede ajustar queda como (tipo, razón) y no detiene a los otros."""
     from .predictive import KINDS, fit_site_correlation  # sin numpy/scipy: ImportError con el texto del extra [ml]
@@ -616,51 +610,26 @@ def _fit_correlations(history, group_by, deming_ratio) -> list:
     return out
 
 
-def _save_history_outputs(folder, audit, fits) -> list:
-    """history_findings.csv y, con correlaciones, site_correlations.csv y .json. Son archivos de resultados: el
-    id_tramo, la fila y el dominio (la litología) sí van aquí."""
-    from .batch import write_table
-    from .report import site_custom, site_fits
-
-    out = Path(folder)
-    out.mkdir(parents=True, exist_ok=True)
-    paths = [write_table(out / "history_findings.csv", FINDING_RESULT_COLUMNS,
-                         [(f.kind, f.sheet, f.fila, f.id_tramo, f.message) for f in audit.findings])]
-    if fits is None:
-        return paths
-    rows, corrs = [], []
-    for r in fits:
-        if isinstance(r, tuple):
-            rows.append((r[0], None, None, None, None, "not_fitted", None, None, None, None, None, None, None, None,
-                         None, None, None, None, r[1]))
-            continue
-        for f in site_fits(r):
-            a_ci, b_ci = (f.a_ci, f.b_ci) if f.method == "OLS" else (None, None)
-            rows.append((r.kind, f.label, f.domain, f.n, f.n_labors, f.status, f.method, f.a, f.b,
-                         *(a_ci or (None, None)), *(b_ci or (None, None)), f.x_min, f.x_max, f.x_from, f.y_to,
-                         r.prior_correlation, "; ".join((*r.warnings, *f.warnings))))
-            c = site_custom(f)
-            if c is not None:  # el formato de `correlations` de las tablas por labor (table_io)
-                corrs.append({"name": c.name, "from": c.from_, "to": c.to, "form": c.form.name, "a": c.a, "b": c.b,
-                              "valid_min": c.valid_min, "valid_max": c.valid_max, "source": c.source})
-    paths.append(write_table(out / "site_correlations.csv", CORRELATION_RESULT_COLUMNS, rows))
-    js = out / "site_correlations.json"
-    js.write_text(json.dumps({"correlations": corrs}, indent=2, ensure_ascii=False), encoding="utf-8")
-    return [*paths, js]
-
-
 def _history(a) -> int:
     from collections import Counter
 
     from . import report as rp
-    from .history import HistoryTramo, audit_history, load_history
+    from .history import (FINDING_KINDS, audit_history, check_group_by, history_audit_counts, load_history,
+                          save_history_findings)
 
     ext = Path(a.report).suffix.lower() if a.report else ""
     if a.report and ext not in (".docx", ".html"):
         raise ValueError("report must end in .docx or .html")
+    # las salidas se validan antes de leer y ajustar; los mensajes no llevan la ruta (puede nombrar la mina)
+    if a.report and not Path(a.report).resolve().parent.is_dir():
+        raise ValueError("--report: its folder does not exist")
+    if a.output and Path(a.output).is_file():
+        raise ValueError("--output must be a folder, not a file")
     group_by = None if a.group_by.lower() == "none" else a.group_by
-    if group_by is not None and (group_by == "fila" or group_by not in HistoryTramo.__dataclass_fields__):
-        raise ValueError("--group-by must be none or a column of sheet Tramos")  # sin repetir el valor
+    try:
+        check_group_by(group_by)
+    except ValueError:
+        raise ValueError("--group-by must be none or a column of sheet Tramos") from None
     if not a.correlations and a.deming_ratio is not None:
         raise ValueError("--deming-ratio needs --correlations")
     if a.deming_ratio is not None and not a.deming_ratio > 0:
@@ -668,10 +637,11 @@ def _history(a) -> int:
     history = load_history(a.history)
     audit = audit_history(history)
     fits = _fit_correlations(history, group_by, a.deming_ratio) if a.correlations else None  # antes del 1.er print
-    print(f"tramos: {audit.tramos}\nsupport types: {audit.support_types}\ninspections: {audit.inspections}")
-    print(f"findings: {len(audit.findings)}")
-    for k, n in sorted(Counter(f.kind for f in audit.findings).items(), key=lambda kv: (-kv[1], kv[0])):
-        print(f"finding: {k} ({n})")
+    c = history_audit_counts(audit)
+    print(f"tramos: {c['tramos']}\nsupport types: {c['support_types']}\ninspections: {c['inspections']}")
+    print(f"findings: {c['findings']}")
+    for k in sorted((k for k in FINDING_KINDS if c[k]), key=lambda k: (-c[k], k)):
+        print(f"finding: {k} ({c[k]})")
     for r in audit.readiness:
         have = ", ".join(f"{k} {r.counts.get(k, 0)} of {m}" for k, m in r.minimums.items())
         print(f"level {r.level} {r.item}: {'ready' if r.ready else 'not ready'} ({have})")
@@ -690,13 +660,23 @@ def _history(a) -> int:
             warns.update({*r.warnings, *f.warnings})
     for w, n in sorted(warns.items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({n} fit{'' if n == 1 else 's'})")
-    if a.output:
-        for p in _save_history_outputs(a.output, audit, fits):
-            print(f"results: {p}")
-    if a.report:
-        rep = rp.build_history_report(audit, fits or (), history=history, lang=a.lang)
-        out = rp.write_docx(rep, a.report) if ext == ".docx" else rp.write_html(rep, a.report)
-        print(f"report: {out}")
+    try:  # en Excel o sin permiso: el OSError de Python trae la ruta completa
+        if a.output:  # solo el nombre: la carpeta protegida puede llevar el nombre de la mina
+            out = Path(a.output)
+            out.mkdir(parents=True, exist_ok=True)
+            paths = [save_history_findings(audit, out / "history_findings.csv")]
+            if fits is not None:
+                from .predictive import save_site_correlations
+
+                paths += save_site_correlations(fits, out)
+            for p in paths:
+                print(f"results: {p.name}")
+        if a.report:
+            rep = rp.build_history_report(audit, fits or (), history=history, lang=a.lang)
+            out = rp.write_docx(rep, a.report) if ext == ".docx" else rp.write_html(rep, a.report)
+            print(f"report: {Path(out).name}")
+    except OSError:
+        raise OSError("results or report could not be written (in use or no permission)") from None
     print("the library recommends, the engineer decides")
     return 2 if audit.findings or not_site else 0
 

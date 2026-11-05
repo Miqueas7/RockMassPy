@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import _rockmasspy_core as rm
-from .batch import _Q_EDITIONS
+from .batch import _Q_EDITIONS, write_table
 from .csv_io import _CsvSource, _csv_files
 from .excel_io import TIPOS, _open, _row, _support_dicts, _where
 from .intact_rock import _strip
@@ -204,18 +204,32 @@ def load_history(path, *, column_map: Mapping[str, str] | None = None) -> Histor
     if not p.exists():
         raise FileNotFoundError("history file not found" if p.suffix else "history folder not found")
     if p.is_dir():
-        src = _CsvSource(_csv_files(p, HISTORY_SHEETS))
-        return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
+        try:
+            src = _CsvSource(_csv_files(p, HISTORY_SHEETS))
+            return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
+        except OSError:  # el OSError de Python trae la ruta completa
+            raise OSError("history folder could not be read (in use or no permission)") from None
     if p.suffix.lower() != ".xlsx":
         raise ValueError("unsupported history input; give a .xlsx file or a folder of .csv files")
     try:
-        src = _open(p)
-    except ValueError:  # el mensaje de _open (1D) nombra el archivo
-        raise ValueError("history file is not a valid .xlsx file") from None
-    try:
-        return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
-    finally:
-        src.wb.close()
+        try:
+            src = _open(p)
+        except ValueError:  # el mensaje de _open (1D) nombra el archivo
+            raise ValueError("history file is not a valid .xlsx file") from None
+        try:  # read_only: openpyxl sigue leyendo el archivo mientras se recorren las hojas
+            return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
+        finally:
+            src.wb.close()
+    except OSError:  # abierto en exclusiva (Excel) o sin permiso; el OSError de Python trae la ruta completa
+        raise OSError("history file could not be read (in use or no permission)") from None
+
+
+def check_group_by(group_by: str | None) -> None:
+    """`group_by` del nivel 1: None o un atributo de `HistoryTramo` (no `fila`). El mensaje no repite el valor:
+    puede venir de la línea de comandos con un nombre de la mina. Vive aquí, sin numpy, para que la CLI valide
+    aunque falte el extra [ml]."""
+    if group_by is not None and (group_by == "fila" or group_by not in HistoryTramo.__dataclass_fields__):
+        raise ValueError("group_by must be None or a column of sheet Tramos")
 
 
 def _support_row(s: SupportTypeDef) -> dict:
@@ -606,6 +620,16 @@ def audit_history(history: History) -> HistoryAudit:
     findings.sort(key=lambda f: (HISTORY_SHEETS.index(f.sheet), f.fila or 0, FINDING_KINDS.index(f.kind)))
     return HistoryAudit(tuple(findings), _readiness(history), len(history.tramos), len(history.support_types),
                         len(history.inspections))
+
+
+FINDING_RESULT_COLUMNS = ("hallazgo", "hoja", "fila", "id_tramo", "mensaje")
+
+
+def save_history_findings(audit: HistoryAudit, path) -> Path:
+    """Escribe .xlsx (hoja `Hallazgos`) o .csv, un hallazgo por fila. Es un archivo de resultados: el id_tramo y la
+    fila sí van aquí (nunca en el mensaje)."""
+    return write_table(path, FINDING_RESULT_COLUMNS, [(f.kind, f.sheet, f.fila, f.id_tramo, f.message)
+                                                      for f in audit.findings], sheet="Hallazgos")
 
 
 def history_audit_counts(audit: HistoryAudit) -> dict[str, int]:

@@ -3,6 +3,7 @@ CustomCorrelation, centinela de privacidad (R13) y banda de predicción en el gr
 
 import dataclasses
 import math
+import re
 
 import pytest
 
@@ -44,7 +45,9 @@ def test_estados_segun_el_tamano():
     assert m.status == "not_calibrated" and m.method == "Bayesian"
     assert m.ols is None and m.bootstrap is None and m.deming is None
     assert any("not calibrated to the site" in w for w in m.warnings)
-    assert any("few labors" in w for w in m.warnings)
+    assert any("few excavations" in w for w in m.warnings)
+    # en inglés, «labor» solo como nombre de columna (labor_codigo), como pide test_final_fixes para el informe
+    assert not any("labor" in re.sub(r"\w+_\w+", "", w) for w in m.warnings)
 
 
 def test_ic_ancho_da_inestable():
@@ -127,8 +130,10 @@ def test_dominios_y_sin_dominio():
     assert [f.label for f in r.domains.values()] == [f"D{j + 1}" for j in range(len(r.domains))]
     assert list(r.domains)[-1] == NO_DOMAIN
     assert fit_site_correlation(h, "rmr_from_q", group_by=None, n_boot=50).domains == {}
-    with pytest.raises(ValueError, match="group_by"):
-        fit_site_correlation(h, "rmr_from_q", group_by="no_such_column")
+    for bad in ("ZZSENT", "fila"):  # el mensaje no repite el valor: puede venir de la línea de comandos
+        with pytest.raises(ValueError, match="group_by must be None or a column of sheet Tramos") as e:
+            fit_site_correlation(h, "rmr_from_q", group_by=bad)
+        assert bad not in str(e.value)
 
 
 def test_to_custom_correlation_con_correlate_custom():

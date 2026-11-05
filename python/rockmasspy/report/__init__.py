@@ -1031,15 +1031,6 @@ def build_verification_report(verification: "VerificationResult", *, title: str,
 _FORMS = {"rmr_from_q": "RMR = a·ln Q + b", "gsi_from_rmr": "GSI = a·RMR + b", "gsi_from_q_prime": "GSI = a·ln Q′ + b"}
 
 
-def site_custom(fit):
-    """`CustomCorrelation` del ajuste o None si no se puede armar (rango de x de un solo valor). Tolera también
-    la API anterior de `to_custom_correlation`, que lanzaba ValueError."""
-    try:
-        return fit.to_custom_correlation()
-    except ValueError:
-        return None
-
-
 def site_fits(result) -> tuple:
     """La mina y luego cada dominio, en el orden D1, D2…"""
     return (result.mine, *result.domains.values())
@@ -1075,7 +1066,7 @@ def history_correlation_figure(result, history, lang: str):
     c, r = _prior_info(result.prior_correlation)
     # la global del GSI va en RMR′ (sin agua ni orientación): en otros ejes que el RMR registrado, no se dibuja
     glob = [c] if c is not None and (r.from_, r.to) == (f.x_from, f.y_to) else []
-    site = [s for s in (site_custom(f),) if s is not None]
+    site = [s for s in (f.to_custom_correlation(),) if s is not None]  # None: un solo valor de x
     return plot_correlation(list(zip(sel.x, sel.y)), x=f.x_from, y=f.y_to, global_correlations=glob,
                             site=site, bands=[f], style=Style(lang=lang))
 
@@ -1157,21 +1148,26 @@ def _hist_kind(k, result, history, lang, figures) -> Section:
 
 def _hist_methods(results, lang) -> tuple[Table, tuple[MethodRef, ...]]:
     dd = t("hm_dd", lang)
+    fitted = [r for r in results if not isinstance(r, tuple)]
+    n_boot = sorted({f.bootstrap.n_boot for r in fitted for f in site_fits(r) if f.bootstrap is not None})
     stats = (MethodRef(t("hm_ols", lang), "V2", "Warton et al. (2006)"),
-             MethodRef(t("hm_boot", lang), "V2", "Efron y Tibshirani (1994); Roberts et al. (2017)"
+             MethodRef(t("hm_boot", lang).format(n_boot="/".join(map(str, n_boot)) or "-"), "V2",
+                       "Efron y Tibshirani (1994); Roberts et al. (2017)"
                        if lang == "es" else "Efron and Tibshirani (1994); Roberts et al. (2017)"),
              MethodRef(t("hm_deming", lang), "V2", "Carroll et al. (2006)"),
              MethodRef(t("hm_bayes", lang), "V2", f"Ching et al. (2020); {t('hm_prior_strength', lang)}: {dd}"))
     priors = {}
-    for r in results:
-        if not isinstance(r, tuple):
-            _, info = _prior_info(r.prior_correlation)
-            priors.setdefault(r.prior_correlation, MethodRef(
-                r.prior_correlation, info.info.verification.name if info else r.prior_verification,
-                info.info.source if info else "-"))
-    methods = (*stats, *priors.values())
-    return (Table(t("cap_hist_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
-                  tuple((m.method_id, m.verification, m.source) for m in methods)), methods)
+    for r in fitted:
+        _, info = _prior_info(r.prior_correlation)
+        priors.setdefault(r.prior_correlation, MethodRef(
+            r.prior_correlation, info.info.verification.name if info else r.prior_verification,
+            info.info.source if info else "-"))
+    # la marca [V2] es de la investigación (MODELOS_SOSTENIMIENTO.md); Primary/Secondary es la del núcleo (R14)
+    rows = (*((m.method_id, t("hm_role_stat", lang), f"[{m.verification}]", "-", m.source) for m in stats),
+            *((m.method_id, t("hm_role_prior", lang), "-", m.verification, m.source) for m in priors.values()))
+    return (Table(t("cap_hist_methods", lang), (t("h_method", lang), t("h_role", lang), t("h_research_mark", lang),
+                                                t("h_core_verification", lang), t("h_source", lang)), rows),
+            (*stats, *priors.values()))
 
 
 def build_history_report(audit, correlations=(), *, history=None, title: str | None = None, lang: str = "es",

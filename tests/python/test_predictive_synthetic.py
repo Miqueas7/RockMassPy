@@ -15,6 +15,13 @@ from rockmasspy.predictive import SyntheticTruth, group_bootstrap, ols_fit, synt
 from rockmasspy.predictive.synthetic import LITHOLOGIES  # noqa: E402
 
 
+@pytest.fixture(scope="module")
+def historicos():
+    """Los históricos por defecto de las semillas 0 a 39, generados una vez: los comparten la cobertura del nivel 1
+    y las pruebas con la semilla 0 (History es inmutable)."""
+    return {seed: synthetic_history(seed=seed) for seed in range(40)}
+
+
 def _lnq_rmr(h):
     return (np.array([math.log(t.q_valor) for t in h.tramos]), np.array([t.rmr_valor for t in h.tramos]))
 
@@ -56,8 +63,8 @@ def test_ida_y_vuelta_por_xlsx(tmp_path):
     assert load_history(p) == h
 
 
-def test_auditoria_limpia_y_niveles_listos():
-    h, _ = synthetic_history(seed=0)
+def test_auditoria_limpia_y_niveles_listos(historicos):
+    h, _ = historicos[0]
     audit = audit_history(h)
     assert audit.findings == ()  # ni Q, ni coherencia, ni solapes, ni componentes repetidos
     assert all(r.ready for r in audit.readiness)
@@ -74,8 +81,8 @@ def test_auditoria_lista_tambien_sin_efecto_del_sitio():
     assert all(r.ready for r in audit.readiness)
 
 
-def test_resultados_por_tramo():
-    h, _ = synthetic_history(seed=0)
+def test_resultados_por_tramo(historicos):
+    h, _ = historicos[0]
     out = tramo_outcomes(h)
     assert len(out) == len(h.tramos)  # todos tienen inspecciones
     rate = sum(o.failed for o in out) / len(out)
@@ -107,10 +114,10 @@ def test_sin_efecto_del_sitio_depende_solo_de_la_categoria():
     assert all(p > 0.01 for p in fit.pvalues[2:])  # semilla fija; con otras, ~1 de 40 cae bajo 0.01 por azar
 
 
-def test_nivel1_ic_bootstrap_cubre_la_pendiente_verdadera():
+def test_nivel1_ic_bootstrap_cubre_la_pendiente_verdadera(historicos):
     cover = 0
     for seed in range(40):  # cobertura real ~92 %: con 40 semillas, >= 33 casi nunca falla por azar
-        h, tr = synthetic_history(seed=seed)
+        h, tr = historicos[seed]
         x, y = _lnq_rmr(h)
         bs = group_bootstrap([labor_key(t) for t in h.tramos], lambda i: ols_fit(x[i], y[i]).a,
                              n_boot=200, seed=seed)
@@ -119,8 +126,8 @@ def test_nivel1_ic_bootstrap_cubre_la_pendiente_verdadera():
     assert cover >= 33
 
 
-def test_nivel1_gsi_sigue_al_rmr_y_a_q_prima():
-    h, tr = synthetic_history(seed=0)
+def test_nivel1_gsi_sigue_al_rmr_y_a_q_prima(historicos):
+    h, tr = historicos[0]
     rmr = np.array([t.rmr_valor for t in h.tramos])
     gsi = np.array([t.gsi_valor for t in h.tramos])
     qp = np.array([math.log(t.rqd_pct / t.jn * t.jr / t.ja) for t in h.tramos])
@@ -136,8 +143,8 @@ def _heavy_share(h):
     return (rank[lnq <= lo] >= 4).mean(), (rank[lnq >= hi] >= 4).mean()
 
 
-def test_nivel2_signos_peor_macizo_tipo_mas_pesado():
-    bad, good = _heavy_share(synthetic_history(seed=0)[0])
+def test_nivel2_signos_peor_macizo_tipo_mas_pesado(historicos):
+    bad, good = _heavy_share(historicos[0][0])
     assert bad > good + 0.3
     # con la práctica invertida el signo se da vuelta
     bad, good = _heavy_share(synthetic_history(seed=0, truth=SyntheticTruth(practice_incoherence=1.0))[0])
@@ -155,8 +162,8 @@ def test_verdad_valida_sus_parametros():
         synthetic_history(n_zones=0)
 
 
-def test_ningun_texto_trae_nombres_reales():
-    h, _ = synthetic_history(seed=0)
+def test_ningun_texto_trae_nombres_reales(historicos):
+    h, _ = historicos[0]
     allowed = re.compile(r"(T\d{4}|L\d{3}|Z\d+|\d{4}-\d{2}-\d{2}|I|II|III|IV|V|RMR89|Q-NGI-2025|GSI clásico)")
     vocab = {"Galería", "Rampa", "Tajeo", "Temporal", "Permanente", "Perforación y voladura",
              "Estable", "Falla", "Desprendimiento", *LITHOLOGIES}

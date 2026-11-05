@@ -127,13 +127,18 @@ def test_no_sentinel_and_writers(caso, tmp_path):
     assert SENT not in "\n".join(c.text for t in d.tables for row in t.rows for c in row.cells)
 
 
-def test_site_custom_tolerates_none():
-    class Fit:
-        def to_custom_correlation(self):
-            return None
-
-    class Raises:
-        def to_custom_correlation(self):
-            raise ValueError("single x")
-
-    assert rp.site_custom(Fit()) is None and rp.site_custom(Raises()) is None
+def test_methods_table_separates_marks(caso):
+    """La marca [V2] de los métodos estadísticos y la verificación del núcleo del prior van en columnas aparte; el
+    bootstrap dice las réplicas que de verdad corrieron (n_boot=200 en este caso, no 2000)."""
+    _, audit, fits = caso
+    for lang in ("es", "en"):
+        rep = rp.build_history_report(audit, fits, figures=False, lang=lang)
+        tab = tablas(rp.Section("", "", rep.sections[3].blocks[:2]))[0]
+        assert tab.header[2:4] == (rp.t("h_research_mark", lang), rp.t("h_core_verification", lang))
+        stats = [r for r in tab.rows if r[1] == rp.t("hm_role_stat", lang)]
+        priors = [r for r in tab.rows if r[1] == rp.t("hm_role_prior", lang)]
+        assert len(stats) == 4 and all(r[2] == "[V2]" and r[3] == "-" for r in stats)
+        assert {r[0] for r in priors} == {"RmrFromQ_Huang2026", "GsiFromRmr89Prime_HoekDiederichs2006"}
+        assert all(r[2] == "-" and r[3] in ("Primary", "Secondary") for r in priors)
+        boot = stats[1][0]
+        assert "200" in boot and "2000" not in boot

@@ -1,6 +1,7 @@
 """`rockmass history`: auditoría sola, --correlations, --output, códigos 0/1/2 y el centinela ZZSENT (R12, R13)."""
 import csv
 import dataclasses
+import functools
 import json
 import sys
 
@@ -11,25 +12,49 @@ from rockmasspy.cli import main
 from rockmasspy.table_io import correlation_from_dict
 
 from test_batch import CAT, rmr_tab
+from test_history import bloqueado
 
 pytest.importorskip("openpyxl")
 pred = pytest.importorskip("rockmasspy.predictive")
 
 SENT = "ZZSENT"
+N_BOOT = 200  # las pruebas de la CLI no miden la precisión del IC: menos réplicas que las 2000 por defecto
 
 
-def historico(tmp_path, *, sentinel=True, bad_q=False, seed=12, n_zones=4):
-    """Histórico sintético en .xlsx; con `sentinel`, labor, zona y litología llevan ZZSENT."""
-    h, _ = pred.synthetic_history(n_zones=n_zones, seed=seed)
-    ts = list(h.tramos)
-    if sentinel:
-        ts = [dataclasses.replace(t, labor_codigo=f"{SENT}-{t.labor_codigo}", zona_nivel=f"{SENT}-{t.zona_nivel}",
-                                  litologia=f"{SENT}-{t.litologia}") for t in ts]
-    if bad_q:  # un Q registrado que no cuadra con sus componentes: un hallazgo q_mismatch
-        ts[0] = dataclasses.replace(ts[0], q_valor=ts[0].q_valor * 3)
-    p = tmp_path / "historico.xlsx"
-    rm.save_history_xlsx(rm.History(tuple(ts), h.support_types, h.inspections), p)
-    return p
+@pytest.fixture(scope="module")
+def hist(tmp_path_factory):
+    """Cada variante del histórico sintético se escribe una sola vez, como historico.xlsx en su carpeta.
+
+    - limpio / bad_q: labor, zona y litología llevan ZZSENT; bad_q tiene un Q que no cuadra (un hallazgo q_mismatch).
+    - sin_gsi: sin GSI, gsi_from_* no tienen pares. solo: un dominio de un solo par (ZZSENT-solo).
+    """
+    h, _ = pred.synthetic_history(n_zones=4, seed=12)
+    sent = [dataclasses.replace(t, labor_codigo=f"{SENT}-{t.labor_codigo}", zona_nivel=f"{SENT}-{t.zona_nivel}",
+                                litologia=f"{SENT}-{t.litologia}") for t in h.tramos]
+    variantes = {"limpio": sent,
+                 "bad_q": [dataclasses.replace(sent[0], q_valor=sent[0].q_valor * 3), *sent[1:]],
+                 "sin_gsi": [dataclasses.replace(t, gsi_valor=None) for t in h.tramos],
+                 "solo": [dataclasses.replace(h.tramos[0], litologia=f"{SENT}-solo"), *h.tramos[1:]]}
+    out = {}
+    for nombre, ts in variantes.items():
+        p = tmp_path_factory.mktemp(nombre) / "historico.xlsx"
+        rm.save_history_xlsx(rm.History(tuple(ts), h.support_types, h.inspections), p)
+        out[nombre] = p
+    return out
+
+
+@pytest.fixture(autouse=True)
+def pocas_replicas(monkeypatch):
+    """La CLI importa fit_site_correlation desde .predictive al ajustar (importación diferida): se cambia ahí."""
+    calls = []
+    orig = pred.fit_site_correlation
+
+    def rapido(*args, **kw):
+        calls.append(kw.get("n_boot"))
+        return functools.partial(orig, n_boot=N_BOOT)(*args, **kw)
+
+    monkeypatch.setattr(pred, "fit_site_correlation", rapido)
+    return calls
 
 
 def sin_centinela(capsys):
@@ -38,8 +63,16 @@ def sin_centinela(capsys):
     return cap
 
 
-def test_audit_only(tmp_path, capsys):
-    code = main(["history", str(historico(tmp_path, bad_q=True))])
+def test_cli_uses_the_patched_fit(hist, capsys, pocas_replicas, tmp_path):
+    assert main(["history", str(hist["limpio"]), "--correlations", "--report", str(tmp_path / "r.html"),
+                 "--lang", "en"]) == 2
+    sin_centinela(capsys)
+    assert len(pocas_replicas) == 3  # los tres pares pasaron por el parche (n_boot lo pone el parche: 200)
+    assert "Bootstrap by excavation (200 replicates" in (tmp_path / "r.html").read_text(encoding="utf-8")
+
+
+def test_audit_only(hist, capsys):
+    code = main(["history", str(hist["bad_q"])])
     out = sin_centinela(capsys).out
     assert code == 2  # un hallazgo
     assert "tramos: " in out and "findings: 1" in out and "finding: q_mismatch (1)" in out
@@ -48,13 +81,21 @@ def test_audit_only(tmp_path, capsys):
     assert not any(t.startswith("T0") for t in out.split())  # ningún id_tramo
 
 
-def test_audit_clean_exit_0(tmp_path, capsys):
-    assert main(["history", str(historico(tmp_path))]) == 0
+def test_audit_counts_match_history_audit_counts(hist, capsys):
+    main(["history", str(hist["bad_q"])])
+    out = sin_centinela(capsys).out
+    c = rm.history_audit_counts(rm.audit_history(rm.load_history(hist["bad_q"])))
+    assert f"tramos: {c['tramos']}\nsupport types: {c['support_types']}\ninspections: {c['inspections']}\n" in out
+    assert f"findings: {c['findings']}\n" in out
+
+
+def test_audit_clean_exit_0(hist, capsys):
+    assert main(["history", str(hist["limpio"])]) == 0
     assert "findings: 0" in sin_centinela(capsys).out
 
 
-def test_correlations_lines_and_exit(tmp_path, capsys):
-    code = main(["history", str(historico(tmp_path)), "--correlations"])
+def test_correlations_lines_and_exit(hist, capsys):
+    code = main(["history", str(hist["limpio"]), "--correlations"])
     out = sin_centinela(capsys).out
     for kind in pred.KINDS:
         assert f"correlation {kind} mine: n " in out and f"correlation {kind} D1: " in out
@@ -65,26 +106,38 @@ def test_correlations_lines_and_exit(tmp_path, capsys):
         assert lit not in out
 
 
-def test_correlations_all_site_exit_0(tmp_path, capsys):
-    code = main(["history", str(historico(tmp_path)), "--correlations", "--group-by", "none"])
+def test_correlations_all_site_exit_0(hist, capsys):
+    code = main(["history", str(hist["limpio"]), "--correlations", "--group-by", "none"])
     out = sin_centinela(capsys).out
     assert out.count(", site, a ") == 3 and " D1:" not in out
     assert code == 0
 
 
-def test_output_files(tmp_path, capsys):
-    out_dir = tmp_path / "salida"
-    code = main(["history", str(historico(tmp_path, bad_q=True)), "--correlations", "--output", str(out_dir)])
-    sin_centinela(capsys)
+def _csv(path):
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        return list(csv.reader(fh))
+
+
+def test_output_files(hist, capsys, tmp_path):
+    out_dir = tmp_path / f"{SENT}-salida"  # la carpeta protegida puede llevar el nombre de la mina
+    code = main(["history", str(hist["bad_q"]), "--correlations", "--output", str(out_dir)])
+    out = sin_centinela(capsys).out
     assert code == 2
-    with open(out_dir / "history_findings.csv", newline="", encoding="utf-8-sig") as fh:
-        rows = list(csv.reader(fh, delimiter=_sep(out_dir)))
-    assert rows[0] == ["hallazgo", "hoja", "fila", "id_tramo", "mensaje"]
+    assert [x for x in out.splitlines() if x.startswith("results: ")] == [
+        "results: history_findings.csv", "results: site_correlations.csv", "results: site_correlations.json"]
+    rows = _csv(out_dir / "history_findings.csv")
+    assert tuple(rows[0]) == rm.FINDING_RESULT_COLUMNS
     assert rows[1][:4] == ["q_mismatch", "Tramos", "2", "T0001"]  # el id_tramo y la fila sí van en el archivo
-    text = (out_dir / "site_correlations.csv").read_text(encoding="utf-8-sig")
-    assert SENT in text  # el dominio va en el archivo de resultados
+    fits = _csv(out_dir / "site_correlations.csv")
+    assert tuple(fits[0]) == pred.CORRELATION_RESULT_COLUMNS
+    assert SENT in "".join(map(str, fits))  # el dominio va en el archivo de resultados
+    estado = fits[0].index("estado")
+    site = [r for r in fits[1:] if r[estado] == "site"]
+    assert "not_calibrated" in {r[estado] for r in fits[1:]}  # D3: sigue en el CSV con su estado
     js = json.loads((out_dir / "site_correlations.json").read_text(encoding="utf-8"))
     assert SENT not in json.dumps(js)  # el JSON va a una tabla por labor: solo etiquetas
+    # solo los ajustes «sitio»: los inestables y los no calibrados no se pegan en una tabla
+    assert len(js["correlations"]) == len(site) and all("status=site" in c["source"] for c in js["correlations"])
     corrs = [correlation_from_dict(c) for c in js["correlations"]]
     assert {c.name for c in corrs} >= {f"{k}_mine" for k in pred.KINDS}
     # se enchufa en una tabla por labor: la tabla lo valida al cargar
@@ -93,19 +146,16 @@ def test_output_files(tmp_path, capsys):
     assert len(rm.from_dict(d).correlations) == len(corrs)
 
 
-def _sep(folder):
-    first = (folder / "history_findings.csv").read_text(encoding="utf-8-sig").splitlines()[0]
-    return ";" if ";" in first else ","
-
-
-def test_report_without_sentinel(tmp_path, capsys):
+def test_report_without_sentinel(hist, capsys, tmp_path):
     docx = pytest.importorskip("docx")
-    rep = tmp_path / "informe.docx"
-    html = tmp_path / "informe.html"
-    src = historico(tmp_path, bad_q=True)
+    carpeta = tmp_path / f"{SENT}-informes"
+    carpeta.mkdir()
+    rep, html = carpeta / "informe.docx", carpeta / "informe.html"
+    src = hist["bad_q"]
     assert main(["history", str(src), "--correlations", "--report", str(rep)]) == 2
     assert main(["history", str(src), "--correlations", "--report", str(html), "--lang", "en"]) == 2
-    sin_centinela(capsys)
+    out = sin_centinela(capsys).out  # la carpeta lleva ZZSENT: solo sale el nombre del informe
+    assert "report: informe.docx" in out and "report: informe.html" in out
     d = docx.Document(str(rep))
     texto = "\n".join([p.text for p in d.paragraphs]
                       + [c.text for tb in d.tables for row in tb.rows for c in row.cells])
@@ -115,40 +165,73 @@ def test_report_without_sentinel(tmp_path, capsys):
     assert SENT not in h and "historico.xlsx" not in h and "Level 1" in h
 
 
-def test_errors_exit_1(tmp_path, capsys):
+def test_errors_exit_1(hist, tmp_path, capsys):
+    src = str(hist["limpio"])
     assert main(["history", str(tmp_path / f"{SENT}.xlsx")]) == 1
-    assert main(["history", str(historico(tmp_path)), "--report", "x.pdf"]) == 1
-    assert main(["history", str(historico(tmp_path)), "--group-by", SENT]) == 1
-    assert main(["history", str(historico(tmp_path)), "--deming-ratio", "1"]) == 1
-    assert main(["history", str(historico(tmp_path)), "--correlations", "--deming-ratio", "0"]) == 1
+    assert main(["history", src, "--report", "x.pdf"]) == 1
+    assert main(["history", src, "--group-by", SENT]) == 1
+    assert main(["history", src, "--deming-ratio", "1"]) == 1
+    assert main(["history", src, "--correlations", "--deming-ratio", "0"]) == 1
     cap = sin_centinela(capsys)
     assert cap.out == "" and cap.err.count("error: ") == 5
 
 
-def test_deming_ratio(tmp_path, capsys):
+def test_outputs_checked_before_reading(hist, tmp_path, capsys, monkeypatch):
+    """--report sin carpeta y --output que es un archivo fallan con 1 antes de leer el histórico, sin la ruta."""
+    def no_leer(*a, **k):
+        raise AssertionError("the history was read before checking the outputs")
+
+    monkeypatch.setattr(rm.history, "load_history", no_leer)
+    archivo = tmp_path / f"{SENT}.csv"
+    archivo.write_text("x", encoding="utf-8")
+    assert main(["history", str(hist["limpio"]), "--correlations", "-o", str(archivo)]) == 1
+    assert main(["history", str(hist["limpio"]), "--report", str(tmp_path / SENT / "informe.html")]) == 1
+    cap = sin_centinela(capsys)
+    assert cap.out == "" and cap.err.splitlines() == ["error: --output must be a folder, not a file",
+                                                      "error: --report: its folder does not exist"]
+
+
+def test_locked_history_exit_1(hist, tmp_path, capsys):
+    """Abierto en exclusiva (como Excel): una línea sin la ruta, que puede llevar el nombre de la mina."""
+    p = tmp_path / f"{SENT}-mina.xlsx"
+    p.write_bytes(hist["limpio"].read_bytes())
+    with bloqueado(p):
+        assert main(["history", str(p)]) == 1
+    cap = sin_centinela(capsys)
+    assert cap.out == "" and cap.err == "error: history file could not be read (in use or no permission)\n"
+
+
+def test_locked_result_exit_1(hist, tmp_path, capsys):
+    """Un resultado abierto en Excel al reescribirlo: código 1 y una línea sin la ruta."""
+    out_dir = tmp_path / f"{SENT}-salida"
+    out_dir.mkdir()
+    (out_dir / "history_findings.csv").write_text("x", encoding="utf-8")
+    with bloqueado(out_dir / "history_findings.csv"):
+        assert main(["history", str(hist["limpio"]), "-o", str(out_dir)]) == 1
+    cap = sin_centinela(capsys)
+    assert cap.err == "error: results or report could not be written (in use or no permission)\n"
+
+
+def test_deming_ratio(hist, tmp_path, capsys):
     out_dir = tmp_path / "o"
-    main(["history", str(historico(tmp_path)), "--correlations", "--group-by", "none", "--deming-ratio", "1",
+    main(["history", str(hist["limpio"]), "--correlations", "--group-by", "none", "--deming-ratio", "1",
           "-o", str(out_dir)])
     sin_centinela(capsys)
     assert (out_dir / "site_correlations.csv").exists()
 
 
-def test_not_fitted_kind(tmp_path, capsys):
+def test_not_fitted_kind(hist, tmp_path, capsys):
     """Sin GSI no hay pares para gsi_from_*: la línea lo dice, el resto sigue y el código es 2."""
-    h, _ = pred.synthetic_history(seed=12)
-    p = tmp_path / "h.xlsx"
-    rm.save_history_xlsx(rm.History(tuple(dataclasses.replace(t, gsi_valor=None) for t in h.tramos),
-                                    h.support_types, h.inspections), p)
     out_dir = tmp_path / "o"
-    assert main(["history", str(p), "--correlations", "--group-by", "none", "-o", str(out_dir)]) == 2
+    assert main(["history", str(hist["sin_gsi"]), "--correlations", "--group-by", "none", "-o", str(out_dir)]) == 2
     out = capsys.readouterr().out
     assert "correlation gsi_from_rmr: not fitted (gsi_from_rmr: no usable pairs with rmr_edicion RMR76 or RMR89 in the history)" in out
     assert "correlation rmr_from_q mine: " in out
     assert "not_fitted" in (out_dir / "site_correlations.csv").read_text(encoding="utf-8-sig")
 
 
-def test_missing_ml_extra(tmp_path, capsys, monkeypatch):
-    src = historico(tmp_path)
+def test_missing_ml_extra(hist, capsys, monkeypatch):
+    src = hist["limpio"]
     for name in [m for m in sys.modules if m == "rockmasspy.predictive" or m.startswith("rockmasspy.predictive.")]:
         monkeypatch.delitem(sys.modules, name)
     monkeypatch.setitem(sys.modules, "numpy", None)
@@ -159,17 +242,12 @@ def test_missing_ml_extra(tmp_path, capsys, monkeypatch):
     assert "pip install rockmasspy[ml]" in cap.err and cap.out == ""
 
 
-def test_single_pair_domain_skipped_in_json(tmp_path, capsys):
-    """Un dominio de un solo par no tiene rango de validez: va al CSV, pero no al JSON (to_custom_correlation None)."""
-    h, _ = pred.synthetic_history(seed=12)
-    ts = list(h.tramos)
-    ts[0] = dataclasses.replace(ts[0], litologia=f"{SENT}-solo")
-    p = tmp_path / "h.xlsx"
-    rm.save_history_xlsx(rm.History(tuple(ts), h.support_types, h.inspections), p)
+def test_single_pair_domain_skipped_in_json(hist, tmp_path, capsys):
+    """Un dominio de un solo par no tiene rango de validez ni es «sitio»: va al CSV, pero no al JSON."""
     out_dir = tmp_path / "o"
-    assert main(["history", str(p), "--correlations", "-o", str(out_dir)]) == 2
+    assert main(["history", str(hist["solo"]), "--correlations", "-o", str(out_dir)]) == 2
     sin_centinela(capsys)
     js = json.loads((out_dir / "site_correlations.json").read_text(encoding="utf-8"))
     csv_text = (out_dir / "site_correlations.csv").read_text(encoding="utf-8-sig")
     assert csv_text.count(f"{SENT}-solo") == 3  # una fila por par
-    assert len(js["correlations"]) == 3 * 5  # 3 pares × (mina + 4 litologías); el dominio de un par no va
+    assert js["correlations"] and all("n=1," not in c["source"] for c in js["correlations"])
