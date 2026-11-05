@@ -60,6 +60,20 @@ def test_escenarios_y_validacion():
         MineScenario(n_zones=0)
     with pytest.raises(ValueError):
         MineScenario(table_change_date="3-ene-2022")
+    with pytest.raises(ValueError, match="does not fit"):
+        MineScenario(years=1, tramos_per_labor=100)
+    with pytest.raises(ValueError, match="practice_type_shift"):
+        MineScenario(practice_type_shift=0.5)
+    with pytest.raises(ValueError, match="triples of numbers"):
+        MineScenario(lithologies=(("andesita", 80.0, "buena"),))
+    with pytest.raises(ValueError, match="generic rock names"):
+        MineScenario(lithologies=(("veta norte", 80.0, 0.0),))
+    assert MineScenario(lithologies=(("granito", 150, 1),)).lithologies == (("granito", 150, 1),)
+    # lo que sí cabe no deja tramos ni inspecciones fuera del histórico
+    h, _ = synthetic_mine(MineScenario(years=2, tramos_per_labor=60, n_zones=1, labors_per_zone=3), seed=0)
+    end = datetime.date(2019, 1, 1) + datetime.timedelta(days=round(365.25 * 2))
+    assert max(t.fecha_evaluacion for t in h.tramos) < end.isoformat()
+    assert max(i.fecha_inspeccion for i in h.inspections) <= end.isoformat()
 
 
 def test_ida_y_vuelta_por_xlsx(tmp_path):
@@ -210,19 +224,99 @@ def test_inspecciones_falla_al_final_y_exposicion_exacta(bases):
     assert Counter(first).most_common(1)[0][0] == 30
 
 
+def _z_failures(mines, horizon, p_of, keep=lambda v: True):
+    """(observadas − esperadas)/DE de las fallas dentro de H, en los tramos cuya censura planeada pasa H."""
+    obs = exp = var = 0.0
+    for h, tr in mines:
+        out = {o.id_tramo: o for o in tramo_outcomes(h)}
+        for v in tr.tramos:
+            if v.censor_days >= horizon and keep(v):
+                p = p_of(tr, v)
+                o = out[v.id_tramo]
+                obs += o.failed and o.exposure_days <= horizon
+                exp, var = exp + p, var + p * (1 - p)
+    return (obs - exp) / math.sqrt(var)
+
+
 def test_p_verdadera_coincide_con_la_frecuencia_simulada(grandes):
-    # P(falla en H | labor) = 1 − exp(−λwH) contra lo simulado, en los tramos cuya censura planeada pasa H
+    # P(falla en H | labor) = 1 − exp(−λwH) contra lo simulado
     for horizon in (180, 730):
-        obs = exp = var = 0.0
-        for h, tr in grandes:
+        z = _z_failures(grandes, horizon, lambda tr, v: tr.p_fail(v.id_tramo, v.installed_type, horizon,
+                                                                   conditional=True))
+        assert abs(z) < 4, (horizon, z)
+    # por estratos de fragilidad: sin la fragilidad (o con la marginal) se pasa de largo en los dos extremos
+    for lo, hi, sign in ((0.0, 0.6, -1), (1.5, math.inf, 1)):
+        keep = lambda v: lo <= v.frailty < hi  # noqa: E731
+        z = _z_failures(grandes, 730, lambda tr, v: tr.p_fail(v.id_tramo, v.installed_type, 730,
+                                                               conditional=True), keep)
+        assert abs(z) < 4, (lo, z)
+        z_w1 = _z_failures(grandes, 730, lambda tr, v: -math.expm1(-tr.rate(v.id_tramo, v.installed_type) * 730),
+                           keep)
+        z_marg = _z_failures(grandes, 730, lambda tr, v: tr.p_fail(v.id_tramo, v.installed_type, 730), keep)
+        assert sign * z_w1 > 4 and sign * z_marg > 4, (lo, z_w1, z_marg)
+
+
+def test_p_contrafactual_con_los_desvios_como_experimento_natural():
+    # El desvío a un tipo más liviano se sortea sin mirar el tramo: entre los tramos donde la tabla pide k, la
+    # fracción f que se desvió a k − 1 es una muestra al azar, así que sus fallas ≈ f·Σ P(k − 1) de TODOS ellos.
+    # Se miran los tramos donde las horas sin sostener del tipo más liviano pasan el autosoporte y las del de la
+    # tabla no (se sabe antes del desvío): ahí usar las horas del tipo instalado subestima la P ≈ 4 veces.
+    sc = dataclasses.replace(SCENARIOS["large_mine"], name="experimento", p_lighter=0.5, p_heavier=0.0)
+    mines = [synthetic_mine(sc, seed=seed) for seed in range(3)]
+    codes = list(_ORDER)
+    for horizon in (365, 730):
+        obs, ps, n_dev = 0, [], 0
+        for h, tr in mines:
             out = {o.id_tramo: o for o in tramo_outcomes(h)}
             for v in tr.tramos:
-                if v.censor_days >= horizon:
-                    p = tr.p_fail(v.id_tramo, v.installed_type, horizon, conditional=True)
+                k = _ORDER[v.table_type] - 1  # rango del tipo más liviano
+                hb = v.unsupported_hours_by_type
+                if k < 1 or v.censor_days < horizon or not hb[k - 1] > v.standup_hours >= hb[k]:
+                    continue
+                ps.append(tr.p_fail(v.id_tramo, codes[k - 1], horizon, conditional=True))
+                if v.practice_deviation == -1:
                     o = out[v.id_tramo]
+                    n_dev += 1
                     obs += o.failed and o.exposure_days <= horizon
-                    exp, var = exp + p, var + p * (1 - p)
-        assert abs(obs - exp) < 4 * math.sqrt(var), (horizon, obs, exp)
+        ps = np.array(ps)
+        f = n_dev / len(ps)
+        assert 0.4 < f < 0.6 and len(ps) > 500
+        z = (obs - f * ps.sum()) / math.sqrt(f * (ps * (1 - f * ps)).sum())
+        assert abs(z) < 4, (horizon, obs, f * ps.sum())
+
+
+def test_tasas_por_tipo_desde_sus_horas_sin_sostener(bases):
+    from rockmasspy.predictive.mine import _LABOR_TYPE_NAMES
+    h, tr = bases[0]
+    sc = tr.scenario
+    for t, v in zip(h.tramos, tr.tramos):
+        assert v.unsupported_hours_by_type[_ORDER[v.installed_type] - 1] == v.unsupported_hours
+        assert v.unsupported_hours_by_type[3] <= v.unsupported_hours_by_type[2]  # IV y V: 1 turno; I–III: días
+        req = _ORDER[v.required_type]
+        for rk, hours in enumerate(v.unsupported_hours_by_type, start=1):
+            log_rate = (sc.log_lambda0[_LABOR_TYPE_NAMES.index(t.tipo_labor)] + v.zone_failure_effect
+                        + (math.log(sc.unsupported_multiplier) if hours > v.standup_hours else 0.0)
+                        + sc.kappa_deficit * max(0, req - rk) - sc.kappa_surplus * max(0, rk - req))
+            assert v.rates[rk - 1] == pytest.approx(math.exp(log_rate))
+        assert v.failed == (v.failure_day <= v.censor_days)
+    out = {o.id_tramo: o for o in tramo_outcomes(h)}
+    assert all(out[v.id_tramo].failed == v.failed for v in tr.tramos)
+    assert all(out[v.id_tramo].exposure_days == v.failure_day for v in tr.tramos if v.failed)
+
+
+def test_sitio_peor_el_sostenimiento_ayuda_poco_solo_en_roca_v():
+    h, tr = synthetic_mine("worse_site", seed=0)
+    sc = tr.scenario
+    assert sc.kappa_deficit == SCENARIOS["base"].kappa_deficit and sc.kappa_deficit_rock_v < sc.kappa_deficit
+    rock_v = [v for v in tr.tramos if v.rmr < 21]
+    assert rock_v and len(rock_v) < len(tr.tramos)
+    for v in tr.tramos:
+        if _ORDER[v.required_type] >= 2:
+            kd = sc.kappa_deficit_rock_v if v.rmr < 21 else sc.kappa_deficit
+            h1, h0 = v.unsupported_hours_by_type[_ORDER[v.required_type] - 2:_ORDER[v.required_type]]
+            if (h1 > v.standup_hours) == (h0 > v.standup_hours):  # mismo término de horas
+                ratio = v.rates[_ORDER[v.required_type] - 2] / v.rates[_ORDER[v.required_type] - 1]
+                assert ratio == pytest.approx(math.exp(kd))
 
 
 def test_p_marginal_es_la_de_la_fragilidad_gamma(grandes):
@@ -261,8 +355,12 @@ def test_sitio_ngi_sin_efectos_la_tasa_depende_solo_del_deficit():
 def test_delta_positivo_pide_mas_sostenimiento():
     h, tr = synthetic_mine(seed=0)
     assert tr.scenario.site_shift_delta > 0
+    more = 0
     for t, v in zip(h.tramos, tr.tramos):
-        assert _ORDER[v.required_type] >= _chart_rank(v.q, t.luz_m / t.esr)
+        ngi = _chart_rank(v.q, t.luz_m / t.esr)
+        assert _ORDER[v.required_type] >= ngi
+        more += _ORDER[v.required_type] > ngi
+    assert more > 0
 
 
 def test_defectos_en_la_tasa_pedida_y_la_auditoria_los_ve():
@@ -282,6 +380,10 @@ def test_defectos_en_la_tasa_pedida_y_la_auditoria_los_ve():
         hit = {d[1] for d in tr.defects}
         # lo que no tiene defecto queda igual que sin defectos
         assert [t for t in h.tramos if t.id_tramo not in hit] == [t for t in clean.tramos if t.id_tramo not in hit]
+        # las inspecciones defectuosas van al final: las demás conservan su fila
+        assert h.inspections[:len(clean.inspections)] == clean.inspections
+        assert len(h.inspections) - len(clean.inspections) == sum(k == "inspection_before_installation"
+                                                                  for k, _, _ in tr.defects)
         # la auditoría ve exactamente los defectos detectables y nada más
         found = {(f.kind, f.id_tramo) for f in audit_history(h).findings}
         detectable = {(k, tid) for k, tid, _ in tr.defects if k != "empty_cell"}

@@ -9,8 +9,9 @@ Mecanismo, de la geología al registro (a diferencia de `synthetic_history`, nad
 - Macizo verdadero (M2): calidad latente u por tramo = calidad media de la litología de la zona + efecto de zona
   + efecto de labor + AR(1) en la progresiva (ρ = exp(−Δ/alcance)) + pepita − caída en las zonas de falla
   (Poisson por metro). De u salen los componentes verdaderos (RQD, Jn, Jr, Ja, Jw, SRF, espaciamiento, condición
-  de juntas, UCS y agua) con pesos distintos (A2.2: RQD y SRF siguen a u; Jn casi no) y valores modales (A2.1). Q, RMR89 y
-  GSI se calculan con el núcleo, como lo haría el geólogo: la recta RMR–ln Q **emerge** y la verdad la informa.
+  de juntas, UCS y agua) con pesos distintos (A2.2: RQD y SRF siguen a u; Jn casi no) y valores modales (A2.1).
+  Q, RMR89 y GSI se calculan con el núcleo, como lo haría el geólogo: la recta RMR–ln Q **emerge** y la verdad la
+  informa.
 - Mapeo (M3): cada labor la mapea un geólogo G01… con sesgo propio y ruido por mapeo en cada componente (B4). Lo
   registrado (componentes, Q con 4 cifras, RMR89 básico y GSI) se recalcula desde los componentes registrados,
   así que `audit_history` no levanta hallazgos. `HistoryTramo` no tiene columna de evaluador: el geólogo va solo en
@@ -19,9 +20,11 @@ Mecanismo, de la geología al registro (a diferencia de `synthetic_history`, nad
   opcionales (C6.3), desvíos de un tipo (más liviano o más pesado), un cambio de tabla en una fecha (C6.6) y horas
   sin sostener (C6.5). Con `practice_mode="q_chart"` la mina instala lo que pide la carta Q con el Q registrado.
 - Falla (M5–M6): tasa constante por día, log λ = log λ0(tipo de labor) + κ_def·max(0, d) − κ_sob·max(0, −d)
-  + efecto de zona + ln(multiplicador)·[horas sin sostener > autosoporte], por la fragilidad gamma de la labor
-  (media 1, varianza θ). d = rango que pide la carta Q con Q_verdadero·exp(−δ) − rango instalado. Con fragilidad
-  gamma la P de falla en H de una labor nueva es cerrada: 1 − (1 + θλH)^(−1/θ).
+  + efecto de zona + ln(multiplicador)·[horas sin sostener del tipo > autosoporte], por la fragilidad gamma de la
+  labor (media 1, varianza θ). d = rango que pide la carta Q con Q_verdadero·exp(−δ) − rango del tipo. Las horas de
+  los cinco tipos salen del mismo número aleatorio (cada tipo con su mediana), así que la P contrafactual usa las
+  horas que habría tenido ese tipo; el multiplicador es daño persistente (toda la vida del tramo). Con fragilidad
+  gamma la P de falla en H de una labor nueva de la misma zona es cerrada: 1 − (1 + θλH)^(−1/θ).
 - Defectos (M7, `defects=True`): se inyectan con un generador aparte, así que el resto del History es idéntico al
   de `defects=False` con la misma semilla.
 """
@@ -47,9 +50,12 @@ _TYPE_CODES = tuple(s.codigo_tipo for s in SUPPORT_TYPES)  # I…V, del más liv
 _RANK = {c: k + 1 for k, c in enumerate(_TYPE_CODES)}
 _LABOR_TYPE_NAMES = tuple(_LABOR_TYPES)  # Galería, Rampa, Tajeo
 _MIN_TRAMOS_PER_LABOR = 4
+_MAX_ADVANCE_DAYS = 6  # días entre mapeos de tramos seguidos: 2 a 6
+_END_MARGIN_DAYS = 30  # el último tramo de una labor se mapea al menos 30 días antes del fin del histórico
 
-# Componentes de Q: (valores del peor al mejor macizo, probabilidades). Pocos valores por parámetro (A2.1, el
-# geólogo usa 2–3 por dominio); las proporciones son de una mina de vetas: supuesto de diseño anclado en A2.1.
+# Componentes de Q: (valores del peor al mejor macizo, probabilidades). Pocos valores por parámetro, como en A2.1
+# (el geólogo usa 2–3 por dominio); las proporciones son un supuesto de diseño de una mina de vetas, no las de A2.1
+# (un túnel en roca mala: Jn = 12 en 92 %, SRF ≥ 2.5 en 95 %).
 _JN = ((15.0, 12.0, 9.0, 6.0, 4.0), (0.05, 0.25, 0.45, 0.20, 0.05))
 _JR = ((1.0, 1.5, 2.0, 3.0), (0.30, 0.55, 0.12, 0.03))  # A2.1: 1.5 en 57 %, 1 en 30 %
 _JA = ((6.0, 4.0, 2.0, 1.0), (0.10, 0.65, 0.17, 0.08))  # A2.1: 4 en 70 %
@@ -73,6 +79,10 @@ _DEFECT_KINDS = ("empty_cell", "q_mismatch", "overlapping_chainage", "inspection
 _EMPTY_COLUMNS = ("rqd_pct", "jn", "jr", "ja", "jw", "srf", "ucs_mpa", "espaciamiento_m", "puntaje_condicion_juntas",
                   "agua", "q_valor", "rmr_valor", "gsi_valor")
 _UNKNOWN_TYPE = "VI"
+# Nombres de roca genéricos que acepta `lithologies`: así nadie mete sin querer el nombre de una veta o de una mina
+GENERIC_LITHOLOGIES = (*LITHOLOGIES, "granito", "granodiorita", "tonalita", "monzonita", "dacita", "riolita",
+                       "basalto", "toba", "arenisca", "lutita", "lodolita", "conglomerado", "dolomita", "mármol",
+                       "skarn", "cuarcita", "pizarra", "filita", "esquisto", "gneis")
 _Q_COLUMNS = ("q_valor", "rqd_pct", "jn", "jr", "ja", "jw", "srf")
 
 
@@ -87,6 +97,7 @@ class MineScenario:
     tramos_per_labor: int = 20  # media (Poisson, al menos 4)
     years: int = 5
     # A1: (litología genérica, UCS mediana en MPa, calidad media en unidades de u); supuesto de diseño
+    # nombres solo de GENERIC_LITHOLOGIES (nunca el de una veta, un cuerpo o una mina)
     lithologies: tuple[tuple[str, float, float], ...] = (
         ("andesita", 80.0, 0.2), ("caliza", 60.0, 0.0), ("diorita", 100.0, 0.4), ("brecha", 35.0, -0.5))
     quality_shift: float = 0.0  # corre toda la mina (sitio peor o mejor)
@@ -137,10 +148,13 @@ class MineScenario:
     site_shift_delta: float = 0.5  # δ: el sitio lee la carta con Q·exp(−δ); 0 = igual a NGI; supuesto de diseño
     log_lambda0: tuple[float, float, float] = (-9.8, -9.8, -8.4)  # Galería, Rampa, Tajeo; calibrado con D7.5
     kappa_deficit: float = 0.8  # por tipo que falta; D7.5 (× ≈ 10 con déficit) y D8.4
+    kappa_deficit_rock_v: float | None = None  # D8.4: en roca V (RMR89 verdadero < 21); None = kappa_deficit
     kappa_surplus: float = 0.3  # por tipo que sobra: rendimiento decreciente; supuesto de diseño
     sd_zone_failure: float = 0.4
     frailty_variance: float = 0.3  # θ de la fragilidad gamma por labor (≈ DE 0.5 en log)
-    unsupported_multiplier: float = 4.0  # C6.5: × 3–5 si las horas sin sostener pasan el autosoporte (D8.5)
+    # C6.5: × 3–5 si las horas sin sostener pasan el autosoporte (D8.5). Decisión de diseño: daño persistente, el
+    # multiplicador dura toda la vida del tramo (la exposición se cuenta desde la instalación)
+    unsupported_multiplier: float = 4.0
     # D9: inspecciones y vida útil
     inspection_active_days: int = 30  # D9.5: mensual en labores activas
     active_period_days: int = 180  # supuesto de diseño
@@ -164,10 +178,24 @@ class MineScenario:
         for name in ("n_zones", "labors_per_zone", "tramos_per_labor", "years", "n_geologists",
                      "inspection_active_days", "active_period_days", "inspection_inactive_days"):
             _positive_int(name, getattr(self, name))
+        for name in ("practice_type_shift", "practice_min_rank"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, (int, np.integer)):
+                raise ValueError(f"{name} must be an integer")
+        m = self.tramos_per_labor  # una labor casi nunca pasa media + 4 DE de Poisson; avance máximo 6 días
+        if _MAX_ADVANCE_DAYS * (m + 4 * math.sqrt(m) + 4) + 2 * _END_MARGIN_DAYS > 365.25 * self.years:
+            raise ValueError("the expected advance of a labor does not fit in the years of the history; "
+                             "raise years or lower tramos_per_labor")
         if any(getattr(self, n) < 0 for n in self.__dataclass_fields__ if n.startswith("sd_")):
             raise ValueError("standard deviations must be >= 0")
-        if not self.lithologies or any(len(x) != 3 or not x[1] > 0 for x in self.lithologies):
-            raise ValueError("lithologies must be (name, ucs_mpa > 0, mean quality) triples")
+        if not self.lithologies or any(len(x) != 3 or not _real(x[1]) or not x[1] > 0 or not _real(x[2])
+                                       for x in self.lithologies):
+            raise ValueError("lithologies must be (name, ucs_mpa > 0, mean quality) triples of numbers")
+        if any(x[0] not in GENERIC_LITHOLOGIES for x in self.lithologies):
+            raise ValueError(f"lithology names must be generic rock names from GENERIC_LITHOLOGIES: "
+                             f"{', '.join(GENERIC_LITHOLOGIES)}")
+        if self.kappa_deficit_rock_v is not None and self.kappa_deficit_rock_v < 0:
+            raise ValueError("kappa_deficit_rock_v must be >= 0")
         cuts = self.practice_gsi_cuts
         if len(cuts) != len(SUPPORT_TYPES) - 1 or any(b <= a for a, b in zip(cuts, cuts[1:])):
             raise ValueError(f"practice_gsi_cuts must be {len(SUPPORT_TYPES) - 1} strictly increasing values")
@@ -209,10 +237,15 @@ class TrueTramo:
     installed_type: str  # el instalado de verdad (aunque un defecto cambie la celda)
     practice_deviation: int  # instalado − tabla, en tipos (−1 más liviano, +1 más pesado)
     required_type: str  # lo que pide la carta Q con Q·exp(−δ) y De
-    unsupported_hours: float
+    unsupported_hours: float  # las del tipo instalado (tiempo_sin_sostener_h)
     frailty: float  # fragilidad de la labor (media 1)
     censor_days: int  # censura planeada: fin de la vida útil o del histórico, desde la instalación
     rates: tuple[float, ...]
+    unsupported_hours_by_type: tuple[float, ...]  # horas sin sostener con cada tipo I…V (mismo número aleatorio)
+    standup_hours: float  # autosoporte de Bieniawski 1989 con el RMR89 verdadero (D8.5)
+    zone_failure_effect: float  # efecto de zona en log λ (ya sorteado)
+    failure_day: int  # día real de la falla desde la instalación (puede pasar la censura)
+    failed: bool  # falló dentro del histórico: failure_day <= censor_days
 
 
 @dataclass(frozen=True)
@@ -231,19 +264,24 @@ class MineTruth:
         return {t.id_tramo: t for t in self.tramos}
 
     def rate(self, tramo_id: str, type_code: str, *, conditional: bool = False) -> float:
-        """Tasa verdadera por día con el tipo `type_code`; condicional, por la fragilidad de la labor del tramo.
-        Las horas sin sostener se dejan las del tramo (atajo: no se recalculan para el tipo contrafactual)."""
+        """Tasa verdadera por día con el tipo `type_code` (con las horas sin sostener que tendría ese tipo);
+        con `conditional=True`, por la fragilidad de la labor del tramo."""
         t = self._by_id[tramo_id]
         return t.rates[_RANK[type_code] - 1] * (t.frailty if conditional else 1.0)
 
     def p_fail(self, tramo_id: str, type_code: str, horizon_days: float, *, conditional: bool = False) -> float:
         """P verdadera de falla dentro de `horizon_days` desde la instalación. Por defecto, marginal sobre la
-        fragilidad de una labor nueva (gamma, cerrada); con `conditional=True`, la de la labor del tramo."""
+        fragilidad de una labor nueva EN LA MISMA ZONA (gamma, cerrada; condicional al efecto de zona ya sorteado);
+        con `conditional=True`, la de la labor del tramo."""
         lam_h = self.rate(tramo_id, type_code, conditional=conditional) * horizon_days
         theta = self.scenario.frailty_variance
         if conditional or theta == 0:
             return -math.expm1(-lam_h)
         return 1.0 - (1.0 + theta * lam_h) ** (-1.0 / theta)
+
+
+def _real(x):
+    return not isinstance(x, bool) and isinstance(x, (int, float, np.integer, np.floating)) and math.isfinite(x)
 
 
 def _pick(table, z):
@@ -302,6 +340,15 @@ def _table_rank(sc, gsi, temporary, date):
     return int(np.clip(max(rank, sc.practice_min_rank), 1, len(SUPPORT_TYPES)))
 
 
+def _rates(sc, ti, zone_f, rmr_true, required, hours_by_type, standup_h):
+    """Tasa verdadera por día de cada tipo I…V con fragilidad 1 (M5), cada uno con sus horas sin sostener."""
+    kd = sc.kappa_deficit if sc.kappa_deficit_rock_v is None or rmr_true >= 21 else sc.kappa_deficit_rock_v
+    return tuple(math.exp(sc.log_lambda0[ti] + zone_f
+                          + (math.log(sc.unsupported_multiplier) if h > standup_h else 0.0)
+                          + kd * max(0, required - rk) - sc.kappa_surplus * max(0, rk - required))
+                 for rk, h in enumerate(hours_by_type, start=1))
+
+
 def _chart_rank(q, de):
     return _RANK[_CATEGORY_TO_TYPE.get(read_q_chart(q, de).category, "V")]
 
@@ -349,6 +396,7 @@ def synthetic_mine(scenario: MineScenario | str | None = None, *, seed: int = 0,
             life = int(rng.integers(*sc.life_temporary_days)) if temporary else \
                 int(365.25 * rng.uniform(*sc.life_permanent_years))
             n = max(min(_MIN_TRAMOS_PER_LABOR, sc.tramos_per_labor), int(rng.poisson(sc.tramos_per_labor)))
+            n = min(n, ((end - _START).days - _END_MARGIN_DAYS) // _MAX_ADVANCE_DAYS)  # la validación lo hace raro
             lengths = rng.integers(3, 9, n)  # metros enteros: tramos contiguos sin solape
             chain = np.concatenate(([0], np.cumsum(lengths)))
             centers = chain[:-1] + lengths / 2.0
@@ -366,8 +414,8 @@ def synthetic_mine(scenario: MineScenario | str | None = None, *, seed: int = 0,
                 path[k] = rho * path[k - 1] + math.sqrt(1 - rho * rho) * rng.normal(0, sc.sd_path_quality)
             u = lit_q + sc.quality_shift + zone_q + labor_q + path + rng.normal(0, sc.sd_nugget_quality, n) \
                 - sc.fault_quality_drop * in_fault
-            advance = rng.integers(2, 7, n)  # días entre mapeos de tramos seguidos
-            last_start = (end - _START).days - 30 - int(advance.sum())
+            advance = rng.integers(2, _MAX_ADVANCE_DAYS + 1, n)  # días entre mapeos de tramos seguidos
+            last_start = (end - _START).days - _END_MARGIN_DAYS - int(advance.sum())
             date = _START + datetime.timedelta(days=int(rng.integers(max(1, last_start + 1))))
             labor_of.append(len(tramos))
             prev = None
@@ -409,17 +457,17 @@ def synthetic_mine(scenario: MineScenario | str | None = None, *, seed: int = 0,
                 if sc.practice_mode == "q_chart":
                     dev = 0
                 installed = int(np.clip(table + dev, 1, len(SUPPORT_TYPES)))
-                med_h = sc.unsupported_hours_heavy if installed >= 4 else sc.unsupported_hours_light
-                hours = float(np.clip(round(med_h * math.exp(rng.normal(0, sc.sd_log_unsupported))), 1, 240))
+                # un solo número aleatorio para las horas de los cinco tipos: el contrafactual usa las suyas
+                z_h = rng.normal(0, sc.sd_log_unsupported)
+                hours_by_type = tuple(float(np.clip(round((sc.unsupported_hours_heavy if rk >= 4 else
+                                                           sc.unsupported_hours_light) * math.exp(z_h)), 1, 240))
+                                      for rk in range(1, len(SUPPORT_TYPES) + 1))
+                hours = hours_by_type[installed - 1]
                 inst_date = date + datetime.timedelta(days=int(hours // 24))
                 # falla (M5)
                 required = _chart_rank(q_true * math.exp(-sc.site_shift_delta), de)
                 standup_h = 10 ** float(np.interp(rmr_true, _STANDUP_RMR, _STANDUP_LOG10_H))
-                log_base = sc.log_lambda0[ti] + zone_f + (math.log(sc.unsupported_multiplier)
-                                                          if hours > standup_h else 0.0)
-                rates = tuple(math.exp(log_base + sc.kappa_deficit * max(0, required - rk)
-                                       - sc.kappa_surplus * max(0, rk - required))
-                              for rk in range(1, len(SUPPORT_TYPES) + 1))
+                rates = _rates(sc, ti, zone_f, rmr_true, required, hours_by_type, standup_h)
                 to_end = (end - inst_date).days
                 censor = max(1, min(life, to_end))
                 abandoned = life < to_end
@@ -442,7 +490,8 @@ def synthetic_mine(scenario: MineScenario | str | None = None, *, seed: int = 0,
                     tiempo_sin_sostener_h=hours))
                 truth.append(TrueTramo(tid, geologist, q_true, rmr_true, gsi_true, bool(in_fault[k]),
                                        _TYPE_CODES[table - 1], _TYPE_CODES[installed - 1], installed - table,
-                                       _TYPE_CODES[required - 1], hours, frailty, censor, rates))
+                                       _TYPE_CODES[required - 1], hours, frailty, censor, rates, hours_by_type,
+                                       standup_h, zone_f, fail_day, failed))
                 # inspecciones (D9.5): mensuales mientras la labor está activa, luego cada ~4 meses; la falla en su
                 # fecha real y nada después, así la exposición de `tramo_outcomes` es la del modelo verdadero
                 stop = fail_day if failed else censor
@@ -481,10 +530,9 @@ def _inject_defects(sc, rng, tramos, insp, labor_of):
     """Defectos de M7 sobre los registros (dicts). Devuelve (tipo, id_tramo, detalle) por defecto inyectado."""
     out = []
     first = set(labor_of)
-    by_tramo = {}
+    by_tramo, extra = {}, []
     for i, d in enumerate(insp):
         by_tramo.setdefault(d["id_tramo"], i)
-    inserts = []
     for i, t in enumerate(tramos):
         tid = t["id_tramo"]
         if rng.random() < sc.defect_empty_rate:
@@ -501,15 +549,13 @@ def _inject_defects(sc, rng, tramos, insp, labor_of):
         if rng.random() < sc.defect_inspection_before_rate:
             before = datetime.date.fromisoformat(t["fecha_instalacion"]) - datetime.timedelta(
                 days=int(rng.integers(1, 11)))
-            inserts.append((by_tramo[tid], dict(insp[by_tramo[tid]], fecha_inspeccion=before.isoformat(),
-                                                estado="Estable", tipo_falla=None, volumen_m3=None,
-                                                sobreexcavacion_pct=None)))
+            extra.append(dict(insp[by_tramo[tid]], fecha_inspeccion=before.isoformat(), estado="Estable",
+                              tipo_falla=None, volumen_m3=None, sobreexcavacion_pct=None))
             out.append(("inspection_before_installation", tid, ""))
         if rng.random() < sc.defect_unknown_support_rate:
             t["sost_instalado"] = _UNKNOWN_TYPE
             out.append(("unknown_support", tid, _UNKNOWN_TYPE))
-    for pos, d in sorted(inserts, key=lambda x: x[0], reverse=True):
-        insp.insert(pos, d)
+    insp += extra  # al final: las demás inspecciones conservan su fila
     return tuple(out)
 
 
@@ -518,13 +564,14 @@ _BASE = MineScenario()
 SCENARIOS: dict[str, MineScenario] = {s.name: s for s in (
     _BASE,
     # el nivel 3 no tiene que inventar efecto de sitio: δ = 0, sin efectos aleatorios ni horas sin sostener, la
-    # misma tasa base en todas las labores y la práctica = la carta Q
+    # misma tasa base en todas las labores y la práctica = la carta Q. La recta RMR–ln Q no se fija en 9 ln Q + 44
+    # (Bieniawski): emerge de los componentes, igual que en la base
     dataclasses.replace(_BASE, name="ngi_site", site_shift_delta=0.0, sd_zone_failure=0.0, frailty_variance=0.0,
                         unsupported_multiplier=1.0, log_lambda0=(-9.0, -9.0, -9.0), practice_mode="q_chart"),
-    # roca débil (A1.4: RMR ~ N(32, 15)); zonas de falla 3–5/km; prevalencia 15–25 %; el sostenimiento ayuda
-    # poco (D8.4)
+    # roca débil (A1.4: RMR ~ N(32, 15)); zonas de falla 3–5/km; prevalencia 15–25 %; en roca V el sostenimiento
+    # ayuda poco (D8.4: β_rank −0.2 frente a −0.5): κ_def 0.3 solo con RMR89 verdadero < 21
     dataclasses.replace(_BASE, name="worse_site", quality_shift=-1.7, sd_path_quality=1.2, fault_rate_per_km=4.0,
-                        kappa_deficit=0.4, kappa_surplus=0.15, log_lambda0=(-9.0, -9.0, -7.8)),
+                        kappa_deficit_rock_v=0.3, log_lambda0=(-9.0, -9.0, -7.8)),
     # A1.5: RMR ~ N(63, 13); prevalencia 1–3 %
     dataclasses.replace(_BASE, name="better_site", quality_shift=1.9, sd_path_quality=0.9,
                         log_lambda0=(-11.0, -11.0, -9.6)),
@@ -538,9 +585,10 @@ SCENARIOS: dict[str, MineScenario] = {s.name: s for s in (
                         table_change_date="2022-01-01"),
     # C6.3 (Peck y Lee): pendiente de la práctica al 60 % y piso en el tipo II
     dataclasses.replace(_BASE, name="mine_practice", practice_slope=0.6, practice_min_rank=2),
-    # B4 y la propuesta: ruido de observador ≈ RMR 6, log10 Q 0.3, GSI 9, y efecto de geólogo más grande
-    dataclasses.replace(_BASE, name="noisy_mapping", sd_geologist_bias=0.25, sd_mapping_z=0.25, sd_mapping_rqd=14.0,
-                        sd_mapping_jcond=2.5, sd_mapping_log_spacing=0.3, sd_mapping_log_ucs=0.3),
+    # B4 y la propuesta: ruido de observador ≈ RMR 5.4, log10 Q 0.27, GSI 9 y efecto de geólogo ≈ 2.4 puntos de
+    # RMR (B4.6: 2–4). Con el GSI en 9 el RMR y el Q no bajan a 5 y 0.25: no cuadran juntos
+    dataclasses.replace(_BASE, name="noisy_mapping", sd_geologist_bias=0.15, sd_mapping_z=0.10, sd_mapping_rqd=16.0,
+                        sd_mapping_jcond=3.0, sd_mapping_log_spacing=0.15, sd_mapping_log_ucs=0.15),
     dataclasses.replace(_BASE, name="small_mine", n_zones=2, labors_per_zone=4, tramos_per_labor=10, years=4),
     dataclasses.replace(_BASE, name="large_mine", n_zones=8, labors_per_zone=15, tramos_per_labor=40, years=10),
 )}
