@@ -31,6 +31,10 @@ __all__ = ["CORRELATION_RESULT_COLUMNS", "KINDS", "NO_DOMAIN", "STATUSES", "Site
            "balanced_accuracy", "brier", "calibration_curve", "calibration_intercept_slope", "f1_macro",
            "logistic_map_fit", "ordinal_logit_fit", "quadratic_weighted_kappa", "recall_per_class", "roc_auc",
            "SyntheticTruth", "save_history_xlsx", "synthetic_history"]
+from .practice import (PRACTICE_RESULT_COLUMNS, Coefficient, Concordance, PracticeAudit,  # noqa: E402
+                       PracticeDesign, PracticeTramo, audit_practice, save_practice_results)
+__all__ += ["PRACTICE_RESULT_COLUMNS", "Coefficient", "Concordance", "PracticeAudit", "PracticeDesign",
+            "PracticeTramo", "audit_practice", "save_practice_results"]
 __all__ += ["Comparison", "Fold", "FoldFailure", "Improvement", "OofPredictions", "ValidationReport",
             "compare_models", "dummy_class_fit_predict", "dummy_proba_fit_predict", "group_kfold",
             "leave_one_group_out", "out_of_fold", "random_kfold", "temporal_split", "tramo_groups", "validate"]
