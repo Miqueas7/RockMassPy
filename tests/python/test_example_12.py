@@ -8,11 +8,12 @@ import pytest
 pytest.importorskip("openpyxl")
 pred = pytest.importorskip("rockmasspy.predictive")
 
-RUTA = Path(__file__).resolve().parents[2] / "examples" / "12-historico-prediccion" / "historico.py"
+CARPETA = Path(__file__).resolve().parents[2] / "examples" / "12-historico-prediccion"
+RUTA = CARPETA / "historico.py"
 
 
-def cargar():
-    spec = importlib.util.spec_from_file_location("historico", RUTA)
+def cargar(ruta=RUTA):
+    spec = importlib.util.spec_from_file_location(ruta.stem, ruta)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -45,3 +46,30 @@ def test_historico(tmp_path, capsys):
     heads = [p.text for p in d.paragraphs if p.style.name == "Heading 1"]
     assert heads == ["1. Datos", "2. Auditoría de ingesta", "3. Preparación por nivel",
                      "4. Nivel 1: correlaciones propias del sitio", "5. Limitaciones"]
+
+
+def test_prediccion(tmp_path, capsys):
+    """Parte 2: nivel 2, nivel 3 «site», modelo JSON, recomendación con el umbral del ingeniero e informe completo."""
+    r = cargar(CARPETA / "prediccion.py").main(tmp_path, n_boot=200)  # menos réplicas: la prueba no mide el IC
+    salida = capsys.readouterr().out
+    assert r["tramos"] > 1300
+    assert r["practice"]["verdicts"] == {"ln_q": "coherent", "ln_de": "coherent"}
+    assert r["practice"]["status"] == "ready" and r["practice"]["beyond_chart"]
+    assert r["calibration"] == "site"
+    assert len(r["recommendations"]) == 6 and any(tipo for tipo, _, _ in r["recommendations"])
+    for nombre in r["files"]:
+        assert (tmp_path / nombre).stat().st_size > 0, nombre
+    js = (tmp_path / "modelo.json").read_text(encoding="utf-8")
+    assert "T0" not in js and "N00" not in js  # el modelo no lleva ids
+    rec = (tmp_path / "resultados" / "recomendaciones.csv").read_text(encoding="utf-8-sig")
+    assert "N001" in rec and "decision_ingeniero" in rec
+    html = (tmp_path / "prediccion.html").read_text(encoding="utf-8")
+    for lit in pred.synthetic.LITHOLOGIES:
+        assert lit not in salida and lit not in html and lit not in js
+    assert "historico_grande.xlsx" not in html and "0.35" in html
+    docx = pytest.importorskip("docx")
+    d = docx.Document(str(tmp_path / "prediccion.docx"))
+    heads = [p.text for p in d.paragraphs if p.style.name == "Heading 1"]
+    assert heads == ["1. Datos", "2. Auditoría de ingesta", "3. Preparación por nivel",
+                     "4. Nivel 1: correlaciones propias del sitio", "5. Nivel 2: auditoría de la práctica",
+                     "6. Nivel 3: desempeño y recomendación", "7. Lista TRIPOD+AI", "8. Limitaciones"]
