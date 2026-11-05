@@ -31,6 +31,12 @@ __all__ = ["CORRELATION_RESULT_COLUMNS", "KINDS", "NO_DOMAIN", "STATUSES", "Site
            "balanced_accuracy", "brier", "calibration_curve", "calibration_intercept_slope", "f1_macro",
            "logistic_map_fit", "ordinal_logit_fit", "quadratic_weighted_kappa", "recall_per_class", "roc_auc",
            "SyntheticTruth", "save_history_xlsx", "synthetic_history"]
+from .performance import (CALIBRATION_LEVELS, RECOMMENDATION_COLUMNS, IsoprobabilityGrid,  # noqa: E402
+                          PerformanceModel, Reason, Recommendation, SupportOption, fit_performance,
+                          isoprobability_grid, load_model, recommend, save_model, save_recommendations)
+__all__ += ["CALIBRATION_LEVELS", "RECOMMENDATION_COLUMNS", "IsoprobabilityGrid", "PerformanceModel", "Reason",
+            "Recommendation", "SupportOption", "fit_performance", "isoprobability_grid", "load_model", "recommend",
+            "save_model", "save_recommendations"]
 __all__ += ["Comparison", "Fold", "FoldFailure", "Improvement", "OofPredictions", "ValidationReport",
             "compare_models", "dummy_class_fit_predict", "dummy_proba_fit_predict", "group_kfold",
             "leave_one_group_out", "out_of_fold", "random_kfold", "temporal_split", "tramo_groups", "validate"]
