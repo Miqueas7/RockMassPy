@@ -3,6 +3,7 @@
 Solo datos sintéticos. statsmodels y scikit-learn entran como oráculos (R1), nunca en tiempo de ejecución.
 """
 
+import dataclasses
 import warnings
 
 import pytest
@@ -13,7 +14,8 @@ pytest.importorskip("scipy")
 from scipy.special import expit  # noqa: E402
 
 from rockmasspy.predictive import (average_precision, balanced_accuracy, brier, calibration_curve,  # noqa: E402
-                                   calibration_intercept_slope, f1_macro, logistic_map_fit, ordinal_logit_fit,
+                                   calibration_intercept_slope, exponential_hazard_map_fit, f1_macro,
+                                   logistic_map_fit, ordinal_logit_fit,
                                    quadratic_weighted_kappa, recall_per_class, roc_auc)
 
 
@@ -500,3 +502,95 @@ def test_metricas_ordinales_errores(fn):
 def test_calibracion_n_bins_invalido():
     with pytest.raises(ValueError, match="n_bins"):
         calibration_curve([0, 1], [0.2, 0.4], n_bins=0)
+
+
+# ---------- tasa de falla constante (exponencial MAP) ----------
+
+def _hazard_data(n=400, beta=(-0.5, 0.8), b=-6.0, seed=7, censor=(30, 900)):
+    """Tiempos de falla exponenciales con log λ = b + X·β, censurados en un plazo uniforme."""
+    rng = np.random.default_rng(seed)
+    X = rng.normal(size=(n, len(beta))) * [1.0, 0.5][:len(beta)] + [0.5, 1.0][:len(beta)]
+    lam = np.exp(b + X @ np.asarray(beta))
+    T, C = rng.exponential(1 / lam), rng.uniform(*censor, size=n)
+    return X, (T <= C).astype(float), np.minimum(T, C)
+
+
+def _hazard_neg_log_post(X, d, t, coef, intercept, prior_scale=2.5, intercept_scale=10.0):
+    """−log posterior de la exponencial escrito aparte, en la escala original (oráculo independiente)."""
+    mean, scale = X.mean(axis=0), 2.0 * X.std(axis=0)
+    gamma, alpha = coef * scale, intercept + coef @ mean
+    eta = X @ coef + intercept
+    return (np.sum(np.exp(eta) * t - d * eta) + np.sum(np.log1p((gamma / prior_scale) ** 2))
+            + np.log1p((alpha / intercept_scale) ** 2))
+
+
+def test_hazard_con_prior_enorme_tiende_al_glm_poisson_con_offset():
+    sm = pytest.importorskip("statsmodels.api")
+    X, d, t = _hazard_data()
+    fit = exponential_hazard_map_fit(X, d, t, prior_scale=1e6, intercept_scale=1e6)
+    ref = sm.GLM(d, sm.add_constant(X), family=sm.families.Poisson(), offset=np.log(t)).fit()
+    assert fit.converged and fit.active_bounds == () and fit.n_events == int(d.sum())
+    np.testing.assert_allclose(fit.coef, ref.params[1:], rtol=1e-5)
+    assert fit.intercept == pytest.approx(ref.params[0], rel=1e-6)
+    order = [1, 2, 0]
+    np.testing.assert_allclose(fit.cov, ref.cov_params()[np.ix_(order, order)], rtol=1e-4)
+    lam = fit.rate(X[:3])
+    np.testing.assert_allclose(lam, np.exp(ref.params[0] + X[:3] @ ref.params[1:]), rtol=1e-5)
+    np.testing.assert_allclose(fit.prob_within(X[:3], 365.0), 1 - np.exp(-lam * 365.0), rtol=1e-12)
+
+
+def test_hazard_gradiente_nulo_y_hessiano_por_diferencias_finitas():
+    X, d, t = _hazard_data(n=150)
+    fit = exponential_hazard_map_fit(X, d, t)
+    w0 = np.r_[fit.coef, fit.intercept]
+
+    def f(w):
+        return _hazard_neg_log_post(X, d, t, w[:-1], w[-1])
+
+    h = 1e-4
+    E = np.eye(w0.size) * h
+    grad = np.array([(f(w0 + e) - f(w0 - e)) / (2 * h) for e in E])
+    assert np.max(np.abs(grad)) < 1e-4
+    H = np.array([[(f(w0 + a + b) - f(w0 + a - b) - f(w0 - a + b) + f(w0 - a - b)) / (4 * h * h) for b in E]
+                  for a in E])
+    np.testing.assert_allclose(np.linalg.inv(fit.cov), H, rtol=1e-3, atol=1e-3)
+
+
+def test_hazard_separacion_es_finita():
+    x = np.r_[np.linspace(-3, -1, 15), np.linspace(1, 3, 15)]
+    d = np.r_[np.zeros(15), np.ones(15)]
+    fit = exponential_hazard_map_fit(x[:, None], d, np.full(30, 100.0))
+    assert fit.converged and np.all(np.isfinite(fit.coef)) and np.all(np.isfinite(fit.cov))
+    assert 0 < fit.coef[0] < 30
+
+
+def test_hazard_cotas_de_signo_y_guardas():
+    X, d, t = _hazard_data()  # β verdaderos −0.5 y +0.8
+    fit = exponential_hazard_map_fit(X, d, t, signs=[1, 0])
+    assert fit.active_bounds == (0,) and fit.coef[0] == 0.0 and fit.converged and fit.signs == (1, 0)
+    ok = exponential_hazard_map_fit(X, d, t, signs=[-1, 1])
+    assert ok.active_bounds == () and ok.coef[0] < 0 < ok.coef[1]
+    # con la cota activa el intervalo se ensancha (normal truncada), nunca se angosta
+    x0 = np.array([[2.0, 1.0]])
+    c, lo, hi = fit.prob_interval(x0, 365.0)
+    bare = dataclasses.replace(fit, signs=(0, 0)).prob_interval(x0, 365.0)
+    assert lo[0] <= bare[1][0] and hi[0] >= bare[2][0] and lo[0] < c[0] < hi[0]
+    with pytest.raises(ValueError, match="at least one event and one non-event"):
+        exponential_hazard_map_fit(X, np.zeros(len(d)), t)
+    with pytest.raises(ValueError, match="exposure must be positive"):
+        exponential_hazard_map_fit(X, d, np.r_[0.0, t[1:]])
+    with pytest.raises(ValueError, match="same number of rows"):
+        exponential_hazard_map_fit(X, d[:-1], t)
+    with pytest.raises(ValueError, match="days"):
+        fit.prob_within(x0, -1.0)
+
+
+def test_hazard_cobertura_del_intervalo_al_90():
+    beta, b, x0, H = (-0.5, 0.8), -6.0, np.array([[1.0, 1.2]]), 365.0
+    true = 1 - np.exp(-np.exp(b + x0 @ np.asarray(beta)) * H)[0]
+    cover = 0
+    for seed in range(100):
+        X, d, t = _hazard_data(n=200, seed=100 + seed)
+        _, lo, hi = exponential_hazard_map_fit(X, d, t).prob_interval(x0, H, level=0.9)
+        cover += lo[0] <= true <= hi[0]
+    assert 80 <= cover <= 98, cover
