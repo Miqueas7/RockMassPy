@@ -169,18 +169,19 @@ def _c_index(d, t, risk) -> float:
 
 def _oof_metrics(y, p, t) -> tuple[dict, tuple]:
     """Métricas fuera de pliegue de la tasa: devianza de Poisson, eventos observados/esperados, pendiente de
-    calibración (Poisson de d sobre log μ, ideal 1) y C de Harrell con λ = μ/t. La curva va por deciles de μ:
-    (esperados medios, observados medios, n)."""
+    calibración (Poisson de d sobre log λ con offset log t, ideal 1) y C de Harrell con λ = μ/t. La curva va por
+    deciles de λ (no de μ: μ depende de t, que en un fallado termina en la falla): (esperados medios, observados
+    medios, n)."""
     mu = _expected_events(p)
+    lam = mu / t
     out = {"n": int(y.size), "poisson_deviance": poisson_deviance(y, p),
-           "observed_expected": float(y.sum() / mu.sum()), "c_index": _c_index(y, t, mu / t)}
+           "observed_expected": float(y.sum() / mu.sum()), "c_index": _c_index(y, t, lam)}
     try:
-        f = exponential_hazard_map_fit(np.log(mu)[:, None], y, np.ones_like(mu), prior_scale=1e6,
-                                       intercept_scale=1e6)
+        f = exponential_hazard_map_fit(np.log(lam)[:, None], y, t, prior_scale=1e6, intercept_scale=1e6)
         out["calibration_slope"] = float(f.coef[0])
-    except ValueError:  # una sola clase o μ constante
+    except ValueError:  # una sola clase o λ constante
         out["calibration_slope"] = math.nan
-    order = np.argsort(mu, kind="stable")
+    order = np.argsort(lam, kind="stable")
     curve = tuple((float(mu[g].mean()), float(y[g].mean()), int(g.size)) for g in np.array_split(order, 10)
                   if g.size)
     return out, curve
@@ -677,6 +678,7 @@ def load_model(path) -> PerformanceModel:
         results={k: Comparison(**{**c, "improvements": {r: Improvement(**i) for r, i in c["improvements"].items()}})
                  for k, c in v["results"].items()}, skipped=v["skipped"])
     keep = ("metrics", "counts")  # dicts: se quedan como dicts
-    m = PerformanceModel(fit=fit, validation=report, **{k: (val if k in keep else _tuples(val)) for k, val in d.items()})
+    m = PerformanceModel(fit=fit, validation=report,
+                         **{k: (val if k in keep else _tuples(val)) for k, val in d.items()})
     _check_model(m)
     return m
