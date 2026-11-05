@@ -63,30 +63,33 @@ def plot_isoprobability(grid, *, stable: Sequence[tuple[float, float]] = (),
 
 def plot_calibration(curve: Sequence[tuple[float, float, int]], *, metrics: dict | None = None, title: str = "",
                      style: Style = Style()):
-    """Curva de calibración fuera de pliegue: (P media, fracción observada, n) por grupo, como
+    """Curva de calibración fuera de pliegue: (eventos esperados medios, observados medios, n) por decil de λ, como
     `PerformanceModel.calibration_curve`, con la diagonal ideal. `metrics` (p. ej. `PerformanceModel.metrics`)
-    agrega Brier, intercepto y pendiente de calibración si están."""
+    agrega devianza de Poisson, observados/esperados y pendiente de calibración si están."""
     curve = list(curve)
     if not curve:
         raise ValueError("curve must not be empty")
     fig = new_figure(style)
     ax = fig.add_axes([0.1, 0.12, 0.85, 0.78])
-    ax.plot([0, 1], [0, 1], linestyle="--", color="0.5", linewidth=1.0, label=text("cal_ideal", style.lang))
     xs, ys, ns = zip(*curve)
+    top_xy = max(1.0, *xs, *ys)  # los esperados λ·t pueden pasar de 1
+    ax.plot([0, top_xy], [0, top_xy], linestyle="--", color="0.5", linewidth=1.0,
+            label=text("cal_ideal", style.lang))
     top = max(ns) or 1
     ax.plot(xs, ys, color="#3F0F4F", linewidth=1.2)
     ax.scatter(xs, ys, s=[20 + 80 * n / top for n in ns], color="#3F0F4F", label=text("cal_points", style.lang),
                zorder=3)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+    ax.set_xlim(0, top_xy)
+    ax.set_ylim(0, top_xy)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(text("cal_x", style.lang), fontsize=style.font_size)
     ax.set_ylabel(text("cal_y", style.lang), fontsize=style.font_size)
     ax.set_title(title or text("cal_title", style.lang), fontsize=style.font_size + 2, fontweight="bold")
     m = metrics or {}
     if all(isinstance(m.get(k), float) and math.isfinite(m[k])
-           for k in ("brier", "calibration_intercept", "calibration_slope")):
-        ax.text(0.02, 0.96, text("cal_metrics", style.lang).format(brier=m["brier"], a=m["calibration_intercept"],
+           for k in ("poisson_deviance", "observed_expected", "calibration_slope")):
+        ax.text(0.02, 0.96, text("cal_metrics", style.lang).format(dev=m["poisson_deviance"],
+                                                                     oe=m["observed_expected"],
                                                                      b=m["calibration_slope"]),
                 transform=ax.transAxes, ha="left", va="top", fontsize=style.font_size)
     ax.grid(alpha=0.3)

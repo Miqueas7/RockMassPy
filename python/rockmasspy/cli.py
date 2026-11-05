@@ -667,8 +667,9 @@ def _print_performance(m) -> bool:
     print(f"performance: calibration {m.calibration} ({m.calibration_reason})")
     print(f"performance: n {c['tramos']}, failures {c['failures']}, labors {c['labors']}, zones {c['zones']}, "
           f"parameters {c['parameters']}, quality {m.quality}")
+    print("performance model: constant failure rate; P(failure in H days) = 1 - exp(-lambda*H)")
     if m.validation is not None:
-        _print_validation("performance", "brier", m.validation, ".4f")
+        _print_validation("performance", "poisson_deviance", m.validation, ".4f")
     coefs = m.coefficients  # {} sin ajuste
     for name, (lo, hi) in zip(coefs, m.coef_ci):
         bound = " (sign bound active)" if name in m.active_bounds else ""

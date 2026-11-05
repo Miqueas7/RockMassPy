@@ -67,7 +67,7 @@ llevan ids inventados (`N001`…).
    no es necesariamente lo que debió instalar.
 3. **Nivel 3** con `fit_performance`: P(falla) por tramo con restricciones de signo, validado por labor, por zona
    fuera y por año contra el ficticio y la línea base NGI. Sale «propio del sitio» solo si las particiones por labor
-   y por zona superan a las dos referencias (IC 95 % de la mejora del Brier sobre cero) y la temporal no sale peor.
+   y por zona superan a las dos referencias (IC 95 % de la mejora de la devianza de Poisson sobre cero) y la temporal no sale peor.
 4. Guarda el modelo en `modelo.json` (coeficientes, rangos, métricas y conteos; **nunca filas ni ids**) y lo vuelve
    a leer con `load_model`.
 5. Recomienda para 6 tramos nuevos (`tramos_nuevos.xlsx`) con `recommend`: P(falla) con su intervalo al 90 % para

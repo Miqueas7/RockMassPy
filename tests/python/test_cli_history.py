@@ -292,8 +292,9 @@ def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_
     assert "practice kappa labor: practice " in out and "over ngi " in out
     assert "practice outside the conformal set: " in out and "practice concordance: n " in out
     assert "performance: calibration site (" in out
-    assert "performance brier labor: site " in out and "over baseline_ngi " in out
-    assert "performance brier temporal: " in out and "non-inferiority" in out
+    assert "performance model: constant failure rate; P(failure in H days) = 1 - exp(-lambda*H)" in out
+    assert "performance poisson_deviance labor: site " in out and "over baseline_ngi " in out
+    assert "performance poisson_deviance temporal: " in out and "non-inferiority" in out
     assert "performance coefficient ln_q: " in out and "performance coefficient support_rank: " in out
     assert not any(w.startswith("T0") for w in out.split())  # ningún id_tramo
     assert [x for x in out.splitlines() if x.startswith(("results: ", "model: "))] == [

@@ -49,18 +49,20 @@ def test_isoprobability_without_points_and_bad_input():
 @pytest.mark.parametrize("lang", ["es", "en"])
 def test_calibration_curve(lang):
     curve = [(0.1, 0.12, 50), (0.4, 0.35, 40), (0.8, 0.82, 10)]
-    fig = plot_calibration(curve, metrics={"brier": 0.2, "calibration_intercept": 0.01, "calibration_slope": 0.95},
+    fig = plot_calibration(curve, metrics={"poisson_deviance": 0.2, "observed_expected": 1.01, "calibration_slope": 0.95},
                            style=Style(lang=lang))
     ax = fig.axes[0]
     assert list(ax.lines[0].get_xdata()) == [0, 1]  # la diagonal
     assert list(ax.lines[1].get_ydata()) == [0.12, 0.35, 0.82]
     t = _textos(fig)
-    assert TEXTS["cal_metrics"][lang].format(brier=0.2, a=0.01, b=0.95) in t
+    assert TEXTS["cal_metrics"][lang].format(dev=0.2, oe=1.01, b=0.95) in t
     assert TEXTS["cal_title"][lang] in t
 
 
 def test_calibration_without_metrics_and_empty():
-    fig = plot_calibration([(0.5, 0.5, 3)], metrics={"brier": float("nan")})
-    assert not any("Brier" in x for x in _textos(fig))
+    fig = plot_calibration([(0.5, 0.5, 3)], metrics={"poisson_deviance": float("nan")})
+    assert not any("devianza" in x for x in _textos(fig))
+    fig = plot_calibration([(1.5, 2.0, 3)])  # esperados sobre 1: la diagonal y los ejes llegan al mayor
+    assert fig.axes[0].get_xlim() == (0, 2.0) and list(fig.axes[0].lines[0].get_xdata()) == [0, 2.0]
     with pytest.raises(ValueError, match="curve"):
         plot_calibration([])

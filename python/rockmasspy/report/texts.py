@@ -619,7 +619,9 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "confundido con la calidad del macizo; las cotas de signo lo acotan, no lo eliminan. Extrapolación: "
               "fuera del rango de entrenamiento, o lejos de él en distancia de Mahalanobis, el modelo no vale; la "
               "recomendación lo avisa tramo por tramo. Un tramo sin inspecciones no entra al nivel 3: nunca se "
-              "asume estable. La validación es interna (otra parte de la misma mina), no externa.",
+              "asume estable. La validación es interna (otra parte de la misma mina), no externa. Tasa constante en el "
+              "tiempo (sin envejecimiento del sostenimiento): el nivel 3 supone que λ no cambia con los días de "
+              "exposición.",
         "en": "Past practice as the label: level 2 learns what the mine installed, which depends on the rock class "
               "that was assessed; it reproduces past decisions, not optimal ones, and so it describes and does not "
               "recommend. Selection bias: level 3 failures depend on the support that was chosen (a heavy type was "
@@ -627,7 +629,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "bounds limit this, they do not remove it. Extrapolation: outside the training range, or far from it "
               "in Mahalanobis distance, the model does not hold; the recommendation flags it tramo by tramo. A tramo "
               "without inspections is left out of level 3: it is never assumed stable. The validation is internal "
-              "(another part of the same mine), not external.",
+              "(another part of the same mine), not external. Constant rate over time (no ageing of the support): "
+              "level 3 assumes λ does not change with the days of exposure.",
     },
     "dd": {"es": "decisión de diseño", "en": "design decision"},
     "cap_dd": {"es": "Mínimos y umbrales (todos son decisión de diseño, por confirmar)",
@@ -765,19 +768,21 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l3_rule_val": {
         "es": "Regla de calibración: «propio del sitio» exige cumplir el mínimo del nivel 3 y que las particiones "
               "por labor y por zona fuera superen al ficticio y a la línea base NGI con el límite inferior del IC "
-              "95 % de la mejora del Brier sobre cero, sin pliegues fallidos y con no más del 1 % de réplicas "
+              "95 % de la mejora de la devianza de Poisson sobre cero, sin pliegues fallidos y con no más del 1 % de réplicas "
               "degeneradas. La partición temporal entra como no inferioridad: bloquea solo si la mejora puntual "
               "contra alguna referencia es negativa, porque el test de un solo año es chico y su IC casi siempre "
               "toca el cero; si no se pudo armar, no bloquea y la validación lo avisa. «Parcial»: cumple el mínimo "
               "pero no lo demás; muestra P(falla) y no elige. «No calibrado al sitio»: bajo el mínimo.",
         "en": "Calibration rule: \"site\" requires the level-3 minimum and that the excavation and zone-left-out "
-              "partitions beat the dummy and the NGI baseline with the lower bound of the 95 % CI of the Brier gain "
-              "above zero, with no failed fold and no more than 1 % degenerate replicates. The temporal partition "
+              "partitions beat the dummy and the NGI baseline with the lower bound of the 95 % CI of the Poisson deviance "
+              "gain above zero, with no failed fold and no more than 1 % degenerate replicates. The temporal partition "
               "enters as non-inferiority: it blocks only if the point gain over a reference is negative, because "
               "the single-year test is small and its CI almost always reaches zero; if it could not be built, it "
               "does not block and the validation warns. \"Partial\": meets the minimum but not the rest; it shows "
               "P(failure) and does not choose. \"Not calibrated to the site\": below the minimum.",
     },
+    "l3_model": {"es": "Modelo: tasa de falla constante; P(falla en H días) = 1 − exp(−λH).",
+                 "en": "Model: constant failure rate; P(failure in H days) = 1 − exp(−λH)."},
     "cap_l3_state": {"es": "Estado y datos del nivel 3", "en": "Level 3 status and data"},
     "l3_calibration": {"es": "Nivel de calibración", "en": "Calibration level"},
     "l3_reason": {"es": "Motivo", "en": "Reason"},
@@ -800,17 +805,18 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "sign_up": {"es": "≥ 0", "en": "≥ 0"},
     "sign_down": {"es": "≤ 0", "en": "≤ 0"},
     "sign_free": {"es": "libre", "en": "free"},
-    "cap_l3_val": {"es": "Brier fuera de pliegue por partición (menor es mejor)",
-                   "en": "Out-of-fold Brier score by partition (lower is better)"},
+    "cap_l3_val": {"es": "Devianza de Poisson fuera de pliegue por partición (menor es mejor)",
+                   "en": "Out-of-fold Poisson deviance by partition (lower is better)"},
     "cap_l3_oof": {"es": "Desempeño fuera de pliegue (partición por labor)",
                    "en": "Out-of-fold performance (excavation partition)"},
-    "m_brier": {"es": "Brier", "en": "Brier"},
-    "m_auc": {"es": "AUC", "en": "AUC"},
-    "m_ap": {"es": "Precisión promedio (PR)", "en": "Average precision (PR)"},
-    "m_cal_a": {"es": "Intercepto de calibración", "en": "Calibration intercept"},
-    "m_cal_b": {"es": "Pendiente de calibración", "en": "Calibration slope"},
-    "fig_l3_cal": {"es": "Curva de calibración fuera de pliegue por deciles (Van Calster et al. 2019 [V2])",
-                   "en": "Out-of-fold calibration curve by deciles (Van Calster et al. 2019 [V2])"},
+    "m_deviance": {"es": "Devianza de Poisson (menor es mejor)", "en": "Poisson deviance (lower is better)"},
+    "m_oe": {"es": "Eventos observados / esperados (ideal 1)", "en": "Observed / expected events (ideal 1)"},
+    "m_cal_b": {"es": "Pendiente de calibración (ideal 1)", "en": "Calibration slope (ideal 1)"},
+    "m_c_index": {"es": "C de Harrell", "en": "Harrell's C"},
+    "fig_l3_cal": {"es": "Curva de calibración fuera de pliegue: eventos esperados frente a observados por decil "
+                         "de λ (Van Calster et al. 2019 [V2])",
+                   "en": "Out-of-fold calibration curve: expected versus observed events by decile of λ "
+                         "(Van Calster et al. 2019 [V2])"},
     "l3_iso_text": {
         "es": "Isoprobabilidades de falla por tipo en el plano Q–De, al estilo de Mawdesley et al. (2001) [V2 + resumen], "
               "dentro del rango de entrenamiento, a {days:.0f} días de exposición (el horizonte del ingeniero o, si "
@@ -915,8 +921,10 @@ TRIPOD_ITEMS: tuple[tuple[str, dict[str, tuple[str, str]]], ...] = (
                                                                "bootstrap por labor"),
              "en": ("Analytical methods and internal validation", "Excavation, zone-left-out and temporal "
                                                                   "partitions; excavation bootstrap")}),
-    ("yes", {"es": ("Desbalance de clases", "Sin rebalanceo; kappa ponderado y Brier"),
-             "en": ("Class imbalance", "No rebalancing; weighted kappa and Brier")}),
+    ("yes", {"es": ("Desbalance de clases", "Sin rebalanceo; kappa ponderado (nivel 2) y devianza de "
+                                                   "Poisson (nivel 3)"),
+             "en": ("Class imbalance", "No rebalancing; weighted kappa (level 2) and Poisson "
+                                                "deviance (level 3)")}),
     ("na", {"es": ("Equidad entre grupos de personas", "Las unidades son tramos, no personas; la heterogeneidad entre "
                                                        "zonas se mide con la zona fuera"),
             "en": ("Fairness across groups of people", "The units are tramos, not people; heterogeneity across "
@@ -925,9 +933,13 @@ TRIPOD_ITEMS: tuple[tuple[str, dict[str, tuple[str, str]]], ...] = (
              "en": ("Model output", "P(failure) with its interval and the recommendation rule")}),
     ("yes", {"es": ("Entrenamiento frente a evaluación", "Métricas fuera de pliegue"),
              "en": ("Training versus evaluation", "Out-of-fold metrics")}),
-    ("yes", {"es": ("Desempeño: discriminación y calibración", "Nivel 3: Brier, AUC, PR y curva de calibración; "
+    ("yes", {"es": ("Desempeño: discriminación y calibración", "Nivel 3: devianza de Poisson, O/E, "
+                                                               "pendiente de calibración, C de Harrell y curva de "
+                                                               "calibración; "
                                                                "nivel 2: kappa ponderado"),
-             "en": ("Performance: discrimination and calibration", "Level 3: Brier, AUC, PR and calibration curve; "
+             "en": ("Performance: discrimination and calibration", "Level 3: Poisson deviance, O/E, "
+                                                                   "calibration slope, Harrell's C and calibration "
+                                                                   "curve; "
                                                                    "level 2: weighted kappa")}),
     ("yes", {"es": ("Especificación completa del modelo", "Coeficientes en el informe; el modelo JSON"),
              "en": ("Full model specification", "Coefficients in the report; the model JSON")}),

@@ -1318,7 +1318,7 @@ def _performance_section(number, m, history, threshold, exposure_days, lang, fig
     from ..viz.style import Style
 
     c = m.counts
-    blocks = [Paragraph(t("l3_text", lang)), Paragraph(t("l3_rule_val", lang)),
+    blocks = [Paragraph(t("l3_text", lang)), Paragraph(t("l3_model", lang)), Paragraph(t("l3_rule_val", lang)),
               Table(t("cap_l3_state", lang), (t("h_item", lang), t("h_value", lang)), (
                   (t("l3_calibration", lang), t(f"cal_{m.calibration}", lang)),
                   (t("l3_reason", lang), m.calibration_reason),
@@ -1341,10 +1341,9 @@ def _performance_section(number, m, history, threshold, exposure_days, lang, fig
     mt = m.metrics
     if mt.get("n"):
         blocks.append(Table(t("cap_l3_oof", lang), (t("h_item", lang), t("h_value", lang)), (
-            ("n", str(mt["n"])), (t("m_brier", lang), _f(mt.get("brier"), ".4f")),
-            (t("m_auc", lang), _f(mt.get("auc"))), (t("m_ap", lang), _f(mt.get("average_precision"))),
-            (t("m_cal_a", lang), _f(mt.get("calibration_intercept"))),
-            (t("m_cal_b", lang), _f(mt.get("calibration_slope"))))))
+            ("n", str(mt["n"])), (t("m_deviance", lang), _f(mt.get("poisson_deviance"), ".4f")),
+            (t("m_oe", lang), _f(mt.get("observed_expected"))),
+            (t("m_cal_b", lang), _f(mt.get("calibration_slope"))), (t("m_c_index", lang), _f(mt.get("c_index"))))))
     if m.calibration_curve:
         from ..viz import plot_calibration
 
