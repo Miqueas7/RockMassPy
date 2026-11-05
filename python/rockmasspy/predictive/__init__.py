@@ -50,3 +50,5 @@ __all__ += ["Comparison", "Fold", "FoldFailure", "Improvement", "OofPredictions"
             "leave_one_group_out", "out_of_fold", "random_kfold", "temporal_split", "tramo_groups", "validate"]
 __all__ += ["ExponentialHazardFit", "exponential_hazard_map_fit", "ngi_category"]
 __all__ += ["FrailtyHazardFit", "frailty_hazard_map_fit", "poisson_deviance"]
+from .mine import SCENARIOS, MineScenario, MineTruth, synthetic_mine  # noqa: E402
+__all__ += ["SCENARIOS", "MineScenario", "MineTruth", "synthetic_mine"]
