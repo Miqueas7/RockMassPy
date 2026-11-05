@@ -352,6 +352,18 @@ _COMPONENTS = ("rqd_pct", "jn", "jr", "ja", "jw", "srf", "ucs_mpa", "espaciamien
                "agua", "gsi_valor")
 _PAIRS = {"rmr_from_q": ("rmr_valor", "q_valor"), "gsi_from_rmr": ("gsi_valor", "rmr_valor"),
           "gsi_from_q_prime": ("gsi_valor", "rqd_pct", "jn", "jr", "ja")}
+LEVEL1_KINDS = tuple(_PAIRS)
+LEVEL1_RMR_EDITIONS = ("RMR76", "RMR89")  # las que tienen correlación global en el núcleo (prior del nivel 1)
+
+
+def _rmr_edition_key(edicion: str | None) -> str:
+    return re.sub(r"[\s-]", "", edicion or "").upper()  # RMR-89, RMR 89 → RMR89
+
+
+def _q_prime(t: HistoryTramo) -> float:
+    """Q′ = RQD/Jn·Jr/Ja del núcleo (RQD < 10 se toma como 10); jw = srf = 1 no entran en q_base. Lanza
+    ValueError con componentes fuera de dominio."""
+    return rm.q_value(rm.QInput(t.rqd_pct, t.jn, t.jr, t.ja, 1.0, 1.0), rm.QEdition.NGI2025).q_base
 
 
 def labor_key(t: HistoryTramo) -> tuple[str | None, str] | None:
@@ -386,8 +398,20 @@ def _audit_q(t):
     return None
 
 
+def _audit_q_prime(t):
+    """Q′ del nivel 1 no calculable. Con Q y sus seis parámetros, `_audit_q` ya lo reporta: no se duplica."""
+    if any(getattr(t, c) is None for c in ("rqd_pct", "jn", "jr", "ja")) \
+            or all(v is not None for v in (t.q_valor, t.jw, t.srf)):
+        return None
+    try:
+        _q_prime(t)
+    except ValueError as e:  # el mensaje del núcleo solo trae nombres y números
+        return _finding("not_recomputed", f"Q' not computable for level 1: {e}", t)
+    return None
+
+
 def _audit_rmr(t):
-    if re.sub(r"[\s-]", "", t.rmr_edicion or "").upper() != "RMR89" or t.rmr_valor is None:  # RMR-89, RMR 89
+    if _rmr_edition_key(t.rmr_edicion) != "RMR89" or t.rmr_valor is None:
         return None
     if any(v is None for v in (t.ucs_mpa, t.rqd_pct, t.espaciamiento_m, t.puntaje_condicion_juntas, t.agua)):
         return None
@@ -480,13 +504,64 @@ def _labors(ts):
     return len({labor_key(t) for t in ts} - {None})
 
 
+@dataclass(frozen=True)
+class Level1Rows:
+    """Pares (x, y) del nivel 1 en la x original (Q, RMR o Q′) y cuántas filas completas se excluyeron."""
+    tramos: tuple[HistoryTramo, ...]
+    x: tuple[float, ...]
+    y: tuple[float, ...]
+    edition: str | None  # edición de RMR usada (RMR76 o RMR89); None en gsi_from_q_prime o sin edición soportada
+    excluded_x: int  # Q ≤ 0 o componentes de Q′ fuera de dominio
+    excluded_edition: int  # rmr_edicion vacía, no soportada o distinta de la usada
+
+
+def level1_rows(history: History, kind: str, *, rmr_edition: str | None = None) -> Level1Rows:
+    """Filas del nivel 1 que usan la preparación (`audit_history`) y el ajuste (`fit_site_correlation`).
+
+    Excluye las filas sin x usable (Q ≤ 0; Q′ no calculable) y, en los tipos con RMR, las que no tienen la edición
+    usada: `rmr_edition` (RMR76 o RMR89) o, si es None, la mayoritaria entre las soportadas (empate: RMR89).
+    """
+    if kind not in _PAIRS:
+        raise ValueError(f"kind must be one of {', '.join(LEVEL1_KINDS)}")
+    if rmr_edition is not None and _rmr_edition_key(rmr_edition) not in LEVEL1_RMR_EDITIONS:
+        raise ValueError(f"rmr_edition must be one of {', '.join(LEVEL1_RMR_EDITIONS)}")
+    rows, bad_x = [], 0
+    for t in history.tramos:
+        if any(getattr(t, c) is None for c in _PAIRS[kind]):
+            continue
+        if kind == "rmr_from_q":
+            x, y = (t.q_valor if t.q_valor > 0 else None), t.rmr_valor
+        elif kind == "gsi_from_rmr":
+            x, y = t.rmr_valor, t.gsi_valor
+        else:
+            try:
+                x = _q_prime(t)
+            except ValueError:
+                x = None
+            y = t.gsi_valor
+        if x is None:
+            bad_x += 1
+        else:
+            rows.append((t, float(x), float(y)))
+    edition, bad_ed = None, 0
+    if kind != "gsi_from_q_prime":
+        eds = Counter(_rmr_edition_key(t.rmr_edicion) for t, _, _ in rows)
+        if rmr_edition is not None:
+            edition = _rmr_edition_key(rmr_edition)
+        elif any(e in eds for e in LEVEL1_RMR_EDITIONS):
+            edition = max(LEVEL1_RMR_EDITIONS, key=lambda e: (eds[e], e == "RMR89"))
+        kept = [r for r in rows if _rmr_edition_key(r[0].rmr_edicion) == edition]
+        rows, bad_ed = kept, len(rows) - len(kept)
+    return Level1Rows(tuple(r[0] for r in rows), tuple(r[1] for r in rows), tuple(r[2] for r in rows), edition,
+                      bad_x, bad_ed)
+
+
 def _readiness(history):
     """Solo cuenta filas completas para las variables base de cada nivel; los totales van aparte."""
     out = []
     n_all = len(history.tramos)
-    for kind, cols in _PAIRS.items():
-        ts = [t for t in history.tramos if all(getattr(t, c) is not None for c in cols)
-              and (kind != "rmr_from_q" or _pos(t.q_valor))]  # ln Q
+    for kind in LEVEL1_KINDS:
+        ts = level1_rows(history, kind).tramos  # los mismos pares que usa el ajuste por defecto
         out.append(LevelReadiness(1, kind, {"pairs": len(ts), "labors": _labors(ts), "total": n_all},
                                   {"pairs": MIN_PAIRS_LEVEL1, "labors": MIN_LABORS_LEVEL1}))
     codes = {s.codigo_tipo for s in history.support_types}
@@ -526,7 +601,7 @@ def _readiness(history):
 def audit_history(history: History) -> HistoryAudit:
     """Auditoría de ingesta: Q y RMR89 recalculados, registros no independientes, coherencia entre hojas y
     preparación de cada nivel (solo conteos). Avisa, nunca bloquea."""
-    findings = [f for t in history.tramos for f in (_audit_q(t), _audit_rmr(t)) if f is not None]
+    findings = [f for t in history.tramos for f in (_audit_q(t), _audit_q_prime(t), _audit_rmr(t)) if f is not None]
     findings += _audit_independence(history.tramos) + _audit_coherence(history)
     findings.sort(key=lambda f: (HISTORY_SHEETS.index(f.sheet), f.fila or 0, FINDING_KINDS.index(f.kind)))
     return HistoryAudit(tuple(findings), _readiness(history), len(history.tramos), len(history.support_types),

@@ -36,8 +36,9 @@ def _pairs_q(h):
 
 
 def test_estados_segun_el_tamano():
-    big = fit_site_correlation(_big()[0], "rmr_from_q", n_boot=N_BOOT)
-    assert big.mine.status == "site" and big.mine.n == 288 and big.mine.n_labors == 24
+    hb = _big()[0]
+    big = fit_site_correlation(hb, "rmr_from_q", n_boot=N_BOOT)
+    assert big.mine.status == "site" and big.mine.n == len(hb.tramos) and big.mine.n_labors == 24
     small = fit_site_correlation(_small()[0], "rmr_from_q", n_boot=N_BOOT)
     m = small.mine
     assert m.status == "not_calibrated" and m.method == "Bayesian"
@@ -48,9 +49,9 @@ def test_estados_segun_el_tamano():
 
 def test_ic_ancho_da_inestable():
     noisy = SyntheticTruth(sd_rmr=40.0, sd_labor_rmr=15.0)
-    h, _ = synthetic_history(n_zones=1, labors_per_zone=5, tramos_per_labor=6, truth=noisy, seed=3)
+    h, _ = synthetic_history(n_zones=1, labors_per_zone=5, tramos_per_labor=8, truth=noisy, seed=3)
     m = fit_site_correlation(h, "rmr_from_q", group_by=None, n_boot=N_BOOT).mine
-    assert m.n == 30 and m.n_labors == 5
+    assert m.n >= 30 and m.n_labors == 5  # justo sobre el mínimo
     assert m.status == "unstable" and m.method == "OLS"
     lo, hi = m.a_ci
     tol = SLOPE_CI_REL_TOL * abs(m.ols.a)
@@ -97,12 +98,24 @@ def test_prior_por_edicion_y_tipo():
 def test_pares_iguales_a_la_preparacion_del_nivel_1():
     h, _ = _big()
     # un hueco por tipo: los conteos tienen que seguir coincidiendo
+    # casos del revisor: componentes de Q′ inválidos, edición vacía y una fila RMR76 entre RMR89
+    bad = {3: dict(jn=0.0), 5: dict(ja=0.0), 8: dict(rqd_pct=150.0), 13: dict(rmr_edicion=None),
+           17: dict(rmr_edicion=""), 19: dict(rmr_edicion="RMR76")}
     h = _edit(h, lambda i, t: dataclasses.replace(t, gsi_valor=None) if i % 7 == 0 else
-              dataclasses.replace(t, q_valor=None) if i % 11 == 0 else t)
+              dataclasses.replace(t, q_valor=None) if i % 11 == 0 else dataclasses.replace(t, **bad.get(i, {})))
     ready = {r.item: r.counts for r in audit_history(h).readiness if r.level == 1}
     for kind in KINDS:
-        m = fit_site_correlation(h, kind, group_by=None, n_boot=50).mine
+        r = fit_site_correlation(h, kind, group_by=None, n_boot=50)
+        m = r.mine
         assert (m.n, m.n_labors) == (ready[kind]["pairs"], ready[kind]["labors"]), kind
+        if kind != "gsi_from_q_prime":
+            assert m.y_to == "RMR89" or m.x_from == "RMR89"
+            assert any(w.startswith("3 pair(s) excluded: rmr_edicion") for w in r.warnings), kind
+    qp = fit_site_correlation(h, "gsi_from_q_prime", group_by=None, n_boot=50)
+    assert any(w.startswith("3 pair(s) excluded: Q'") for w in qp.warnings)
+    # con la edición pedida entra solo esa
+    r76 = fit_site_correlation(h, "rmr_from_q", group_by=None, rmr_edition="RMR76", n_boot=50)
+    assert r76.mine.n == 1 and r76.prior_correlation == "RmrFromQ_Bieniawski1976"
 
 
 def test_dominios_y_sin_dominio():
@@ -128,14 +141,31 @@ def test_to_custom_correlation_con_correlate_custom():
     r = rm.correlate_custom(c, 2.0)
     assert r.value == pytest.approx(m.ols.a * math.log(2.0) + m.ols.b) and not r.warnings
     assert any("outside the calibration range" in w for w in rm.correlate_custom(c, c.valid_max * 10).warnings)
-    assert "n=288" in c.source and "labors=24" in c.source and "method=OLS" in c.source and "status=site" in c.source
+    assert c.source == f"RockMassPy site fit rmr_from_q: n={len(h.tramos)}, labors=24, method=OLS, status=site"
     # bajo el mínimo predice el bayesiano
     s = fit_site_correlation(_small()[0], "gsi_from_rmr", group_by=None).mine
     cs = s.to_custom_correlation()
     assert cs.form == rm.CorrelationForm.Linear and (cs.a, cs.b) == (s.bayes_a, s.bayes_b)
     assert "method=Bayesian" in cs.source and "status=not_calibrated" in cs.source
+    assert "GsiFromRmr89Prime_HoekDiederichs2006 (Primary)" in cs.source and s.prior_verification == "Primary"
     y, lo, hi = s.predict(50.0)
     assert lo < y < hi and y == pytest.approx(s.bayes_a * 50 + s.bayes_b)
+
+
+def test_to_custom_correlation_none_con_un_solo_tramo():
+    h, _ = _big()
+    h = _edit(h, lambda i, t: dataclasses.replace(t, litologia="unica") if i == 0 else t)
+    r = fit_site_correlation(h, "rmr_from_q", n_boot=50)
+    one = r.domains["unica"]
+    assert one.n == 1 and one.status == "not_calibrated"
+    assert one.to_custom_correlation() is None
+
+
+def test_pendiente_con_signo_opuesto_es_inestable():
+    h, _ = synthetic_history(n_zones=4, labors_per_zone=6, truth=SyntheticTruth(rmr_a=-9.0, rmr_b=60.0), seed=1)
+    m = fit_site_correlation(h, "rmr_from_q", group_by=None, n_boot=N_BOOT).mine
+    assert m.ols.a < 0 and m.status == "unstable"
+    assert "unstable: slope sign opposite to the global correlation; check the data" in m.warnings
 
 
 def test_deming_solo_con_razon():
@@ -147,17 +177,25 @@ def test_deming_solo_con_razon():
     assert d.deming == deming_fit(x, [t.rmr_valor for t in h.tramos], 2.0) and d.deming_reason is None
     with pytest.raises(ValueError, match="deming_ratio"):
         fit_site_correlation(h, "rmr_from_q", deming_ratio=0.0)
+    s = fit_site_correlation(_small()[0], "rmr_from_q", group_by=None, deming_ratio=2.0).mine
+    assert s.deming is None and s.deming_reason == "below the level-1 minimum"
 
 
-def test_error_con_ediciones_mezcladas():
+def test_ediciones_mezcladas_usan_la_mayoritaria():
     h, _ = _small()
-    mixed = _edit(h, lambda i, t: dataclasses.replace(t, rmr_edicion="RMR76") if i % 2 else t)
+    mixed = _edit(h, lambda i, t: dataclasses.replace(t, rmr_edicion="RMR76") if i % 3 == 0 else t)
+    n76 = sum(t.rmr_edicion == "RMR76" for t in mixed.tramos)
     for kind in ("rmr_from_q", "gsi_from_rmr"):
-        with pytest.raises(ValueError, match="mixes editions"):
-            fit_site_correlation(mixed, kind)
-    fit_site_correlation(mixed, "gsi_from_q_prime")  # no usa el RMR como x: la edición no importa
-    with pytest.raises(ValueError, match="unsupported rmr_edicion"):
+        r = fit_site_correlation(mixed, kind)
+        assert r.mine.n == len(mixed.tramos) - n76 and "RMR89" in (r.mine.x_from, r.mine.y_to)
+        assert f"{n76} pair(s) excluded: rmr_edicion missing or other than RMR89; RMR editions are not mixed " \
+               "in one fit" in r.warnings
+        assert fit_site_correlation(mixed, kind, rmr_edition="RMR76").mine.n == n76
+    assert fit_site_correlation(mixed, "gsi_from_q_prime").mine.n == len(mixed.tramos)  # la edición no importa
+    with pytest.raises(ValueError, match="no usable pairs with rmr_edicion"):
         fit_site_correlation(_edit(h, lambda i, t: dataclasses.replace(t, rmr_edicion="RMR14")), "rmr_from_q")
+    with pytest.raises(ValueError, match="rmr_edition"):
+        fit_site_correlation(h, "rmr_from_q", rmr_edition="RMR14")
 
 
 def test_centinela_no_aparece_en_mensajes():
@@ -173,11 +211,12 @@ def test_centinela_no_aparece_en_mensajes():
             texts = [*r.warnings, repr(r)]
             for f in (r.mine, *r.domains.values()):
                 c = f.to_custom_correlation()
-                texts += [*f.warnings, f.deming_reason or "", f.label, c.name, c.source, repr(f)]
+                texts += [*f.warnings, f.deming_reason or "", f.label, repr(f)] + ([c.name, c.source] if c else [])
             assert not [s for s in texts if "ZZSENT" in s], kind
-        mixed = _edit(h, lambda i, t: dataclasses.replace(t, rmr_edicion="RMR76") if i % 2 else t)
+        mixed = _edit(h, lambda i, t: dataclasses.replace(t, rmr_edicion="RMR76") if i % 3 == 0 else t)
+        assert not [w for w in fit_site_correlation(mixed, "rmr_from_q").warnings if "ZZSENT" in w]
         with pytest.raises(ValueError) as e:
-            fit_site_correlation(mixed, "rmr_from_q")
+            fit_site_correlation(_edit(h, lambda i, t: dataclasses.replace(t, rmr_edicion="ZZSENT")), "rmr_from_q")
         assert "ZZSENT" not in str(e.value)
 
 
@@ -185,7 +224,7 @@ def test_errores_de_entrada():
     h, _ = _small()
     with pytest.raises(ValueError, match="kind"):
         fit_site_correlation(h, "rmr_from_gsi")
-    with pytest.raises(ValueError, match="no complete pairs"):
+    with pytest.raises(ValueError, match="no usable pairs"):
         fit_site_correlation(_edit(h, lambda i, t: dataclasses.replace(t, gsi_valor=None)), "gsi_from_rmr")
 
 
@@ -207,4 +246,9 @@ def test_plot_correlation_con_banda():
     hs, _ = _small()
     s = fit_site_correlation(hs, "gsi_from_rmr", group_by=None).mine
     fig = plot_correlation([(t.rmr_valor, t.gsi_valor) for t in hs.tramos], x="RMR89", y="GSI", bands=[s])
-    assert sum(isinstance(c, PolyCollection) for c in fig.axes[0].collections) == 1
+    band = [c for c in fig.axes[0].collections if isinstance(c, PolyCollection)]
+    assert len(band) == 1
+    ys = np.concatenate([p.vertices[:, 1] for p in band[0].get_paths()])
+    assert ys.min() >= 0 and ys.max() <= 100  # recortada como los valores del núcleo
+    with pytest.raises(ValueError, match="band:mine"):
+        plot_correlation(_pairs_q(h), x="Q", y="GSI", bands=[m])
