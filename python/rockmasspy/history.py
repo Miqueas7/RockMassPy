@@ -17,10 +17,10 @@ from pathlib import Path
 from . import _rockmasspy_core as rm
 from .batch import _Q_EDITIONS
 from .csv_io import _CsvSource, _csv_files
-from .excel_io import _open, _row, _support_dicts, _where
+from .excel_io import TIPOS, _open, _row, _support_dicts, _where
 from .intact_rock import _strip
 from .support import SupportType
-from .table_io import support_from_dict
+from .table_io import _optional, support_from_dict
 from .tramos import _IDENT, _normalize_gsi_cell, read_records
 
 HISTORY_SHEETS = ("Tramos", "Tipos_sostenimiento", "Desempeno")
@@ -216,6 +216,39 @@ def load_history(path, *, column_map: Mapping[str, str] | None = None) -> Histor
         return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
     finally:
         src.wb.close()
+
+
+def _support_row(s: SupportTypeDef) -> dict:
+    e = s.elementos
+    return {"codigo_tipo": s.codigo_tipo, "orden": s.orden, "descripcion": s.descripcion or None,
+            "perno_tipo": e.bolt and e.bolt.kind, "perno_longitud_m": e.bolt and e.bolt.length_m,
+            "perno_espaciamiento_m": e.bolt and e.bolt.spacing_m,
+            "shotcrete_espesor_mm": e.shotcrete and e.shotcrete.thickness_mm,
+            "shotcrete_fibra": e.shotcrete and ("Sí" if e.shotcrete.fiber else "No"), "malla": e.mesh,
+            "cimbra": e.arch, "costo_relativo": e.relative_cost}
+
+
+def save_history_xlsx(history: History, path) -> None:
+    """Escribe las hojas Tramos, Tipos_sostenimiento y Desempeno con las columnas de la plantilla, en su orden.
+
+    `load_history` del archivo devuelve el mismo History si las filas (`fila`) son las de la hoja (2, 3, …), como las
+    del generador sintético (`rockmasspy.predictive.synthetic_history`), y si cada número tiene a lo sumo 15 cifras
+    significativas (openpyxl no guarda más). `codigo_mina`, `evaluador_codigo` y `observaciones` van vacías: el
+    histórico no las guarda. Necesita openpyxl (extra `io`), no numpy.
+    """
+    openpyxl = _optional("openpyxl")
+    tramo_cols = ("id_tramo", "codigo_mina", *HISTORY_TRAMO_COLUMNS[1:], "evaluador_codigo", "observaciones")
+    sheets = (("Tramos", tramo_cols, [vars(t) for t in history.tramos]),
+              ("Tipos_sostenimiento", TIPOS, [_support_row(s) for s in history.support_types]),
+              ("Desempeno", (*INSPECTION_COLUMNS, "observaciones"), [vars(i) for i in history.inspections]))
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, cols, rows in sheets:
+        ws = wb.create_sheet(name)
+        ws.append(list(cols))
+        for r in rows:
+            ws.append([r.get(c) for c in cols])
+    wb.save(path)
 
 
 # --- nivel 3: resultado por tramo (R9) ---
