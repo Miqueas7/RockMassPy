@@ -1032,9 +1032,8 @@ _FORMS = {"rmr_from_q": "RMR = a·ln Q + b", "gsi_from_rmr": "GSI = a·RMR + b",
 
 
 def site_custom(fit):
-    """`CustomCorrelation` del ajuste o None si no se puede armar (rango de x de un solo valor).
-
-    Tolera las dos API de `to_custom_correlation`: la que lanza ValueError y la que devuelve None."""
+    """`CustomCorrelation` del ajuste o None si no se puede armar (rango de x de un solo valor). Tolera también
+    la API anterior de `to_custom_correlation`, que lanzaba ValueError."""
     try:
         return fit.to_custom_correlation()
     except ValueError:
@@ -1065,17 +1064,19 @@ def _prior_info(method_id: str):
 
 def history_correlation_figure(result, history, lang: str):
     """Pares del sitio, la recta de la mina, su intervalo de predicción y la global (si va en los mismos ejes)."""
-    from ..predictive.correlations import _pairs
+    from ..history import level1_rows
     from ..viz import plot_correlation
     from ..viz.style import Style
 
     f = result.mine
-    _, x, y = _pairs(history, result.kind)
+    # los mismos pares del ajuste: la edición de RMR del ajuste (x o y, según el par)
+    ed = next((e for e in (f.x_from, f.y_to) if e.startswith("RMR")), None)
+    sel = level1_rows(history, result.kind, rmr_edition=ed)
     c, r = _prior_info(result.prior_correlation)
     # la global del GSI va en RMR′ (sin agua ni orientación): en otros ejes que el RMR registrado, no se dibuja
     glob = [c] if c is not None and (r.from_, r.to) == (f.x_from, f.y_to) else []
     site = [s for s in (site_custom(f),) if s is not None]
-    return plot_correlation(list(zip(x.tolist(), y.tolist())), x=f.x_from, y=f.y_to, global_correlations=glob,
+    return plot_correlation(list(zip(sel.x, sel.y)), x=f.x_from, y=f.y_to, global_correlations=glob,
                             site=site, bands=[f], style=Style(lang=lang))
 
 
@@ -1130,8 +1131,7 @@ def _hist_kind(k, result, history, lang, figures) -> Section:
         return Section(f"4.{k}", _FORMS.get(kind, kind), (Paragraph(t("hist_not_fitted", lang).format(
             reason=reason.rstrip("."))),))
     form = _FORMS[result.kind]
-    _, info = _prior_info(result.prior_correlation)
-    mark = info.info.verification.name if info is not None else result.prior_verification
+    mark = result.prior_verification
     blocks = [Paragraph(t("hist_prior", lang).format(
         method=result.prior_correlation, mark=mark, a=result.prior_mean[0], b=result.prior_mean[1],
         sd_a=result.prior_sd[0], sd_b=result.prior_sd[1], sigma=result.prior_sigma))]

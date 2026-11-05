@@ -19,7 +19,7 @@ def caso():
     ts[0] = dataclasses.replace(ts[0], q_valor=ts[0].q_valor * 3)  # un hallazgo q_mismatch
     h = rm.History(tuple(ts), h.support_types, h.inspections)
     fits = [pred.fit_site_correlation(h, k, n_boot=200) for k in ("rmr_from_q", "gsi_from_rmr")]
-    fits.append(("gsi_from_q_prime", "gsi_from_q_prime: no complete pairs in the history"))
+    fits.append(("gsi_from_q_prime", "gsi_from_q_prime: no usable pairs in the history"))
     return h, rm.audit_history(h), fits
 
 
@@ -92,7 +92,7 @@ def test_level1(caso):
     prior = subs[0].blocks[0].text
     assert "RmrFromQ_Huang2026 [Secondary]" in prior and "decisión de diseño" in prior
     assert "deming_ratio not given" in subs[0].blocks[2].text
-    assert subs[2].blocks[0].text.startswith("No ajustado: gsi_from_q_prime: no complete pairs")
+    assert subs[2].blocks[0].text.startswith("No ajustado: gsi_from_q_prime: no usable pairs")
     assert isinstance(subs[0].blocks[-1], rp.Figure) and subs[0].blocks[-1].png is None  # figures=False
 
 

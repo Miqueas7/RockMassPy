@@ -142,7 +142,7 @@ def test_not_fitted_kind(tmp_path, capsys):
     out_dir = tmp_path / "o"
     assert main(["history", str(p), "--correlations", "--group-by", "none", "-o", str(out_dir)]) == 2
     out = capsys.readouterr().out
-    assert "correlation gsi_from_rmr: not fitted (gsi_from_rmr: no complete pairs in the history)" in out
+    assert "correlation gsi_from_rmr: not fitted (gsi_from_rmr: no usable pairs with rmr_edicion RMR76 or RMR89 in the history)" in out
     assert "correlation rmr_from_q mine: " in out
     assert "not_fitted" in (out_dir / "site_correlations.csv").read_text(encoding="utf-8-sig")
 
@@ -157,3 +157,19 @@ def test_missing_ml_extra(tmp_path, capsys, monkeypatch):
     assert main(["history", str(src), "--correlations"]) == 1
     cap = capsys.readouterr()
     assert "pip install rockmasspy[ml]" in cap.err and cap.out == ""
+
+
+def test_single_pair_domain_skipped_in_json(tmp_path, capsys):
+    """Un dominio de un solo par no tiene rango de validez: va al CSV, pero no al JSON (to_custom_correlation None)."""
+    h, _ = pred.synthetic_history(seed=12)
+    ts = list(h.tramos)
+    ts[0] = dataclasses.replace(ts[0], litologia=f"{SENT}-solo")
+    p = tmp_path / "h.xlsx"
+    rm.save_history_xlsx(rm.History(tuple(ts), h.support_types, h.inspections), p)
+    out_dir = tmp_path / "o"
+    assert main(["history", str(p), "--correlations", "-o", str(out_dir)]) == 2
+    sin_centinela(capsys)
+    js = json.loads((out_dir / "site_correlations.json").read_text(encoding="utf-8"))
+    csv_text = (out_dir / "site_correlations.csv").read_text(encoding="utf-8-sig")
+    assert csv_text.count(f"{SENT}-solo") == 3  # una fila por par
+    assert len(js["correlations"]) == 3 * 5  # 3 pares × (mina + 4 litologías); el dominio de un par no va
