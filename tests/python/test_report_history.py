@@ -215,9 +215,35 @@ def test_tripod_and_limitations(niveles):
     assert len(tab.rows) == len(TRIPOD_ITEMS) and {r[1] for r in tab.rows} <= {"sí", "parcial", "no", "no aplica"}
     assert "Collins et al. 2024" in rep.sections[6].blocks[0].text
     lim = " ".join(b.text for b in rep.sections[7].blocks)
-    for frase in ("práctica pasada como etiqueta", "Sesgo de selección", "Extrapolación"):
+    for frase in ("práctica pasada como etiqueta", "Sesgo de selección", "Extrapolación",
+                  "La cobertura se verificó con datos sintéticos; con datos reales se confirma con el desempeño "
+                  "posterior"):
         assert frase in lim
     assert {"TRIPOD+AI", "Gelman et al. (2008)"} <= {m.method_id for m in rep.methods} | {m.source for m in rep.methods}
+
+
+class _ConBloqueos:
+    """El modelo real con un motivo global para que recommend no elija (el campo puede no existir todavía)."""
+    recommendation_blockers = ("support effect not significant", "bound active on ln_de")
+
+    def __init__(self, m):
+        self._m = m
+
+    def __getattr__(self, name):
+        return getattr(self._m, name)
+
+
+def test_level3_recommendation_blockers_and_interval_text(niveles):
+    h, audit, practice, perf = niveles
+    s = rp.build_history_report(audit, history=h, performance=perf, figures=False).sections[4]
+    dd = [x for x in tablas(s) if "decisión de diseño" in x.caption][0]
+    assert dict(dd.rows)[rp.t("dd_interval", "es")].startswith("límite superior de P(falla) para una labor nueva")
+    con = rp.build_history_report(audit, history=h, performance=_ConBloqueos(perf), figures=False).sections[4]
+    alerta = [b.text for b in con.blocks if isinstance(b, rp.Paragraph) and b.text.startswith("Atención: ")]
+    assert alerta == [rp.t("l3_rec_blocked", "es").format(
+        reasons="support effect not significant; bound active on ln_de")]
+    assert not any(isinstance(b, rp.Paragraph) and b.text.startswith("Atención: ") for b in s.blocks) \
+        or rp.recommendation_blockers(perf)
 
 
 def test_levels_no_sentinel_english_and_writers(niveles, tmp_path):

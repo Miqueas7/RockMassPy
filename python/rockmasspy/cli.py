@@ -610,26 +610,26 @@ def _fit_correlations(history, group_by, deming_ratio) -> list:
     return out
 
 
-def _gain(i, fmt: str = ".3f") -> str:
-    return f"{i.value:{fmt}} ({i.ci_low:{fmt}}; {i.ci_high:{fmt}})"
-
-
 def _decision_note(partition: str, c) -> str:
-    """Cómo pesa la partición en la decisión (ValidationReport.recommend): labor y zona por superioridad, la
-    temporal por no inferioridad (mejora puntual ≥ 0), la aleatoria no cuenta."""
+    """Cómo pesa la partición en la decisión (ValidationReport.recommend): labor y zona por superioridad (con sus
+    motivos genéricos: nombres de modelo y conteos), la temporal por no inferioridad, la aleatoria no cuenta."""
+    from .predictive.validation import is_noninferior
+
     if partition == "temporal":
-        return "non-inferiority " + ("met" if all(i.value >= 0 for i in c.improvements.values()) else "not met")
+        return "non-inferiority " + ("met" if is_noninferior(c) else "not met")
     if partition == "random":
         return "optimistic, does not count"
-    return f"blockers {len(c.blockers)}"
+    return f"blockers {len(c.blockers)}" + (f" ({'; '.join(c.blockers)})" if c.blockers else "")
 
 
 def _print_validation(level: str, metric: str, report, fmt: str) -> None:
-    """Una línea por partición: métricas, mejora con IC y cuántos motivos hay para no recomendar (sin etiquetas)."""
+    """Una línea por partición: métricas, mejora con IC y los motivos para no recomendar (sin etiquetas)."""
+    from .report import gain_text
+
     for p, c in report.results.items():
         refs = list(c.improvements)
         ms = ", ".join(f"{m} {c.metrics[m]:{fmt}}" for m in (c.main, *refs))
-        gains = ", ".join(f"over {r} {_gain(c.improvements[r], fmt)}" for r in refs)
+        gains = ", ".join(f"over {r} {gain_text(c.improvements[r], fmt)}" for r in refs)
         print(f"{level} {metric} {p}: {ms}; gain {gains}; {_decision_note(p, c)}")
     for p, why in report.skipped.items():
         print(f"{level} {metric} {p}: skipped ({why})")
@@ -662,9 +662,15 @@ def _print_practice(a) -> bool:
 
 
 def _print_performance(m) -> bool:
-    """Líneas del nivel 3; True si el modelo no quedó «site»."""
+    """Líneas del nivel 3; True si el modelo no quedó «site» o si recommend nunca elegiría con él."""
+    from .report import recommendation_blockers
+
     c = m.counts
-    print(f"performance: calibration {m.calibration} ({m.calibration_reason})")
+    rb = recommendation_blockers(m)
+    if m.calibration == "site" and rb:
+        print(f"performance: calibration site, but recommend will not choose: {'; '.join(rb)}")
+    else:
+        print(f"performance: calibration {m.calibration} ({m.calibration_reason})")
     print(f"performance: n {c['tramos']}, failures {c['failures']}, labors {c['labors']}, zones {c['zones']}, "
           f"parameters {c['parameters']}, quality {m.quality}")
     print("performance model: constant failure rate; P(failure in H days) = 1 - exp(-lambda*H)")
@@ -678,28 +684,7 @@ def _print_performance(m) -> bool:
     for w in m.warnings:
         if w not in shown:
             print(f"performance warning: {w}")
-    return m.calibration != "site"
-
-
-def _save_validation_summary(reports: dict, path) -> Path:
-    """Resumen de la validación: una fila por nivel × partición × modelo (o una por partición omitida). Sin ids."""
-    from .batch import write_table
-
-    rows = []
-    for level, r in reports.items():
-        for p, c in r.results.items():
-            blockers = "; ".join(c.blockers)
-            for m in (c.main, *c.improvements):
-                i = c.improvements.get(m)
-                rows.append((level, p, m, c.metrics[m], None if i is None else i.value,
-                             None if i is None else i.ci_low, None if i is None else i.ci_high, c.n_rows,
-                             c.n_groups, c.failed_folds.get(m, 0), blockers, None))
-        rows += [(level, p, None, None, None, None, None, None, None, None, None, why) for p, why in r.skipped.items()]
-    return write_table(path, _VALIDATION_COLUMNS, rows, sheet="Validacion")
-
-
-_VALIDATION_COLUMNS = ("nivel", "particion", "modelo", "metrica", "mejora_del_principal", "ic_inf", "ic_sup",
-                       "filas", "labores", "pliegues_fallidos", "motivos_no_recomienda", "omitida")
+    return m.calibration != "site" or bool(rb)
 
 
 def _history(a) -> int:
@@ -717,8 +702,19 @@ def _history(a) -> int:
         raise ValueError("--report: its folder does not exist")
     if a.output and Path(a.output).is_file():
         raise ValueError("--output must be a folder, not a file")
-    if not a.performance and (a.quality is not None or a.model_output):
-        raise ValueError(f"{'--quality' if a.quality is not None else '--model-output'} needs --performance")
+    level3_only = [f for f, v in (("--quality", a.quality), ("--model-output", a.model_output),
+                                  ("--threshold", a.threshold), ("--exposure-days", a.exposure_days)) if v is not None]
+    if not a.performance and level3_only:
+        raise ValueError(f"{level3_only[0]} needs --performance")
+    if a.performance:
+        from .predictive.performance import QUALITIES  # sin el extra [ml]: ImportError con su texto, antes de leer
+
+        if a.quality is not None and a.quality not in QUALITIES:
+            raise ValueError(f"--quality must be one of {', '.join(QUALITIES)}")
+    if a.threshold is not None and not 0 < a.threshold < 1:
+        raise ValueError("--threshold must be a probability strictly between 0 and 1")
+    if a.exposure_days is not None and not a.exposure_days > 0:
+        raise ValueError("--exposure-days must be greater than 0")
     if a.model_output and Path(a.model_output).suffix.lower() != ".json":
         raise ValueError("--model-output must end in .json")
     if a.model_output and not Path(a.model_output).resolve().parent.is_dir():
@@ -785,7 +781,9 @@ def _history(a) -> int:
             reports = {lv: x.validation for lv, x in (("2", practice), ("3", performance))
                        if x is not None and x.validation is not None}
             if reports:
-                paths.append(_save_validation_summary(reports, out / "validation_summary.csv"))
+                from .predictive.validation import save_validation_summary
+
+                paths.append(save_validation_summary(reports, out / "validation_summary.csv"))
             for p in paths:
                 print(f"results: {p.name}")
         if a.model_output:
@@ -794,7 +792,8 @@ def _history(a) -> int:
             print(f"model: {save_model(performance, a.model_output).name}")
         if a.report:
             rep = rp.build_history_report(audit, fits or (), history=history, practice=practice,
-                                          performance=performance, lang=a.lang)
+                                          performance=performance, threshold=a.threshold,
+                                          exposure_days=a.exposure_days, lang=a.lang)
             out = rp.write_docx(rep, a.report) if ext == ".docx" else rp.write_html(rep, a.report)
             print(f"report: {Path(out).name}")
     except OSError:
@@ -862,15 +861,18 @@ def _recommend(a) -> int:
     if a.practice_from:
         from .history import load_history
 
-        practice = _PositionedPractice(predictive.audit_practice(load_history(a.practice_from)))
+        h = load_history(a.practice_from)
+        # otros códigos de tipo: el conjunto conforme hablaría de tipos que el modelo no conoce (decisión: error)
+        if {s.codigo_tipo for s in h.support_types} != {code for code, _ in model.support_types}:
+            raise ValueError("--practice-from: its support type codes do not match the model's")
+        practice = _PositionedPractice(predictive.audit_practice(h))
     recs = predictive.recommend(model, tramos, threshold=a.threshold, exposure_days=a.exposure_days,
                                 practice=practice)
     print(f"model: calibration {model.calibration}, threshold {a.threshold:g}, exposure {a.exposure_days:g} days, "
           f"interval {recs[0].level:g}")
     print(f"tramos: {len(recs)}")
     for i, r in enumerate(recs, 1):  # la posición, nunca el id_tramo (va solo en el archivo)
-        why = r.reason if r.reason is None or isinstance(r.reason, str) else "; ".join(r.reason)
-        what = r.chosen if r.chosen else f"no recommendation: {why}"
+        what = r.chosen if r.chosen else f"no recommendation: {r.reason}"
         alerts = "; ".join(r.extrapolation_notes) or "none"
         cset = "" if r.conformal_set is None else f"; practice set {', '.join(r.conformal_set) or 'none'}"
         print(f"tramo {i}: {what}; alerts: {alerts}; calibration {r.calibration}{cset}")
@@ -1046,9 +1048,14 @@ def _parser() -> argparse.ArgumentParser:
                    "never recommends; needs the ml extra)")
     c.add_argument("--performance", action="store_true", help="level 3: fit and validate the P(failure) model "
                    "(needs the ml extra)")
-    c.add_argument("--quality", choices=QUALITY_CHOICES, help="rock quality of the level 3 model (default q; needs "
+    # las opciones salen de performance.QUALITIES al correr: el parser no importa numpy
+    c.add_argument("--quality", metavar="q|rmr", help="rock quality of the level 3 model (default q; needs "
                    "--performance)")
     c.add_argument("--model-output", metavar="MODELO.json", help="save the level 3 model (no rows, no ids)")
+    c.add_argument("--threshold", type=float, metavar="P", help="P(failure) threshold set by the engineer, quoted in "
+                   "the report (needs --performance; no default)")
+    c.add_argument("--exposure-days", type=float, metavar="D", help="horizon of the report's isoprobability "
+                   "charts (needs --performance; default: the history's median exposure)")
     c.add_argument("-o", "--output", metavar="DIR", help="folder for history_findings.csv, site_correlations.csv, "
                    "site_correlations.json, practice_results.csv and validation_summary.csv")
     c.add_argument("--report", metavar="OUT.docx|.html")
@@ -1067,9 +1074,6 @@ def _parser() -> argparse.ArgumentParser:
                    "the id_tramo and the empty columns decision_ingeniero and motivo")
     c.set_defaults(fn=_recommend)
     return p
-
-
-QUALITY_CHOICES = ("q", "rmr")  # los de predictive.performance.QUALITIES; aquí sin numpy
 
 
 def _criteria_inputs(c) -> None:

@@ -106,6 +106,17 @@ def test_practice_from_adds_the_conformal_set(casos, capsys):
     assert all("; practice set " in x for x in _tramo_lines(cap.out))
 
 
+def test_practice_from_with_other_type_codes_exit_1(casos, capsys, tmp_path):
+    """Un histórico con otros códigos de tipo que el modelo: error (decisión), código 1 y sin valores ni ruta."""
+    h = rm.load_history(casos / "historico.xlsx")
+    otro = tmp_path / f"{SENT}-otro.xlsx"
+    rm.save_history_xlsx(rm.History(h.tramos, h.support_types[:-1], h.inspections), otro)
+    code, cap = run(capsys, casos / "nuevos.xlsx", "--model", casos / "site.json", "--threshold", 0.5,
+                    "--exposure-days", 365, "--practice-from", otro)
+    assert code == 1 and cap.out == ""
+    assert cap.err == "error: --practice-from: its support type codes do not match the model's\n"
+
+
 @pytest.mark.parametrize("falta, args", [
     ("--threshold", ["--model", "M", "--exposure-days", "365"]),
     ("--exposure-days", ["--model", "M", "--threshold", "0.3"]),

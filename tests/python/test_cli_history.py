@@ -8,6 +8,7 @@ import sys
 import pytest
 
 import rockmasspy as rm
+import rockmasspy.report as rp
 from rockmasspy.cli import main
 from rockmasspy.table_io import correlation_from_dict
 
@@ -284,14 +285,17 @@ def niveles_rapidos(monkeypatch):
 def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_rapidos):
     out_dir, modelo, informe = tmp_path / f"{SENT}-res", tmp_path / "modelo.json", tmp_path / "informe.html"
     code = main(["history", str(grande), "--practice", "--performance", "-o", str(out_dir),
-                 "--model-output", str(modelo), "--report", str(informe), "--lang", "en"])
+                 "--model-output", str(modelo), "--report", str(informe), "--lang", "en",
+                 "--threshold", "0.3", "--exposure-days", "200"])
     out = sin_centinela(capsys).out
     assert niveles_rapidos == ["audit_practice", "fit_performance"]
-    assert code == 0, out
+    rb = rp.recommendation_blockers(pred.load_model(modelo))
+    assert code == (2 if rb else 0), out  # «site» pero recommend no elegiría: hay que revisar
     assert "practice ln_q: coherent (beta " in out and "practice ln_de: coherent (beta " in out
-    assert "practice kappa labor: practice " in out and "over ngi " in out
+    assert "practice kappa labor: practice " in out and "over ngi " in out and "blockers 0" in out
     assert "practice outside the conformal set: " in out and "practice concordance: n " in out
-    assert "performance: calibration site (" in out
+    assert ("performance: calibration site, but recommend will not choose: " if rb
+            else "performance: calibration site (") in out
     assert "performance model: constant failure rate; P(failure in H days) = 1 - exp(-lambda*H)" in out
     assert "performance poisson_deviance labor: site " in out and "over baseline_ngi " in out
     assert "performance poisson_deviance temporal: " in out and "non-inferiority" in out
@@ -310,6 +314,30 @@ def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_
     html = informe.read_text(encoding="utf-8")
     assert SENT not in html and "historico.xlsx" not in html
     assert "Level 2" in html and "Level 3" in html and "TRIPOD+AI" in html
+    assert "set by the engineer: P(failure) ≤ 0.3" in html and "at 200 days of exposure" in html
+
+
+class _ConBloqueos:
+    """El modelo real con un motivo global para que recommend no elija (el campo puede no existir todavía)."""
+    recommendation_blockers = ("support effect not significant",)
+
+    def __init__(self, m):
+        self._m = m
+
+    def __getattr__(self, name):
+        return getattr(self._m, name)
+
+
+def test_site_with_recommendation_blockers_exit_2(grande, tmp_path, capsys, monkeypatch):
+    orig = pred.fit_performance
+    monkeypatch.setattr(pred, "fit_performance", lambda *a, **k: _ConBloqueos(orig(*a, **{**k, "n_boot": N_BOOT})))
+    informe = tmp_path / "informe.html"
+    code = main(["history", str(grande), "--performance", "--report", str(informe), "--lang", "en"])
+    out = sin_centinela(capsys).out
+    assert code == 2
+    assert "performance: calibration site, but recommend will not choose: support effect not significant" in out
+    html = informe.read_text(encoding="utf-8")
+    assert "recommend will not choose any type with this model" in html and "support effect not significant" in html
 
 
 def test_small_history_levels_exit_2(hist, capsys, niveles_rapidos):
@@ -331,12 +359,17 @@ def test_level_options_checked_before_reading(hist, tmp_path, capsys, monkeypatc
     assert main(["history", src, "--model-output", "m.json"]) == 1
     assert main(["history", src, "--performance", "--model-output", str(tmp_path / f"{SENT}.txt")]) == 1
     assert main(["history", src, "--performance", "--model-output", str(tmp_path / SENT / "m.json")]) == 1
-    with pytest.raises(SystemExit) as e:  # argparse sale con 1 (_Parser)
-        main(["history", src, "--performance", "--quality", "gsi"])
-    assert e.value.code == 1
+    assert main(["history", src, "--performance", "--quality", "gsi"]) == 1
+    assert main(["history", src, "--threshold", "0.3"]) == 1
+    assert main(["history", src, "--exposure-days", "100"]) == 1
+    assert main(["history", src, "--performance", "--threshold", "1"]) == 1
+    assert main(["history", src, "--performance", "--exposure-days", "0"]) == 1
     cap = sin_centinela(capsys)
     assert cap.out == ""
-    errs = [x for x in cap.err.splitlines() if x.startswith("error: ")]
-    assert errs[:4] == ["error: --quality needs --performance", "error: --model-output needs --performance",
-                        "error: --model-output must end in .json", "error: --model-output: its folder does not exist"]
-    assert errs[4].startswith("error: argument --quality: invalid choice: 'gsi'")
+    assert cap.err.splitlines() == [
+        "error: --quality needs --performance", "error: --model-output needs --performance",
+        "error: --model-output must end in .json", "error: --model-output: its folder does not exist",
+        "error: --quality must be one of q, rmr", "error: --threshold needs --performance",
+        "error: --exposure-days needs --performance",
+        "error: --threshold must be a probability strictly between 0 and 1",
+        "error: --exposure-days must be greater than 0"]

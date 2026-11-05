@@ -459,3 +459,37 @@ def validate(y, models: Mapping[str, Callable[[np.ndarray, np.ndarray], object]]
         except ValueError as e:  # p. ej. la métrica sin definir en ese test; su texto no se copia (R13)
             skipped[name] = f"comparison failed ({type(e).__name__})"
     return ValidationReport(results=results, skipped=skipped)
+
+
+# ---------- resumen de la validación (CLI `rockmass history --output`) ----------
+
+def is_noninferior(c: Comparison) -> bool:
+    """Mejora puntual ≥ 0 contra todas las referencias (la regla de la partición temporal)."""
+    # shortcut: lee Comparison.noninferior cuando exista; mientras, la misma regla. Borrar al fusionar la propiedad
+    v = getattr(c, "noninferior", None)
+    return all(i.value >= 0 for i in c.improvements.values()) if v is None else bool(v)
+
+
+VALIDATION_SUMMARY_COLUMNS = ("nivel", "particion", "modelo", "metrica", "mejora_del_principal", "ic_inf", "ic_sup",
+                              "filas", "labores", "pliegues_fallidos", "motivos_no_recomienda", "omitida")
+
+
+def save_validation_summary(report_or_reports, path):
+    """Escribe .csv o .xlsx (hoja `Validacion`): una fila por partición × modelo y una por partición omitida.
+
+    `report_or_reports`: un `ValidationReport` o {nivel: ValidationReport}. Solo nombres de modelo, métricas,
+    conteos y motivos genéricos: nunca filas, ids ni etiquetas de labor o zona."""
+    from ..batch import write_table
+
+    reports = report_or_reports if isinstance(report_or_reports, Mapping) else {"": report_or_reports}
+    rows = []
+    for level, r in reports.items():
+        for p, c in r.results.items():
+            blockers = "; ".join(c.blockers)
+            for m in (c.main, *c.improvements):
+                i = c.improvements.get(m)
+                rows.append((level, p, m, c.metrics[m], None if i is None else i.value,
+                             None if i is None else i.ci_low, None if i is None else i.ci_high, c.n_rows,
+                             c.n_groups, c.failed_folds.get(m, 0), blockers, None))
+        rows += [(level, p, *[None] * 9, why) for p, why in r.skipped.items()]
+    return write_table(path, VALIDATION_SUMMARY_COLUMNS, rows, sheet="Validacion")

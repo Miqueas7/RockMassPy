@@ -46,8 +46,8 @@ from .. import __version__
 from ..batch import write_table
 from ..history import MIN_TRAMOS_PER_TYPE_LEVEL2, History, _readiness, level3_rows
 from .stats import ExponentialHazardFit, exponential_hazard_map_fit
-from .validation import (Comparison, Improvement, ValidationReport, group_kfold, ngi_category, out_of_fold,
-                         tramo_groups, validate)
+from .validation import (Comparison, Improvement, ValidationReport, group_kfold, is_noninferior, ngi_category,
+                         out_of_fold, tramo_groups, validate)
 
 SCHEMA_VERSION = 2
 CALIBRATION_LEVELS = ("site", "partial", "not_calibrated")
@@ -196,7 +196,7 @@ def _validation_reason(report: ValidationReport) -> str:
         else:
             parts.append(f"{name}: {report.skipped.get(name, 'not run')}")
     temporal = report.results.get("temporal")
-    if temporal is not None:  # no inferioridad (ValidationReport.recommend)
+    if temporal is not None and not is_noninferior(temporal):  # no inferioridad (ValidationReport.recommend)
         parts += [f"temporal: {temporal.main} worse than {r} in the last year"
                   for r, i in temporal.improvements.items() if i.value < 0]
     return "; ".join(parts)
