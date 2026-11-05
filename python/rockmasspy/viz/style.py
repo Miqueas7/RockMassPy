@@ -82,6 +82,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "range_axis": {"es": "Valor", "en": "Value"},
     "correlation_title": {"es": "Correlaciones entre sistemas", "en": "Correlations between systems"},
     "scatter_points": {"es": "Datos del sitio", "en": "Site data"},
+    "prediction_band": {"es": "Intervalo de predicción 95 %", "en": "95 % prediction interval"},
     "global_scatter_note": {
         "es": "las correlaciones globales tienen mucha dispersión; calibra una correlación propia del sitio",
         "en": "global correlations have high scatter; calibrate a site correlation",

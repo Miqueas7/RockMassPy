@@ -35,6 +35,13 @@ def rating_to_dict(r: RatingTable) -> dict:
             "adjustments": dict(r.adjustments)}
 
 
+def correlation_to_dict(c) -> dict:
+    """Una `CustomCorrelation` en el formato de `correlations` de las tablas por labor (inversa de
+    `correlation_from_dict`)."""
+    return {"name": c.name, "from": c.from_, "to": c.to, "form": c.form.name, "a": c.a, "b": c.b,
+            "valid_min": c.valid_min, "valid_max": c.valid_max, "source": c.source}
+
+
 def to_dict(t: LaborTable) -> dict:
     def sup(s: SupportType) -> dict:
         return {
@@ -58,9 +65,7 @@ def to_dict(t: LaborTable) -> dict:
         "author": t.author, "date": t.date, "notes": t.notes,
         "support_types": [sup(s) for s in t.catalog],
         "table": table,
-        "correlations": [{"name": c.name, "from": c.from_, "to": c.to, "form": c.form.name, "a": c.a, "b": c.b,
-                          "valid_min": c.valid_min, "valid_max": c.valid_max, "source": c.source}
-                         for c in t.correlations],
+        "correlations": [correlation_to_dict(c) for c in t.correlations],
         "rating": None if t.rating is None else rating_to_dict(t.rating),
     }
 

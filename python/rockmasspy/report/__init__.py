@@ -1026,5 +1026,179 @@ def build_verification_report(verification: "VerificationResult", *, title: str,
                   __version__, date or datetime.date.today().isoformat())
 
 
+# --- histórico de la mina (Fase 4A: datos, auditoría de ingesta, preparación por nivel y nivel 1) ---
+
+_FORMS = {"rmr_from_q": "RMR = a·ln Q + b", "gsi_from_rmr": "GSI = a·RMR + b", "gsi_from_q_prime": "GSI = a·ln Q′ + b"}
+
+
+def site_fits(result) -> tuple:
+    """La mina y luego cada dominio, en el orden D1, D2…"""
+    return (result.mine, *result.domains.values())
+
+
+def _years(dates) -> str:
+    ys = sorted({d[:4] for d in dates if d})
+    return f"{ys[0]}–{ys[-1]} ({len(ys)})" if ys else "-"
+
+
+def _ci(v, ci) -> str:
+    return f"{v:.4g}" + ("" if ci is None else f" ({ci[0]:.4g}; {ci[1]:.4g})")
+
+
+def _prior_info(method_id: str):
+    """(Correlation del núcleo, info) del prior; (None, None) si el núcleo no lo tiene."""
+    c = getattr(rm.Correlation, method_id, None)
+    if c is None:
+        return None, None
+    return c, rm.correlate(c, 1.0 if "FromQ" in c.name else 50.0)
+
+
+def history_correlation_figure(result, history, lang: str):
+    """Pares del sitio, la recta de la mina, su intervalo de predicción y la global (si va en los mismos ejes)."""
+    from ..history import level1_rows
+    from ..viz import plot_correlation
+    from ..viz.style import Style
+
+    f = result.mine
+    # los mismos pares del ajuste: la edición de RMR del ajuste (x o y, según el par)
+    ed = next((e for e in (f.x_from, f.y_to) if e.startswith("RMR")), None)
+    sel = level1_rows(history, result.kind, rmr_edition=ed)
+    c, r = _prior_info(result.prior_correlation)
+    # la global del GSI va en RMR′ (sin agua ni orientación): en otros ejes que el RMR registrado, no se dibuja
+    glob = [c] if c is not None and (r.from_, r.to) == (f.x_from, f.y_to) else []
+    site = [s for s in (f.to_custom_correlation(),) if s is not None]  # None: un solo valor de x
+    return plot_correlation(list(zip(sel.x, sel.y)), x=f.x_from, y=f.y_to, global_correlations=glob,
+                            site=site, bands=[f], style=Style(lang=lang))
+
+
+def _hist_data(audit, history, lang) -> Section:
+    perf = next((r for r in audit.readiness if r.level == 3), None)
+    w = perf.counts.get("tramos_with_inspections") if perf else None
+    rows = [(t("hd_tramos", lang), str(audit.tramos)), (t("hd_types", lang), str(audit.support_types)),
+            (t("hd_inspections", lang), str(audit.inspections)),
+            (t("hd_with_insp", lang), "-" if w is None else str(w)),
+            (t("hd_without_insp", lang), "-" if w is None else str(audit.tramos - w))]
+    if history is not None:
+        rows += [(t("hd_years_eval", lang), _years(x.fecha_evaluacion for x in history.tramos)),
+                 (t("hd_years_insp", lang), _years(i.fecha_inspeccion for i in history.inspections))]
+    return Section("1", t("hs_1", lang), (Paragraph(t("hist_scope", lang)),
+                                         Table(t("cap_hist_data", lang), (t("h_item", lang), t("h_value", lang)),
+                                               tuple(rows))))
+
+
+def _hist_audit(audit, lang) -> Section:
+    from ..history import FINDING_KINDS, history_audit_counts
+
+    c = history_audit_counts(audit)
+    blocks = [Paragraph(t("hist_audit_text", lang)),
+              Table(t("cap_hist_kinds", lang), (t("h_kind", lang), t("h_findings", lang)),
+                    tuple((k, str(c[k])) for k in FINDING_KINDS))]
+    if audit.findings:  # el id_tramo y la fila van en celdas de tabla; el mensaje nunca los repite
+        blocks.append(Table(t("cap_hist_findings", lang), (t("h_kind", lang), t("h_sheet", lang), t("h_row", lang),
+                                                           "id_tramo", t("h_message", lang)),
+                            tuple((f.kind, f.sheet, _str(f.fila), f.id_tramo or "-", f.message)
+                                  for f in audit.findings)))
+    else:
+        blocks.append(Paragraph(t("hist_no_findings", lang)))
+    return Section("2", t("hs_2", lang), tuple(blocks))
+
+
+def _hist_readiness(audit, lang) -> Section:
+    def kv(d):
+        return "; ".join(f"{k} {v}" for k, v in d.items())
+
+    rows = tuple((str(r.level), r.item, kv({k: r.counts.get(k, 0) for k in r.minimums}), kv(r.minimums),
+                  kv(r.missing), t("ready_yes" if r.ready else "ready_no", lang)) for r in audit.readiness)
+    return Section("3", t("hs_3", lang), (
+        Paragraph(t("hist_readiness_text", lang)),
+        Table(t("cap_hist_readiness", lang), (t("h_level", lang), t("h_item", lang), t("h_available", lang),
+                                              t("h_minimum_dd", lang), t("h_lacking", lang), t("h_ready", lang)),
+              rows)))
+
+
+def _hist_kind(k, result, history, lang, figures) -> Section:
+    if isinstance(result, tuple):  # (tipo, razón): el par no se pudo ajustar
+        kind, reason = result
+        return Section(f"4.{k}", _FORMS.get(kind, kind), (Paragraph(t("hist_not_fitted", lang).format(
+            reason=reason.rstrip("."))),))
+    form = _FORMS[result.kind]
+    mark = result.prior_verification
+    blocks = [Paragraph(t("hist_prior", lang).format(
+        method=result.prior_correlation, mark=mark, a=result.prior_mean[0], b=result.prior_mean[1],
+        sd_a=result.prior_sd[0], sd_b=result.prior_sd[1], sigma=result.prior_sigma))]
+    fits = site_fits(result)
+    blocks.append(Table(t("cap_hist_fits", lang).format(form=form),
+                        (t("h_fit", lang), "n", t("h_labors", lang), t("h_status", lang), t("h_method", lang),
+                         t("h_a_ci", lang), t("h_b_ci", lang)),
+                        tuple((t("fit_mine", lang) if f.label == "mine" else f.label, str(f.n), str(f.n_labors),
+                               t(f"fit_{f.status}", lang), t(f"method_{f.method.lower()}", lang),
+                               _ci(f.a, f.a_ci if f.method == "OLS" else None),
+                               _ci(f.b, f.b_ci if f.method == "OLS" else None)) for f in fits)))
+    m = result.mine
+    blocks.append(Paragraph(t("hist_deming", lang).format(a=m.deming.a, b=m.deming.b) if m.deming is not None
+                            else t("hist_no_deming", lang).format(reason=(m.deming_reason or "-").rstrip("."))))
+    warns = Counter(result.warnings * len(fits)) + Counter(w for f in fits for w in set(f.warnings))
+    if warns:
+        blocks.append(_count_table("cap_hist_warnings", "h_fits", warns, lang))
+    if history is not None:
+        blocks.append(_fig(t("fig_hist_corr", lang).format(form=form),
+                           lambda: history_correlation_figure(result, history, lang), lang, figures))
+    return Section(f"4.{k}", form, tuple(blocks))
+
+
+def _hist_methods(results, lang) -> tuple[Table, tuple[MethodRef, ...]]:
+    dd = t("hm_dd", lang)
+    fitted = [r for r in results if not isinstance(r, tuple)]
+    n_boot = sorted({f.bootstrap.n_boot for r in fitted for f in site_fits(r) if f.bootstrap is not None})
+    stats = (MethodRef(t("hm_ols", lang), "V2", "Warton et al. (2006)"),
+             MethodRef(t("hm_boot", lang).format(n_boot="/".join(map(str, n_boot)) or "-"), "V2",
+                       "Efron y Tibshirani (1994); Roberts et al. (2017)"
+                       if lang == "es" else "Efron and Tibshirani (1994); Roberts et al. (2017)"),
+             MethodRef(t("hm_deming", lang), "V2", "Carroll et al. (2006)"),
+             MethodRef(t("hm_bayes", lang), "V2", f"Ching et al. (2020); {t('hm_prior_strength', lang)}: {dd}"))
+    priors = {}
+    for r in fitted:
+        _, info = _prior_info(r.prior_correlation)
+        priors.setdefault(r.prior_correlation, MethodRef(
+            r.prior_correlation, info.info.verification.name if info else r.prior_verification,
+            info.info.source if info else "-"))
+    # la marca [V2] es de la investigación (MODELOS_SOSTENIMIENTO.md); Primary/Secondary es la del núcleo (R14)
+    rows = (*((m.method_id, t("hm_role_stat", lang), f"[{m.verification}]", "-", m.source) for m in stats),
+            *((m.method_id, t("hm_role_prior", lang), "-", m.verification, m.source) for m in priors.values()))
+    return (Table(t("cap_hist_methods", lang), (t("h_method", lang), t("h_role", lang), t("h_research_mark", lang),
+                                                t("h_core_verification", lang), t("h_source", lang)), rows),
+            (*stats, *priors.values()))
+
+
+def build_history_report(audit, correlations=(), *, history=None, title: str | None = None, lang: str = "es",
+                         author: str = "", date: str = "", figures: bool = True) -> Report:
+    """Informe del histórico (Fase 4A): datos, auditoría de ingesta, preparación por nivel, nivel 1 y limitaciones.
+
+    - `audit`: el `HistoryAudit` de `audit_history`.
+    - `correlations`: los `SiteCorrelationResult` de `fit_site_correlation`; un par que no se pudo ajustar va como
+      la tupla (tipo, razón). Vacío: la sección del nivel 1 dice que no se pidieron.
+    - `history`: el `History` leído; da los años cubiertos y los puntos de las figuras (sin él no van).
+    Nunca lleva el nombre del archivo, la labor, la zona ni la litología: los dominios van como D1, D2…; el
+    `id_tramo` y la fila solo en la tabla de hallazgos.
+    """
+    _check_lang(lang)
+    correlations = list(correlations)
+    if correlations:
+        methods_table, methods = _hist_methods(correlations, lang)
+        s4 = (Paragraph(t("hist_l1_text", lang)), methods_table,
+              *(_hist_kind(k, r, history, lang, figures) for k, r in enumerate(correlations, 1)))
+    else:
+        s4, methods = (Paragraph(t("hist_l1_none", lang)),), ()
+    sections = (
+        _hist_data(audit, history, lang),
+        _hist_audit(audit, lang),
+        _hist_readiness(audit, lang),
+        Section("4", t("hs_4", lang), s4),
+        Section("5", t("hs_5", lang), (Paragraph(t("hist_limits", lang)), Paragraph(DISCLAIMER[lang]))),
+    )
+    return Report(title or t("hist_title", lang), _subtitle(t("hist_subtitle", lang), author, lang), lang, sections,
+                  methods, DISCLAIMER[lang], __version__, date or datetime.date.today().isoformat())
+
+
 from .docx import write_docx  # noqa: E402,F401
 from .html import write_html  # noqa: E402,F401
