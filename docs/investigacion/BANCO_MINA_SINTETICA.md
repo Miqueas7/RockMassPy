@@ -1,0 +1,271 @@
+# Banco de pruebas del módulo predictivo con la mina sintética
+
+Fase 5, tarea 5 (plan M8). Este documento mide la auditoría y los niveles 1, 2 y 3 del módulo predictivo, con
+`recommend`, contra la verdad de `synthetic_mine` (`python/rockmasspy/predictive/mine.py`). **Todas las cifras son
+de minas sintéticas con mecanismo conocido; ninguna sale de una mina real.** La mina sintética es un banco de
+pruebas: no entrena ningún modelo que se entregue ni da coeficientes por defecto.
+
+- Script: [`scripts/banco_mina_sintetica.py`](scripts/banco_mina_sintetica.py).
+- Resultados:
+  - [`banco_mina_sintetica.csv`](banco_mina_sintetica.csv): la corrida principal, con los mínimos vigentes de la
+    librería. Una fila por escenario × semilla × defectos × umbral × horizonte (2124 filas, 100 columnas).
+  - [`banco_mina_sintetica_sin_minimo_l3.csv`](banco_mina_sintetica_sin_minimo_l3.csv): sensibilidad del §6, con el
+    mínimo de eventos por parámetro del nivel 3 bajado a 1 dentro del proceso (la librería no cambia).
+- Versión: rama `fase-5` en **fa0a8f5** (la verdad ya corregida: cada tipo contrafactual usa sus propias horas sin
+  sostener). Una vista previa anterior, con la verdad vieja, se descartó.
+- Comandos, desde la raíz del repo:
+  - `.venv\Scripts\python.exe -I docs/investigacion/scripts/banco_mina_sintetica.py --reps 50 --reps-large 20 --n-boot 500`
+  - `... --reps 50 --n-boot 500 --min-events-l3 1 --no-defects --scenarios ngi_site,small_mine,base,worse_site,better_site,conservative_practice --out docs/investigacion/banco_mina_sintetica_sin_minimo_l3.csv`
+- **Tiempo:** la corrida principal tomó **240 s de reloj** con 28 procesos en la PC (≈ 6300 s de CPU: de 207 s en
+  `small_mine` a 1012 s en `large_mine`; un trabajo de `large_mine` toma ≈ 50 s y uno de 600 tramos, 8–15 s). La
+  sensibilidad tomó 121 s. Con este costo no hizo falta recortar `large_mine` a 5 semillas: quedó en 20.
+
+## 1. Cómo se corrió
+
+- **Escenarios:** los 11 de `SCENARIOS`. 50 semillas por escenario (20 en `large_mine`), con semillas fijas
+  derivadas de `--seed 20261105`. Además, una corrida con `defects=True` por escenario, con la semilla de la réplica
+  0: el History es el mismo que el limpio salvo los defectos. Las tablas de los §3 a §6 son de las corridas limpias.
+- **Auditoría:** `audit_history` sobre la corrida con defectos. Un defecto inyectado cuenta como detectado si hay un
+  hallazgo del mismo tipo en el mismo `id_tramo`. La celda vacía no tiene hallazgo propio: cuenta cualquier hallazgo
+  en su tramo. Falso hallazgo: uno que no corresponde a ningún defecto inyectado.
+- **Nivel 1:** `fit_site_correlation` con `group_by="litologia"`, para `rmr_from_q` y `gsi_from_rmr`, en toda la mina
+  y por litología. La recta verdadera es la OLS sobre los valores **verdaderos** de los mismos tramos (para toda la
+  mina coincide con `MineTruth.rmr_lnq_slope`; el script lo verifica). Métricas: estado, si el IC 95 % bootstrap de
+  la pendiente cubre la pendiente verdadera, sesgo de la pendiente y cobertura del intervalo de predicción al 95 %
+  (fracción de tramos con el valor verdadero dentro del intervalo, dado el x registrado).
+- **Nivel 2:** `audit_practice`. Estado, convergencia, veredictos de ln Q y ln De, si sale algún «practice
+  incoherent», si la práctica es más predecible que la carta (`beyond_chart`), kappa de la concordancia y tamaño
+  medio del conjunto conforme. Los tramos «fuera del conjunto» se comparan con los desvíos verdaderos de la práctica
+  (`practice_deviation ≠ 0`): precisión y sensibilidad.
+- **Nivel 3 y recomendación:**
+  - `fit_performance` con la mina de la semilla; `recommend` se aplica a **una segunda mina del mismo escenario**
+    (otra semilla). Las labores y las zonas son nuevas para el ajuste: es más exigente que una labor nueva en una
+    zona conocida.
+  - Umbrales de P aceptable 0.05 y 0.10; horizontes 365 y 1095 días (3 años caben en la exposición de entrenamiento
+    de todas las minas, que van de 4 a 10 años).
+  - **Demasiado liviano:** el tipo elegido tiene la P verdadera (`truth.p_fail`, marginal sobre la fragilidad de
+    una labor nueva y condicional al efecto de su zona) sobre el umbral.
+  - **Óptimo de verdad:** el tipo más liviano con P verdadera ≤ umbral. Si ningún tipo cumple, el tramo no tiene
+    óptimo («sin óptimo»). **Sobrecosto:** Σ costo elegido / Σ costo óptimo − 1, con `relative_cost` de
+    `SUPPORT_TYPES` (I 1.0, II 1.6, III 2.4, IV 3.5, V 6.0), sobre los tramos con óptimo. Es neto: un tipo demasiado
+    liviano baja el costo.
+  - **Referencias:** la carta Q con el Q registrado (`read_q_chart` con De = luz/ESR, la misma lectura que usa el
+    generador) y lo que instaló la mina. Se miden en todos los tramos y, la carta, también en los mismos tramos donde
+    el modelo eligió.
+- `n_boot` = 500 en todos los bootstraps. Los mínimos de la librería no se tocan en la corrida principal.
+
+## 2. Auditoría de ingesta
+
+Corrida con defectos, una por escenario (11 minas, 10201 tramos):
+
+| Defecto | Detectados / inyectados |
+|---|---|
+| Q que no cuadra con sus componentes | 183/184 (99.5 %) |
+| Progresivas que se solapan | 184/184 |
+| Inspección antes de la instalación | 216/216 |
+| Tipo de sostenimiento que no existe | 120/120 |
+| Celda vacía | 20/281 (7 %) |
+| Falsos hallazgos | 0 (y 0 en las 520 corridas limpias) |
+
+- El Q que se escapó es de un tramo con Q muy bajo: `Q_ABS_TOL` = 0.005 es mayor que |Q − Q/3| cuando Q < 0.0075.
+- **La celda vacía no se informa.** `audit_history` no tiene un hallazgo de dato faltante: los 20 detectados son
+  celdas que dejaron un recálculo imposible y salen por otra vía. La fila simplemente sale de los niveles que la
+  necesitan; solo se ve en los conteos de preparación.
+- Los defectos no se excluyen de los ajustes (la auditoría avisa, no bloquea): con los Q multiplicados por 3 o por
+  1/3, la pendiente RMR–ln Q del nivel 1 se movió de 0 a −0.12 puntos. Los estados de los tres niveles no cambiaron en
+  ninguna de las 11 gemelas.
+
+## 3. Resumen por escenario
+
+Corridas limpias. Mediana [mínimo–máximo] entre semillas; los conteos son de semillas.
+
+| Escenario | Semillas | Tramos | Fallas (filas del nivel 3) | Nivel 1 RMR–ln Q: «site» / IC cubre | Nivel 2: converge / «incoherent» / supera la carta | Nivel 3: site / partial / not_calibrated |
+|---|---:|---|---|---|---|---|
+| `base` | 50 | 587 [549–656] | 51 [24–88] | 50/50 / 50/50 | 50/50 / 0/50 / 49/50 | 5 / 11 / 34 |
+| `ngi_site` | 50 | 604 [553–672] | 51 [34–79] | 50/50 / 49/50 | 50/50 / 0/50 / 0/50 | 0 / 12 / 38 |
+| `worse_site` | 50 | 604 [553–651] | 134 [80–197] | 50/50 / 49/50 | 50/50 / 0/50 / 44/50 | 7 / 43 / 0 |
+| `better_site` | 50 | 592 [545–666] | 11 [5–26] | 50/50 / 50/50 | 50/50 / 2/50 / 45/50 | 0 / 0 / 50 |
+| `shifted_correlation` | 50 | 609 [555–638] | 63 [30–127] | 50/50 / 49/50 | 50/50 / 2/50 / 50/50 | 14 / 17 / 19 |
+| `conservative_practice` | 50 | 600 [558–646] | 12 [4–22] | 50/50 / 50/50 | 48/50 / 0/50 / 48/50 | 0 / 0 / 50 |
+| `incoherent_practice` | 50 | 594 [546–637] | 63 [40–105] | 50/50 / 50/50 | 50/50 / 0/50 / 45/50 | 19 / 12 / 19 |
+| `mine_practice` | 50 | 600 [539–672] | 55 [27–108] | 50/50 / 50/50 | 50/50 / 1/50 / 47/50 | 7 / 14 / 29 |
+| `noisy_mapping` | 50 | 604 [538–656] | 56 [31–87] | 50/50 / 50/50 | 50/50 / 0/50 / 50/50 | 3 / 13 / 34 |
+| `small_mine` | 50 | 80 [67–100] | 5 [0–13] | 35/50 / 50/50 | 50/50 / 0/50 / 14/50 | 0 / 0 / 50 |
+| `large_mine` | 20 | 4807 [4686–4912] | 508 [371–662] | 20/20 / 20/20 | 14/20 / 0/20 / 20/20 | 19 / 1 / 0 |
+
+### Recomendación, H = 365 días
+
+«Elige» es sobre todos los tramos de la mina de prueba; «demasiado liviano» y «la carta en los mismos tramos», sobre
+los elegidos (conteos sumados entre semillas). El sobrecosto va en mediana [rango] entre las semillas que eligieron.
+
+| Escenario | Umbral | Elige | Demasiado liviano (modelo) | Sobrecosto del modelo frente al óptimo | Carta en los mismos tramos: liviana | Carta en todos: liviana / sobrecosto | Instalado: liviano / sobrecosto | Sin óptimo |
+|---|---:|---|---|---|---|---|---|---|
+| `base` | 0.05 | 2.2 % | 2.6 % (17/665) | +164 % [102–196] | 32.2 % | 53.9 % / −28 % | 39.6 % / +7 % | 18.9 % |
+| `base` | 0.10 | 3.5 % | 2.4 % (25/1049) | +126 % [70–475] | 19.5 % | 29.7 % / −9 % | 21.9 % / +28 % | 5.2 % |
+| `ngi_site` | 0.05 | 0 | sin elecciones | | | 11.3 % / +2 % | igual a la carta | 0 |
+| `ngi_site` | 0.10 | 0 | sin elecciones | | | 0.8 % / +43 % | igual a la carta | 0 |
+| `worse_site` | 0.05 | 0.5 % | **6.9 %** (11/159) | +155 % [71–189] | 73.6 % | 86.2 % / −30 % | 73.8 % / +10 % | 66.7 % |
+| `worse_site` | 0.10 | 2.5 % | **23.4 %** (175/747) | +119 % [37–172] | 55.7 % | 72.1 % / −15 % | 60.3 % / +24 % | 53.1 % |
+| `better_site` | 0.05 | 0 | sin elecciones | | | 6.4 % / +5 % | 9.7 % / +20 % | 0.3 % |
+| `better_site` | 0.10 | 0 | sin elecciones | | | 1.5 % / +13 % | 2.6 % / +30 % | 0.1 % |
+| `shifted_correlation` | 0.05 | 8.3 % | 2.1 % (53/2477) | +128 % [66–250] | 18.4 % | 47.8 % / −23 % | 46.9 % / −13 % | 18.3 % |
+| `shifted_correlation` | 0.10 | 12.5 % | 3.4 % (126/3741) | +79 % [25–175] | 11.0 % | 24.3 % / 0 % | 29.3 % / +4 % | 5.1 % |
+| `conservative_practice` | 0.05 | 0 | sin elecciones | | | 24.4 % / +2 % | 9.5 % / +92 % | 4.7 % |
+| `conservative_practice` | 0.10 | 0 | sin elecciones | | | 10.2 % / +24 % | 4.0 % / +133 % | 2.1 % |
+| `incoherent_practice` | 0.05 | 12.0 % | 2.2 % (80/3630) | +180 % [80–500] | 25.5 % | 52.7 % / −27 % | 42.3 % / +8 % | 17.7 % |
+| `incoherent_practice` | 0.10 | 18.3 % | 1.1 % (59/5569) | +145 % [64–358] | 15.2 % | 28.0 % / −5 % | 24.4 % / +30 % | 5.3 % |
+| `mine_practice` | 0.05 | 2.2 % | 3.1 % (20/650) | +107 % [89–113] | 25.5 % | 56.3 % / −29 % | 43.4 % / 0 % | 19.7 % |
+| `mine_practice` | 0.10 | 2.9 % | 3.7 % (32/876) | +66 % [50–107] | 16.4 % | 31.8 % / −8 % | 24.8 % / +19 % | 6.2 % |
+| `noisy_mapping` | 0.05 | 2.8 % | 2.3 % (19/832) | +151 % [114–306] | 20.7 % | 52.8 % / −26 % | 40.0 % / +12 % | 18.7 % |
+| `noisy_mapping` | 0.10 | 3.8 % | 1.3 % (15/1150) | +102 % [73–187] | 14.8 % | 29.6 % / −6 % | 22.7 % / +36 % | 6.0 % |
+| `small_mine` | 0.05 | 0 | sin elecciones | | | 57.5 % / −33 % | 43.7 % / +4 % | 21.3 % |
+| `small_mine` | 0.10 | 0 | sin elecciones | | | 31.0 % / −10 % | 24.4 % / +25 % | 5.8 % |
+| `large_mine` | 0.05 | 46.9 % | 3.3 % (1484/44985) | +114 % [48–199] | 28.8 % | 53.1 % / −27 % | 38.6 % / +10 % | 17.4 % |
+| `large_mine` | 0.10 | 60.7 % | **5.0 %** (2923/58165) | +59 % [16–104] | 16.5 % | 28.1 % / −6 % | 21.1 % / +32 % | 4.9 % |
+
+### Recomendación, H = 1095 días (solo donde el modelo eligió)
+
+| Escenario | Umbral | Elige | Demasiado liviano (modelo) | Sobrecosto del modelo | Carta en los mismos tramos: liviana | Sin óptimo |
+|---|---:|---|---|---|---|---|
+| `base` | 0.05 / 0.10 | 0.7 % / 1.6 % | 1.9 % (4/214) / 1.9 % (9/480) | +132 % / +212 % | 56.1 % / 37.1 % | 44.9 % / 27.8 % |
+| `worse_site` | 0.10 | 0.1 % | 2.3 % (1/43) | +121 % | 97.7 % | 73.9 % |
+| `shifted_correlation` | 0.05 / 0.10 | 1.5 % / 5.5 % | 4.9 % (22/445) / 1.5 % (24/1641) | +138 % / +135 % | 85.6 % / 30.7 % | 44.7 % / 27.6 % |
+| `incoherent_practice` | 0.05 / 0.10 | 3.7 % / 8.9 % | 3.3 % (37/1127) / 2.2 % (59/2716) | +159 % / +171 % | 72.3 % / 34.2 % | 43.7 % / 26.7 % |
+| `mine_practice` | 0.05 / 0.10 | 0.5 % / 1.6 % | **8.0 %** (13/162) / 4.7 % (22/470) | +147 % / +135 % | 66.7 % / 43.6 % | 48.5 % / 29.8 % |
+| `noisy_mapping` | 0.05 / 0.10 | 0.9 % / 2.1 % | **9.9 %** (28/282) / 1.3 % (8/631) | +132 % / +219 % | 78.0 % / 26.8 % | 44.5 % / 28.5 % |
+| `large_mine` | 0.05 / 0.10 | 11.8 % / 36.2 % | 4.8 % (543/11319) / 2.4 % (821/34677) | +146 % / +157 % | 76.4 % / 37.1 % | 43.9 % / 26.6 % |
+
+Con H = 1095 días la combinación umbral–horizonte es inalcanzable en buena parte de los tramos («sin óptimo»
+27–74 %, 64 % en `ngi_site` con 0.05): la carta y lo instalado salen «demasiado livianos» en 47–100 % por pura
+exposición, no por elegir mal. El resto de las columnas está en el CSV.
+
+## 4. Lo que funciona
+
+1. **La auditoría es exacta en lo que revisa:** 99.5–100 % de los defectos con hallazgo propio y 0 falsos en 531
+   minas.
+2. **El nivel 1 recupera la recta de la mina.** «site» en 50/50 en los escenarios de ≈ 600 tramos y en 35/50 en
+   `small_mine` (80 tramos). El IC de la pendiente cubre la verdadera en 49–50 de 50, el intervalo de predicción
+   cubre 93.9–95.7 % de los RMR verdaderos (medianas) (nominal 95 %) y el sesgo de la pendiente es despreciable. Sigue a la mina
+   cuando la recta cambia: `better_site` 7.5 (verdad 7.6) y `shifted_correlation` 7.2 (verdad 7.2). Por litología,
+   80–100 % de los dominios llegan a «site» (14 % en `small_mine`) y el IC cubre en 94–100 %.
+3. **El nivel 2 no inventa incoherencias.** «practice incoherent» salió en 5 de 520 minas (1 %), todas con ln De, y
+   en `ngi_site`, donde la práctica es la carta, dice correctamente que no supera a la carta (0/50).
+4. **`ngi_site` y `small_mine` se portan como se esperaba.** `ngi_site` nunca llega a «site» (38 not_calibrated,
+   12 partial) ni recomienda; sin el mínimo de eventos (§6) queda 50/50 en «partial»: la validación no le encuentra
+   nada que ganarle a la carta. `small_mine` nunca recomienda (50/50 not_calibrated: 2 zonas y ≈ 5 fallas).
+5. **Donde el modelo elige, es mucho más seguro que la carta en los mismos tramos.** Con H = 365, demasiado liviano
+   1–5 % frente a 11–74 % de la carta en esos mismos tramos.
+
+## 5. Lo que falla
+
+1. **«Demasiado liviano» sobre ~5 %** (P verdadera sobre el umbral en el tipo elegido):
+   - `worse_site`, H = 365: **23.4 %** con 0.10 (175/747) y **6.9 %** con 0.05 (11/159). Está concentrado: con
+     0.10 eligen 5 de los 7 modelos «site», y uno solo pone 142 de 317 elecciones (45 %) sobre el umbral; otro, 30 de
+     232 (13 %).
+   - `noisy_mapping`, H = 1095 con 0.05: **9.9 %** (28/282), casi todo de una mina (28/215).
+   - `mine_practice`, H = 1095 con 0.05: **8.0 %** (13/162), de una mina (13/61).
+   - `large_mine`, H = 365 con 0.10: **5.0 %** (2923/58165), repartido en las 19 minas «site» (de 0.5 % a 17 % por
+     mina). Es el caso más representativo: mucho dato, modelo «site» y aun así 1 de cada 20 elecciones liviana.
+   - Sin el mínimo de eventos del nivel 3, `base` sube a 10.5 % (0.05) y 6.2 % (0.10): el mínimo sí protege (§6).
+2. **Causa: el modelo es aditivo y plano en la calidad; la verdad castiga el déficit.** En la verdad la tasa sube
+   κ_def por cada tipo que falta frente a lo que pide la carta con el Q verdadero (corrido δ), o sea que el efecto
+   del sostenimiento depende del macizo. El modelo de la librería suma β_q·ln Q + β_rank·rango y no tiene esa
+   interacción. En el diagnóstico de la peor mina de `large_mine`, la P del modelo para el tipo elegido queda en
+   ≈ 0.025–0.03 en todos los estratos, mientras la verdadera va de 0.02 (tipo ≥ requerido) a 0.11–0.49 (tipo 1 a 3
+   escalones bajo lo requerido); el 91 % de sus elecciones livianas (487 de 536) son tipos bajo lo que pide la carta verdadera
+   (por ejemplo, tipo I donde la verdad pide III: 75 de 101 livianos). En `worse_site` la pendiente de ln Q sale
+   −0.26 (chata) y elige IV o V en roca que pide V con P verdadera ≈ 0.12–0.21. El efecto de zona de la mina de
+   prueba no explica el patrón: los livianos se reparten en todas las zonas.
+3. **Elige poco y muy caro.** Con los mínimos vigentes, en las minas de ≈ 600 tramos elige en 0–18 % de los tramos
+   (0 % en 5 escenarios). Cuando elige, el sobrecosto frente al óptimo de verdad es +59 a +219 % (mediana) y
+   +48 a +496 % frente a la carta en los mismos tramos. Es la misma cara del punto 2: en roca buena pide de más y en
+   roca mala no pide lo suficiente.
+4. **El tamaño de los escenarios no alcanza el mínimo del nivel 3.** El plan dimensionó ≈ 600 tramos con 5–10 % de
+   fallas (D7.5), pero con 6 parámetros el mínimo pide 60 eventos y la mediana es 51: `base` queda not_calibrated en
+   34/50. `better_site` y `conservative_practice` (11–12 fallas) nunca llegan.
+5. **El nivel 2 no detecta la práctica incoherente** tal como se definió en el escenario. En `incoherent_practice`
+   (GSI visual con DE 10, 40 % de desvíos, cambio de tabla) los signos siguen correctos, así que el veredicto es
+   «coherent» en 50/50 y «beyond_chart» en 45/50. Las señales están, pero el módulo no las convierte en veredicto:
+   conjunto conforme de 3.24 tipos (2.57 en `base`), kappa recomendado–instalado 0.93 (0.97 en `base`) y
+   sensibilidad a los desvíos de 15 % (27 % en `base`).
+6. **«Fuera del conjunto» no es un detector de desvíos.** Marca ≈ 10 % de los tramos por construcción (nivel 90 %).
+   Contra los desvíos verdaderos, la precisión es 30–67 % y la sensibilidad 15–55 %. En `ngi_site`, sin desvíos,
+   marca 2933 tramos (precisión 0): son la parte de la carta que el logit en ln Q y ln De no reproduce.
+7. **El ajuste ordinal no converge en minas grandes:** 6 de 20 en `large_mine` y 2 de 50 en `conservative_practice`.
+   Esas minas quedan con «not estimable» y sin conjuntos conformes (ver §8, error 1).
+8. **El nivel 1 GSI–RMR se sesga con mapeo ruidoso.** En `noisy_mapping` el IC de la pendiente cubre en 28/50
+   (sesgo +0.05 [0.01–0.10]): el GSI y el RMR registrados comparten los mismos componentes mal mapeados (condición y
+   RQD), así que el error no es independiente entre x e y. El RMR–ln Q no se afecta (50/50).
+
+## 6. Sensibilidad: sin el mínimo de eventos del nivel 3
+
+Mismas semillas, mínimo de eventos por parámetro bajado a 1 dentro del proceso; H = 365.
+
+| Escenario | site / partial / not_calibrated | Elige (0.05 / 0.10) | Demasiado liviano (0.05 / 0.10) |
+|---|---|---|---|
+| `ngi_site` | 0 / 50 / 0 | 0 / 0 | sin elecciones |
+| `small_mine` | 0 / 0 / 50 (2 zonas < 3) | 0 / 0 | sin elecciones |
+| `base` | 12 / 38 / 0 | 5.2 % / 8.0 % | **10.5 %** (162/1543) / **6.2 %** (148/2382) |
+| `worse_site` | 7 / 43 / 0 | igual a la principal (ya pasaba el mínimo) | 6.9 % / 23.4 % |
+| `better_site` | 0 / 49 / 1 | 0 / 0 | sin elecciones |
+| `conservative_practice` | 1 / 47 / 2 | 0 / 0 | sin elecciones |
+
+La regla de validación sola deja pasar 7 modelos «site» más en `base`, y esos eligen peor: el mínimo vigente de 10
+eventos por parámetro sí está protegiendo. Confirma la lectura de `SIMULACION_MINIMOS.md` §5 con otro generador.
+
+## 7. Recomendaciones
+
+Para el módulo:
+
+1. **Modelo de desempeño (lo más urgente):** agregar el déficit frente a la carta, d = rango instalado − rango que
+   pide la carta NGI con el Q registrado, como variable (o la interacción ln Q × rango), con su cota de signo. Volver
+   a correr este banco: la meta es bajar «demasiado liviano» bajo 5 % en `large_mine` y `worse_site`, y el
+   sobrecosto. Ojo: el déficit es justo el mecanismo del generador (M5, supuesto de diseño); para no medir el modelo
+   con su propia receta, el banco debería tener también un escenario con otro mecanismo (por ejemplo, un umbral de
+   calidad o un efecto del sostenimiento que se satura).
+2. **Una compuerta de calibración por estrato de calidad:** antes de elegir, observados/esperados fuera de pliegue en
+   el tercio peor de ln Q. Con el modelo actual detectaría el caso de `worse_site`.
+3. **Compuerta de consistencia con la carta:** no elegir un tipo más liviano que el que pide la carta NGI con el Q
+   registrado si el entrenamiento casi no tiene tramos de ese tipo en ese rango de Q. Hoy elige tipo I en roca que la
+   verdad clasifica para III.
+4. **Nivel 2:** un indicador de práctica ruidosa (tamaño del conjunto conforme o kappa de la concordancia frente a
+   una referencia) además de los signos, y documentar que «fuera del conjunto» marca ≈ 1 − nivel de los tramos por
+   construcción y no equivale a un desvío.
+5. **Ajuste ordinal:** escalar la tolerancia con n (error 1 del §8).
+6. **Auditoría:** un hallazgo de dato faltante (por columna, contado, no por fila) y una tolerancia de Q relativa
+   para Q muy bajos.
+7. **Nivel 1, GSI–RMR:** avisar que GSI y RMR comparten componentes (condición de juntas y RQD) y que el IC de la
+   pendiente es optimista con mapeo ruidoso.
+
+Para los mínimos y los escenarios:
+
+8. Mantener `MIN_EVENTS_PER_PARAMETER_LEVEL3` = 10 (§6) y `MIN_ZONES_LEVEL3` = 3 (`small_mine` queda fuera por las
+   zonas).
+9. Redimensionar `base` para que llegue al mínimo (≈ 800 tramos con la misma prevalencia, o +2 puntos de
+   prevalencia): hoy es un escenario «not_calibrated» en 2/3 de las semillas, no el caso típico que se quería medir.
+10. Documentar que con H largo (3 años) y umbral 5 % la mayoría de los tramos no tiene ningún tipo que cumpla: la
+    librería debería decir «ningún tipo cumple» y no forzar una elección, como hace hoy.
+
+## 8. Errores del paquete encontrados
+
+No se corrigió nada (este banco no toca `python/` ni `tests/`):
+
+1. **`stats.ordinal_logit_fit` no converge con n grande.** Usa `trust-exact` con `gtol` = 1e-9 absoluto sobre la
+   log-verosimilitud sumada (no promediada). Con ≈ 4800 tramos, el optimizador termina con «A bad approximation
+   caused failure to predict improvement» aunque los coeficientes son moderados (ln Q ≈ −1.5). El mensaje atribuye
+   el fallo a una separación que no existe. Efecto: `audit_practice` sale con covarianza NaN, veredictos «not
+   estimable» y sin conjuntos conformes en 6 de 20 minas grandes. Arreglo probable: optimizar la log-verosimilitud
+   media o una tolerancia relativa.
+2. **`audit_history` y Q muy bajos:** la tolerancia absoluta `Q_ABS_TOL` = 0.005 esconde un Q registrado 3 veces
+   mayor (o menor) cuando Q < 0.0075 (1 de 184 en el banco).
+3. Hueco, no error: no hay hallazgo de celda vacía (7 % de detección, solo indirecta).
+
+## 9. Limitaciones
+
+- El generador es una simplificación, aunque calibrada (`CALIBRACION_MINA_SINTETICA.md`): tasa constante, fragilidad
+  gamma, déficit frente a la carta como mecanismo y una sola práctica por escenario. El punto 1 del §7 viene de que el
+  modelo de la librería no tiene la forma del generador; con otro mecanismo verdadero el resultado podría ser otro.
+- La mina de prueba trae zonas nuevas: es más exigente que aplicar el modelo a una labor nueva en una zona conocida.
+- Las tasas «demasiado liviano» con pocas elecciones (decenas a cientos, de 2 a 7 minas «site») dependen de una o dos
+  minas; sirven para ver dónde falla, no para fijar un número.
+- El costo es el `relative_cost` sintético de `SUPPORT_TYPES`, no el de una mina; el sobrecosto es solo comparativo.
