@@ -478,7 +478,9 @@ def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
     # trust-exact a veces termina con «bad approximation» ya en el óptimo (precisión de máquina): se juzga por el
     # gradiente y no por res.success
     elif float(np.max(np.abs(res.jac), initial=0.0)) > 1e-6 * max(1.0, math.sqrt(n)):
-        converged, message = False, f"optimizer did not converge: {res.message}"
+        # el MLE existe (no hay separación), pero una verosimilitud muy plana suele ser separación casi completa
+        converged, message = False, (f"optimizer did not converge: {res.message} (likely near separation: a class "
+                                     "is almost separated by X; merge classes or drop columns)")
     else:
         cov, message = _information_cov(-h)
         converged = not message
@@ -490,10 +492,15 @@ def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
 class LogisticMapFit:
     """Logística bayesiana por MAP con *prior* Cauchy (Gelman et al. 2008) y covarianza de Laplace.
 
-    `coef`, `intercept` y `cov` están en la escala ORIGINAL de X; `cov` va en el orden (coef..., intercept).
-    `x_mean` y `x_scale` son la estandarización interna (z = (x − media)/escala, escala = 2·desviación, ddof 0).
-    `active_bounds` son las columnas cuya cota de signo quedó activa (su coef es 0). La covarianza de Laplace no
-    trunca en la cota, así que ahí el intervalo es más ancho que el posterior real (conservador).
+    `coef`, `intercept` y `cov` están en la escala ORIGINAL de X; `cov` va en el orden (coef..., intercept) y es
+    la de Laplace pura (inversa del hessiano en el MAP). `x_mean` y `x_scale` son la estandarización interna:
+    z = (x − media)/escala, con escala = 2·desviación (ddof 0) en las continuas y escala = máximo − mínimo en las
+    binarias (exactamente dos valores distintos), que solo se centran (Gelman et al. 2008).
+
+    `active_bounds` son las columnas cuya cota de signo quedó activa (su coef es 0). Ahí el posterior real es una
+    normal truncada en 0: toda su masa queda del lado permitido y su cola es más larga que la de la normal
+    simétrica de Laplace, así que Laplace SUBESTIMA el límite del lado permitido. Lo mismo pasa, menos, con una
+    cota casi activa. `predict_interval` lo corrige; `cov` no.
     """
 
     coef: np.ndarray
@@ -506,6 +513,7 @@ class LogisticMapFit:
     x_mean: np.ndarray
     x_scale: np.ndarray
     message: str = ""
+    signs: tuple[int, ...] = ()  # cotas de signo usadas en el ajuste, una por columna (0 = libre)
 
     def _eta(self, X):
         Xa = _matrix("X", X, self.coef.size)
@@ -516,29 +524,53 @@ class LogisticMapFit:
         return expit(self._eta(X)[1])
 
     def predict_interval(self, X, level: float = 0.9):
-        """(central, inferior, superior) de P(y = 1): método delta en la escala logit y luego σ."""
+        """(central, inferior, superior) de P(y = 1): método delta en la escala logit y luego σ.
+
+        En cada columna con cota de signo, la desviación de su coeficiente estandarizado γ se agranda hasta que el
+        intervalo simétrico alcance el cuantil (1 + level)/2 de la normal truncada N(γ, σ²)·[γ del lado
+        permitido], σ = desviación de Laplace. En la cota (γ = 0) es la seminormal: factor
+        Φ⁻¹((3 + level)/4) / Φ⁻¹((1 + level)/2), 1.19 al 90 %; lejos de la cota, factor 1. Con la cota activa el
+        óptimo sin cota cae del lado prohibido y la truncada real es más angosta que la seminormal: conservador.
+        El límite del lado prohibido también se ensancha (no importa para elegir con el superior).
+        """
         lv = _level(level)
         Xa, eta = self._eta(X)
-        Xt = np.column_stack([Xa, np.ones(Xa.shape[0])])
-        half = norm.ppf(0.5 + lv / 2) * np.sqrt(np.einsum("ij,jk,ik->i", Xt, self.cov, Xt))
+        p = self.coef.size
+        u = 0.5 + lv / 2
+        z = norm.ppf(u)
+        # a la escala estandarizada, donde vive la cota: γ = β·escala, α = b + Σ β·media
+        Ainv = np.eye(p + 1)
+        Ainv[:p, :p] = np.diag(self.x_scale)
+        Ainv[p, :p] = self.x_mean
+        cov_w = Ainv @ self.cov @ Ainv.T
+        factor = np.ones(p + 1)
+        for j, s in enumerate(self.signs):
+            if s != 0:
+                sd = math.sqrt(cov_w[j, j])
+                r = abs(self.coef[j] * self.x_scale[j]) / sd  # distancia a la cota, en desviaciones
+                # cuantil u de N(r, 1) truncada en 0, medido desde r: Φ⁻¹(1 − (1 − u)·Φ(r))
+                factor[j] = max(1.0, norm.ppf(1.0 - (1.0 - u) * norm.cdf(r)) / z)
+        Zt = np.column_stack([(Xa - self.x_mean) / self.x_scale, np.ones(Xa.shape[0])]) * factor
+        half = z * np.sqrt(np.einsum("ij,jk,ik->i", Zt, cov_w, Zt))
         return expit(eta), expit(eta - half), expit(eta + half)
 
 
 def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float = 10.0,
                      signs: Sequence[int] | None = None) -> LogisticMapFit:
-    """Logística MAP: cada columna de X se estandariza a media 0 y desviación 0.5; Cauchy(0, prior_scale) en los
-    coeficientes estandarizados y Cauchy(0, intercept_scale) en el intercepto (Gelman et al. 2008).
+    """Logística MAP: cada columna continua de X se estandariza a media 0 y desviación 0.5, y cada binaria (dos
+    valores distintos) solo se centra, con escala = máximo − mínimo (Gelman et al. 2008). Cauchy(0, prior_scale)
+    en los coeficientes estandarizados y Cauchy(0, intercept_scale) en el intercepto.
 
     `signs[j]` = +1 impone β_j ≥ 0, −1 impone β_j ≤ 0 y 0 lo deja libre (cotas de L-BFGS-B; la escala positiva
-    conserva el signo). Con separación completa el MAP es finito porque el prior es propio.
+    conserva el signo). Con separación completa el MAP es finito porque el prior es propio. `y` necesita al menos
+    un 0 y un 1: es solo una guarda, el mínimo real de fallas lo aplica la preparación del nivel 3.
     """
     Xa = _matrix("X", X)
     n, p = Xa.shape
     ya = _binary("y", y)
     if ya.size != n:
         raise ValueError(f"X and y must have the same number of rows ({n} != {ya.size})")
-    if n < 2:
-        raise ValueError("logistic_map_fit needs at least 2 rows")
+    _both_classes(ya, "logistic_map_fit")
     s, s0 = _positive("prior_scale", prior_scale), _positive("intercept_scale", intercept_scale)
     sg = np.zeros(p, dtype=int)
     if signs is not None:
@@ -553,7 +585,9 @@ def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float =
     for j in range(p):
         if _constant(sd[j] ** 2 * n, mean[j], n):
             raise ValueError(f"column {j} of X is constant: it cannot be standardized")
-    scale = 2.0 * sd
+    # binaria rara con 2·sd: escala chica y prior efectivo mucho más ancho (Cauchy(0, 8) o más); Gelman usa el rango
+    binary = np.array([np.unique(Xa[:, j]).size == 2 for j in range(p)], dtype=bool)
+    scale = np.where(binary, Xa.max(axis=0, initial=-np.inf) - Xa.min(axis=0, initial=np.inf), 2.0 * sd)
     Z = np.column_stack([(Xa - mean) / scale, np.ones(n)])
     scales2 = np.concatenate([np.full(p, s), [s0]]) ** 2
 
@@ -591,7 +625,7 @@ def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float =
     return LogisticMapFit(coef=orig[:p], intercept=float(orig[p]), cov=A @ cov_w @ A.T,
                           active_bounds=tuple(int(j) for j in np.nonzero(at_bound[:p])[0]), converged=converged,
                           n=n, loglik=-float(np.sum(np.logaddexp(0.0, eta) - ya * eta)), x_mean=mean,
-                          x_scale=scale, message=message)
+                          x_scale=scale, message=message, signs=tuple(int(g) for g in sg))
 
 
 # ---------- métricas de clasificación (R7) ----------

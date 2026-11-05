@@ -246,6 +246,104 @@ def test_map_intervalo_delta_cobertura():
     assert 0.83 <= hits / 200 <= 0.97
 
 
+def _metropolis_upper(X, y, fit, x0, n_iter=40000, seed=0):
+    """Cuantil 0.95 de P(y = 1 | x0) bajo el posterior truncado por la cota +1 de la columna 0 (Metropolis)."""
+    p = X.shape[1]
+    mu, sc = fit.x_mean, fit.x_scale
+    Z = np.column_stack([(X - mu) / sc, np.ones(len(y))])
+    sc2 = np.r_[np.full(p, 2.5), 10.0] ** 2
+    Ainv = np.eye(p + 1)
+    Ainv[:p, :p], Ainv[p, :p] = np.diag(sc), mu
+    L = np.linalg.cholesky(Ainv @ fit.cov @ Ainv.T)
+    w = np.r_[fit.coef * sc, fit.intercept + fit.coef @ mu]
+
+    def f(v):
+        eta = Z @ v
+        return np.sum(np.logaddexp(0, eta) - y * eta) + np.sum(np.log1p(v * v / sc2))
+
+    rng = np.random.default_rng(seed)
+    cur, out = f(w), np.empty((n_iter, p + 1))
+    for it in range(n_iter):
+        prop = w + 0.9 * L @ rng.standard_normal(p + 1)
+        if prop[0] >= 0:
+            new = f(prop)
+            if np.log(rng.random()) < cur - new:
+                w, cur = prop, new
+        out[it] = w
+    W = out[n_iter // 5:]
+    eta = ((x0 - mu) / sc) @ W[:, :p].T + W[:, p]
+    return float(np.quantile(expit(eta), 0.95))
+
+
+def test_map_cota_activa_el_superior_no_subestima():
+    # β verdadero = 0 con la cota β ≥ 0: la cota queda apenas activa y el posterior es una normal truncada
+    rng = np.random.default_rng(11)
+    for _ in range(50):
+        X = rng.normal(0, 1, (80, 1))
+        y = (rng.random(80) < expit(-1.0 + 0.0 * X[:, 0])).astype(float)
+        fit = logistic_map_fit(X, y, signs=[1])
+        if fit.active_bounds:
+            break
+    assert fit.active_bounds == (0,) and fit.signs == (1,)
+    x0 = np.array([[2.5]])
+    upper = fit.predict_interval(x0, level=0.9)[2][0]
+    laplace = expit(x0[0] @ fit.coef + fit.intercept + 1.6448536 * np.sqrt(np.r_[x0[0], 1] @ fit.cov
+                                                                            @ np.r_[x0[0], 1]))
+    mcmc = _metropolis_upper(X, y, fit, x0[0])
+    assert laplace < mcmc - 0.01  # el Laplace simétrico subestima
+    assert upper >= mcmc - 0.003
+
+
+def test_map_factor_de_la_seminormal_en_la_cota():
+    # con la cota activa, la desviación de γ se agranda por Φ⁻¹((3 + nivel)/4) / Φ⁻¹((1 + nivel)/2)
+    from scipy.stats import norm
+    X, y = _binary_data()
+    fit = logistic_map_fit(X, y, signs=[-1, 0])
+    assert fit.active_bounds == (0,)
+    x0 = np.array([[fit.x_mean[0] + 3.0, fit.x_mean[1]]])  # solo la columna con cota aporta a la varianza
+    for level in (0.8, 0.9, 0.95):
+        c, _, hi = fit.predict_interval(x0, level=level)
+        z = norm.ppf(0.5 + level / 2)
+        half = np.log(hi / (1 - hi)) - np.log(c / (1 - c))
+        Ainv = np.eye(3)
+        Ainv[:2, :2], Ainv[2, :2] = np.diag(fit.x_scale), fit.x_mean
+        cov_w = Ainv @ fit.cov @ Ainv.T
+        zt = np.r_[3.0 / fit.x_scale[0], 0.0, 1.0]
+        d = np.r_[norm.ppf((3 + level) / 4) / z, 1.0, 1.0]
+        assert half[0] == pytest.approx(z * np.sqrt((zt * d) @ cov_w @ (zt * d)), rel=1e-9)
+    # sin cotas el intervalo es el delta simétrico de siempre
+    free = logistic_map_fit(X, y)
+    c, lo, hi = free.predict_interval(x0, level=0.9)
+    Xt = np.r_[x0[0], 1.0]
+    assert np.log(hi / (1 - hi))[0] - np.log(c / (1 - c))[0] == pytest.approx(
+        norm.ppf(0.95) * np.sqrt(Xt @ free.cov @ Xt), rel=1e-9)
+
+
+def test_map_columna_binaria_solo_se_centra():
+    rng = np.random.default_rng(14)
+    n = 400
+    rare = (rng.random(n) < 0.05).astype(float) * 3.0 + 2.0  # dos valores, 2 y 5, el 5 raro
+    cont = rng.normal(1.0, 2.0, n)
+    X = np.column_stack([rare, cont])
+    y = (rng.random(n) < expit(-1.0 + 0.4 * (rare - 2.0) + 0.3 * cont)).astype(float)
+    fit = logistic_map_fit(X, y)
+    np.testing.assert_allclose(fit.x_mean, X.mean(axis=0))
+    np.testing.assert_allclose(fit.x_scale, [3.0, 2.0 * cont.std()])  # rango en la binaria, 2·sd en la continua
+    # el prior en la binaria es Cauchy(0, 2.5) sobre el efecto de pasar de un valor al otro: reescalarla a 0/1
+    # no cambia el ajuste
+    f01 = logistic_map_fit(np.column_stack([(rare - 2.0) / 3.0, cont]), y)
+    assert f01.x_scale[0] == 1.0
+    np.testing.assert_allclose(f01.coef[0], fit.coef[0] * 3.0, rtol=1e-6)
+    np.testing.assert_allclose(f01.predict_proba(np.column_stack([(rare - 2.0) / 3.0, cont])),
+                               fit.predict_proba(X), rtol=1e-7)
+
+
+@pytest.mark.parametrize("y", [[0, 0, 0, 0], [1, 1, 1, 1]])
+def test_map_sin_fallas_o_sin_estables_es_error(y):
+    with pytest.raises(ValueError, match="both classes"):
+        logistic_map_fit([[1.0], [2.0], [3.0], [4.0]], y)
+
+
 @pytest.mark.parametrize("kwargs, msg", [
     (dict(y=[0, 1, 2, 1]), "only 0 and 1"),
     (dict(y=[0, 1, 1]), "same number of rows"),
