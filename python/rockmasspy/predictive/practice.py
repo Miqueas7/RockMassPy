@@ -88,7 +88,7 @@ class Concordance:
 @dataclass(frozen=True)
 class PracticeAudit:
     """Auditoría de la práctica. `validation.recommend` aquí NO es una recomendación: solo dice si la práctica de
-    la mina es más predecible que la carta Q (ver `beyond_chart`)."""
+    la mina es más predecible que la carta Q y el ficticio (ver `beyond_chart`)."""
 
     n: int
     labors: int
@@ -98,14 +98,15 @@ class PracticeAudit:
     converged: bool
     validation: ValidationReport = field(repr=False)
     conformal_level: float
-    conformal_threshold: float  # q del puntaje 1 − p; inf si hay muy pocas filas para el nivel; NaN sin conjuntos
-    coverage: float  # fracción de tramos con conjunto cuyo tipo instalado cae dentro (NaN sin conjuntos)
+    # q del puntaje 1 − p; inf si hay muy pocas filas para el nivel; NaN sin conjuntos (p. ej. el ajuste final
+    # no convergió)
+    conformal_threshold: float
     outside_set: tuple[str, ...] = field(repr=False)  # id_tramo fuera de su conjunto conforme
     tramos: tuple[PracticeTramo, ...] = field(repr=False)
     concordance: Concordance | None
     status: str  # uno de STATUSES
     missing_types: tuple[str, ...]  # tipos definidos bajo el mínimo del nivel 2
-    dropped_columns: tuple[str, ...]  # columnas colineales (o constantes) fuera del ajuste final
+    dropped_columns: tuple[str, ...]  # columnas colineales (o constantes) fuera del ajuste final, con aviso
     warnings: tuple[str, ...]
     # lo mínimo del ajuste final para predecir tramos nuevos (coeficientes, cortes y codificación; nunca filas)
     fit: OrdinalLogitFit = field(repr=False)
@@ -114,9 +115,10 @@ class PracticeAudit:
 
     @property
     def beyond_chart(self) -> bool:
-        """¿La práctica es más predecible que la carta Q en la validación por labor (IC de la mejora > 0)?"""
-        r = self.validation.results.get("labor")
-        return r is not None and r.beats("ngi")
+        """¿La práctica es más predecible que la carta Q y el ficticio? Es la regla de `ValidationReport.recommend`
+        (labor y zona fuera con IC > 0, sin pliegues fallidos, ≤ 1 % de réplicas descartadas; temporal como no
+        inferioridad). Describe la práctica; no habilita ninguna recomendación."""
+        return self.validation.recommend
 
     def predict_proba(self, tramos) -> np.ndarray:
         """P de cada tipo de `types` (n, K) para tramos nuevos, con el ajuste final (todos los datos) y sus mismas
@@ -128,7 +130,11 @@ class PracticeAudit:
 
     def conformal_set(self, tramo) -> tuple[str, ...]:
         """Tipos (en orden, del más liviano al más pesado) con 1 − p_k ≤ `conformal_threshold` para un tramo nuevo.
-        La cobertura vale si las labores nuevas son intercambiables con las del histórico."""
+
+        El umbral sale de las predicciones fuera de pliegue por labor y se aplica a las probabilidades del ajuste con
+        todos los datos (estilo cross-conformal): la garantía de cobertura es aproximada y supone que las labores
+        nuevas son intercambiables con las del histórico. En la revisión, con labores nuevas, la cobertura al 90 %
+        dio 0.902 de media y 0.776 de mínimo en 20 semillas. ValueError si no hay umbral (ver `warnings`)."""
         if math.isnan(self.conformal_threshold):
             raise ValueError("no conformal threshold was computed for this audit (see its warnings)")
         p = self.predict_proba([tramo])[0]
@@ -141,7 +147,8 @@ _MISSING_LEVEL = "(missing)"
 @dataclass(frozen=True)
 class PracticeDesign:
     """Codificación de las variables (sin y, sin filas ni ids): se fija con el histórico y se aplica igual a
-    tramos nuevos. `labor_levels` vacío = tipo_labor no entra."""
+    tramos nuevos. `labor_levels` vacío = tipo_labor no entra; si entra, la categoría de referencia es la primera
+    (alfabética, «(missing)» al final) y cada una de las demás tiene su columna."""
 
     permanent: bool
     labor_levels: tuple[str, ...]
@@ -149,29 +156,31 @@ class PracticeDesign:
     @property
     def names(self) -> list[str]:
         return ["ln_q", "ln_de", *(["permanent"] if self.permanent else []),
-                *[f"tipo_labor={lv}" for lv in self.labor_levels]]
+                *[f"tipo_labor={lv}" for lv in self.labor_levels[1:]]]
 
     def matrix(self, tramos) -> np.ndarray:
-        """Columnas candidatas de cada tramo. Los mensajes dicen la posición en la lista, nunca un identificador.
+        """Columnas candidatas de cada tramo. Los mensajes dicen la posición en la lista (si hay más de un tramo),
+        nunca un identificador.
         Un tipo_labor no visto lanza ValueError: el histórico no dice nada de esa práctica (decisión de diseño;
         tratarlo como la categoría de referencia inventaría un dato)."""
         out = []
         for i, t in enumerate(tramos):
+            who = "tramo" if len(tramos) == 1 else f"tramo at position {i}"
             for name in ("q_valor", "luz_m", "esr"):
                 v = getattr(t, name)
                 if v is None or not v > 0:
-                    raise ValueError(f"tramo at position {i}: {name} must be a number > 0 for the practice model")
+                    raise ValueError(f"{who}: {name} must be a number > 0 for the practice model")
             row = [math.log(t.q_valor), math.log(t.luz_m / t.esr)]
             if self.permanent:
                 if t.vida_util is None:
-                    raise ValueError(f"tramo at position {i}: vida_util is required by the practice model")
+                    raise ValueError(f"{who}: vida_util is required by the practice model")
                 row.append(float(t.vida_util == "Permanente"))
             if self.labor_levels:
                 lv = t.tipo_labor or _MISSING_LEVEL
                 if lv not in self.labor_levels:
-                    raise ValueError(f"tramo at position {i}: tipo_labor was not seen in the history, so the "
+                    raise ValueError(f"{who}: tipo_labor was not seen in the history, so the "
                                      "practice model has no information about it")
-                row += [float(lv == x) for x in self.labor_levels]
+                row += [float(lv == x) for x in self.labor_levels[1:]]
             out.append(row)
         return np.array(out, dtype=float).reshape(len(out), len(self.names))
 
@@ -185,13 +194,14 @@ def _design(rows) -> tuple[PracticeDesign, list[str]]:
                      "left out of the model")
     levels = ()
     if len({t.tipo_labor for t in rows} - {None}) >= 2:
-        levels = tuple(sorted({t.tipo_labor or _MISSING_LEVEL for t in rows}))
+        levels = tuple(sorted({t.tipo_labor or _MISSING_LEVEL for t in rows},
+                              key=lambda lv: (lv == _MISSING_LEVEL, lv)))
     return PracticeDesign(not missing_vida, levels), warns
 
 
 def _select(X: np.ndarray) -> np.ndarray:
-    """Índices de columnas linealmente independientes junto con el intercepto, en orden (una-caliente: cae la
-    categoría redundante; también las constantes y las colineales con vida útil)."""
+    """Índices de columnas linealmente independientes junto con el intercepto, en orden: caen las constantes y las
+    colineales (p. ej. un tipo de labor que coincide con la vida útil)."""
     keep, base = [], np.ones((X.shape[0], 1))
     for j in range(X.shape[1]):
         trial = np.column_stack([base, X[:, j]])
@@ -284,25 +294,31 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
                                           float(fit.coef[i] + _Z95 * se[i])) for i, j in enumerate(cols)}
     verdicts = {v: _verdict(v, coefficients.get(v)) for v in _EXPECTED_SIGN}
     dropped = tuple(n for j, n in enumerate(names) if j not in set(cols.tolist()))
+    if dropped:  # los nombres de tipo de labor vienen de la lista de la plantilla: pueden ir en el aviso
+        warns.append(f"columns dropped for collinearity: {', '.join(dropped)}; remaining coefficients are contrasts")
 
     # validación: modelo de práctica contra el ficticio y la carta Q (categoría NGI como única variable)
     labors, zones, years = tramo_groups(rows)
+    # shortcut: categoría NGI armada aquí; cuando exista validation.ngi_category(tramo), usarla
     ngi = np.array([[float(read_q_chart(t.q_valor, t.luz_m / t.esr).category)] for t in rows])
     validation = validate(y, {"practice": _model(X, y, K, "class"), "dummy": dummy_class_fit_predict(y),
                               "ngi": _model(ngi, y, K, "class")},
                           kind="class", labors=labors, zones=zones, years=years,
                           metric=lambda a, b: quadratic_weighted_kappa(a, b, K), higher_is_better=True,
                           reference=("dummy", "ngi"), k=k, n_boot=n_boot, seed=seed)
+    warns += validation.warnings
 
     # conjunto conforme agrupado por labor
     sets: list[tuple[int, ...] | None] = [None] * len(rows)
     best: list[int | None] = [None] * len(rows)
-    q_hat, coverage = math.nan, math.nan
-    try:
-        folds = group_kfold(labors, k=k, seed=seed)
-    except ValueError:
-        folds = None
-        warns.append("conformal sets need at least 2 labors: none computed")
+    q_hat, folds = math.nan, None
+    if not fit.converged:  # conformal_set usa el ajuste final: sin él no hay conjuntos
+        warns.append("conformal sets not computed: the final ordinal fit did not converge")
+    else:
+        try:
+            folds = group_kfold(labors, k=k, seed=seed)
+        except ValueError:
+            warns.append("conformal sets need at least 2 labors: none computed")
     if folds is not None:
         oof = out_of_fold(folds, _model(X, y, K, "proba"), len(rows), kind="proba")
         if oof.n_failed:
@@ -320,7 +336,6 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
                 p = oof.pred[i]
                 sets[i] = tuple(int(c) for c in np.flatnonzero(1.0 - p <= q_hat))
                 best[i] = int(np.argmax(p))
-            coverage = float(np.mean([y[i] in sets[i] for i in idx]))
 
     tramos = tuple(PracticeTramo(t.id_tramo, t.sost_instalado, None if best[i] is None else types[best[i]],
                                  None if sets[i] is None else tuple(types[c] for c in sets[i]),
@@ -328,7 +343,7 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
     return PracticeAudit(
         n=len(rows), labors=len({labor_key(t) for t in rows} - {None}), types=types, coefficients=coefficients,
         verdicts=verdicts, converged=fit.converged, validation=validation, conformal_level=float(conformal_level),
-        conformal_threshold=q_hat, coverage=coverage, outside_set=tuple(t.id_tramo for t in tramos if t.outside),
+        conformal_threshold=q_hat, outside_set=tuple(t.id_tramo for t in tramos if t.outside),
         tramos=tramos, concordance=_concordance(history), status=status, missing_types=missing,
         dropped_columns=dropped, warnings=tuple(warns), fit=fit, design=design, columns=tuple(cols.tolist()))
 
