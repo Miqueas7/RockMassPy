@@ -621,7 +621,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "recomendación lo avisa tramo por tramo. Un tramo sin inspecciones no entra al nivel 3: nunca se "
               "asume estable. La validación es interna (otra parte de la misma mina), no externa. Tasa constante en el "
               "tiempo (sin envejecimiento del sostenimiento): el nivel 3 supone que λ no cambia con los días de "
-              "exposición.",
+              "exposición. La cobertura se verificó con datos sintéticos; con datos reales se confirma con el "
+              "desempeño posterior.",
         "en": "Past practice as the label: level 2 learns what the mine installed, which depends on the rock class "
               "that was assessed; it reproduces past decisions, not optimal ones, and so it describes and does not "
               "recommend. Selection bias: level 3 failures depend on the support that was chosen (a heavy type was "
@@ -630,7 +631,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "in Mahalanobis distance, the model does not hold; the recommendation flags it tramo by tramo. A tramo "
               "without inspections is left out of level 3: it is never assumed stable. The validation is internal "
               "(another part of the same mine), not external. Constant rate over time (no ageing of the support): "
-              "level 3 assumes λ does not change with the days of exposure.",
+              "level 3 assumes λ does not change with the days of exposure. The coverage was checked with synthetic "
+              "data; with real data it is confirmed by the later performance.",
     },
     "dd": {"es": "decisión de diseño", "en": "design decision"},
     "cap_dd": {"es": "Mínimos y umbrales (todos son decisión de diseño, por confirmar)",
@@ -872,7 +874,16 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "dd_temporal": {"es": "Partición temporal", "en": "Temporal partition"},
     "dd_temporal_v": {"es": "no inferioridad (mejora puntual ≥ 0)", "en": "non-inferiority (point gain ≥ 0)"},
     "dd_interval": {"es": "Intervalo de P(falla) y límite usado", "en": "P(failure) interval and bound used"},
-    "dd_interval_v": {"es": "90 %, límite superior (conservador)", "en": "90 %, upper bound (conservative)"},
+    "dd_interval_v": {"es": "límite superior de P(falla) para una labor nueva: incluye la incertidumbre de los "
+                            "coeficientes (covarianza robusta por zona) y la variabilidad entre labores (fragilidad "
+                            "gamma)",
+                      "en": "upper bound of P(failure) for a new excavation: it includes the uncertainty of the "
+                            "coefficients (zone-robust covariance) and the variability between excavations (gamma "
+                            "frailty)"},
+    "l3_rec_blocked": {"es": "Atención: recommend no elegirá ningún tipo con este modelo, aunque su nivel sea «propio "
+                             "del sitio». Motivos: {reasons}.",
+                       "en": "Attention: recommend will not choose any type with this model, even at the \"site\" "
+                             "level. Reasons: {reasons}."},
     "dd_maha": {"es": "Alerta de extrapolación", "en": "Extrapolation alert"},
     "dd_maha_v": {"es": "fuera del rango o Mahalanobis sobre el percentil {p:g} del entrenamiento",
                   "en": "outside the range or Mahalanobis above the training {p:g}th percentile"},

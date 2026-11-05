@@ -1183,15 +1183,24 @@ def _f(v, fmt: str = ".3f") -> str:
     return "-" if v is None or not (v == v and abs(v) != float("inf")) else format(v, fmt)
 
 
-def _gain(i, fmt: str = ".3f") -> str:
+def recommendation_blockers(model) -> tuple[str, ...]:
+    """Motivos globales por los que `recommend` nunca elegiría un tipo con este modelo (vacío: puede elegir)."""
+    # shortcut: getattr hasta que PerformanceModel.recommendation_blockers exista en fase-4bc; luego, el campo directo
+    return tuple(getattr(model, "recommendation_blockers", ()))
+
+
+def gain_text(i, fmt: str = ".3f") -> str:
+    """Mejora con su IC: «valor (inferior; superior)». La usan el informe y la CLI."""
     return f"{_f(i.value, fmt)} ({_f(i.ci_low, fmt)}; {_f(i.ci_high, fmt)})"
 
 
 def _blockers_cell(partition, c, lang) -> str:
     """Cómo pesa la partición en la decisión: labor y zona por superioridad (sus motivos para no recomendar), la
     temporal por no inferioridad (mejora puntual ≥ 0) y la aleatoria no cuenta."""
+    from ..predictive.validation import is_noninferior
+
     if partition == "temporal":
-        return t("noninf_met" if all(i.value >= 0 for i in c.improvements.values()) else "noninf_not", lang)
+        return t("noninf_met" if is_noninferior(c) else "noninf_not", lang)
     if partition == "random":
         return t("random_no_weight", lang)
     return "; ".join(c.blockers) or "-"
@@ -1209,7 +1218,7 @@ def _validation_table(caption_key, report, refs, fmt, lang) -> list:
         if c is not None:
             rows.append((t(f"part_{p}", lang), str(c.n_rows), str(c.n_groups),
                          *(_f(c.metrics[m], fmt) for m in (c.main, *refs)),
-                         *(_gain(c.improvements[r], fmt) for r in refs), _blockers_cell(p, c, lang)))
+                         *(gain_text(c.improvements[r], fmt) for r in refs), _blockers_cell(p, c, lang)))
         elif p in report.skipped:
             rows.append((t(f"part_{p}", lang), "-", "-", *("-" for _ in range(2 * len(refs) + 1)),
                          t("part_skipped", lang).format(reason=report.skipped[p])))
@@ -1327,6 +1336,9 @@ def _performance_section(number, m, history, threshold, exposure_days, lang, fig
                   (t("l3_non_failures", lang), str(c["non_failures"])), (t("l3_labors", lang), str(c["labors"])),
                   (t("l3_zones", lang), str(c["zones"])), (t("l3_params", lang), str(c["parameters"])),
                   (t("l3_minority", lang), f"{c['minority_class']} / {c['minority_class_minimum']}")))]
+    rb = recommendation_blockers(m)
+    if rb:  # destacado: aunque el modelo quede «site», recommend no elegirá ningún tipo
+        blocks.append(Paragraph(t("l3_rec_blocked", lang).format(reasons="; ".join(rb))))
     if not m.coefficients:
         blocks.append(Paragraph(t("l3_no_fit", lang)))
     else:
