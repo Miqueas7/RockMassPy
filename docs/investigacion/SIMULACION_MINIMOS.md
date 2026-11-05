@@ -6,15 +6,20 @@ sintéticos de mecanismo conocido; ninguna sale de una mina.** Cada mínimo prop
 respaldada por simulación**, no un número publicado (`MODELOS_SOSTENIMIENTO.md` §2.3, §3.3 y §7.4).
 
 - Script: [`scripts/simulacion_minimos.py`](scripts/simulacion_minimos.py).
-- Resultados: [`simulacion_minimos.csv`](simulacion_minimos.csv), en formato largo: una métrica por fila, con
-  éxitos, n e IC 95 %.
-- Comando: `simulacion_minimos.py --seed 20261105 --reps 50 --reps-l1 200 --n-boot 500`. Tomó 16 min en la laptop.
-- Versión de la librería: `fase-4bc` en d52d0e6.
-  - Nivel 3 con tasa de falla constante (Poisson con offset ln t) y generador con tiempos de falla exponenciales.
-  - Validación: labor y zona fuera, cero pliegues fallidos, ≤ 1 % de réplicas descartadas y temporal como no
-    inferioridad.
-  - `recommend` no elige si el tramo extrapola, si el IC de β_rank toca el 0 o si hay cotas activas en la calidad
-    o la luz.
+- Resultados, en formato largo (una métrica por fila, con éxitos, n e IC 95 %):
+  - [`simulacion_minimos.csv`](simulacion_minimos.csv): niveles 1, 2 y 3 **antes** de la fragilidad (§2 a §4.3).
+    Comando: `--seed 20261105 --reps 50 --reps-l1 200 --n-boot 500`; tomó 16 min en la laptop. Versión:
+    `fase-4bc` en d52d0e6.
+    - Nivel 3 exponencial sin fragilidad.
+    - Validación: labor y zona fuera, cero pliegues fallidos, ≤ 1 % de réplicas descartadas y temporal como no
+      inferioridad.
+    - `recommend` no elige si el tramo extrapola, si el IC de β_rank toca el 0 o si hay cotas activas en la
+      calidad o la luz.
+  - [`simulacion_minimos_nivel3_fragilidad.csv`](simulacion_minimos_nivel3_fragilidad.csv): nivel 3 **después**,
+    con la fragilidad gamma por labor (§4.4). Comando: `--levels 3 --seed 20261105 --reps 50 --n-boot 500`, con la
+    misma semilla y los mismos históricos que el «antes»; tomó 8 min. Versión: `fase-4bc` en f10e1d1.
+  - [`simulacion_minimos_nivel3_fragilidad_6zonas.csv`](simulacion_minimos_nivel3_fragilidad_6zonas.csv): lo mismo
+    con 6 zonas (`--zones-l3 6`), para que la covarianza agrupada por zona se active (pide ≥ 5).
 
 ## 1. Diseño de la simulación
 
@@ -79,8 +84,10 @@ respaldada por simulación**, no un número publicado (`MODELOS_SOSTENIMIENTO.md
     β_rank, sin cotas, sin extrapolación y sin historia. Sirve para ver qué aportan las compuertas.
 - **Nulo de frontera** (`site_effect=False`, la tasa depende solo de la categoría NGI):
   - El modelo del sitio se arma en el script con las variables del sitio **más la categoría**, libre de signo.
-    Se usan `exponential_hazard_map_fit`, `validate` y la devianza de Poisson, con el ficticio de tasa constante y
-    la línea base de la categoría sola, tal como en `performance.py`. Así el modelo anida a la línea base.
+    Se usan la misma verosimilitud que la librería, `validate` y la devianza de Poisson, con el ficticio de tasa
+    constante y la línea base de la categoría sola, tal como en `performance.py`. La verosimilitud es
+    `exponential_hazard_map_fit` en el «antes» y `frailty_hazard_map_fit` (fragilidad por labor, covarianza por zona)
+    en el «después». Así el modelo anida a la línea base.
   - Recomendación falsa: la validación recomienda y el ajuste final converge. Se mide también la versión con β_rank
     identificado y sin cotas en calidad o luz.
   - Como referencia, la tasa de «site» de `fit_performance` en el mismo nulo («mal especificado»).
@@ -143,6 +150,9 @@ Lectura:
   [1.8 %, 8.5 %], cerca del 5 % esperado si los IC de Wald fueran exactos.
 
 ## 4. Resultados del nivel 3
+
+§4.1 a §4.3 son el **antes**: el modelo exponencial sin fragilidad (d52d0e6). Se dejan como evidencia de por qué
+se cambió el modelo. El **después**, con la fragilidad gamma por labor, está en §4.4.
 
 50 réplicas por celda. «Elige» y «demasiado liviana» se cuentan sobre los 100 tramos nuevos de cada réplica
 (5000 por celda). Entre corchetes va el IC por bootstrap de réplicas y entre paréntesis los conteos.
@@ -211,6 +221,86 @@ Junto: **0 de 300, IC 95 % [0 %, 1.3 %]**. El tamaño real de la regla está muy
 4. Las coberturas de los coeficientes están cerca del 95 %, salvo ln Q con prevalencia 25 % (0.82–0.84). Las cotas
    en calidad o luz no se activaron con efecto real, y β_rank quedó siempre identificado en los modelos «site».
 
+### 4.4 Antes y después de la fragilidad
+
+**Qué cambió (f10e1d1):**
+- El modelo es `frailty_hazard_map_fit`: exponencial con fragilidad gamma compartida por labor, prior normal(0, 2)
+  en log θ y covarianza robusta agrupada por zona. Con menos de 5 zonas usa Laplace, con aviso.
+- La cota de decisión, para una labor nueva, es 1 − exp(−λ_sup·H·Z_q), con Z_q el cuantil de una Gamma con la cota
+  superior de θ.
+- La línea base NGI sigue siendo exponencial sin fragilidad.
+
+**Cómo se comparó:**
+- Misma semilla, mismos históricos, mismos tramos nuevos y mismos efectos de zona y labor sorteados para ellos. Solo
+  cambia la librería.
+- En el nulo de frontera, el modelo del sitio del script también lleva la fragilidad por labor y la covarianza por
+  zona, como la librería. Sigue anidando a la línea base: la fragilidad con θ → 0 es el exponencial.
+- El pozo tiene 4 zonas, así que en la corrida principal la covarianza de los ajustes es la de Laplace. La corrida
+  con 6 zonas sí usa la covarianza agrupada.
+
+**Recomendación demasiado liviana** (P verdadera condicional sobre 10 %, entre las elecciones; umbral 10 %, H = 365 d):
+
+| Prevalencia | Eventos/parám. | Antes | Después (4 zonas) | Después (6 zonas) |
+|---:|---:|---|---|---|
+| 10 % | 5 | 0/55 | 1/49 (2.0 %) | 1/101 (1.0 %) |
+| 10 % | 10 | 26/363 (7.2 %) | 9/307 (2.9 %) | 0/211 (0 %) |
+| 10 % | 20 | **208/1985 (10.5 %)** | **17/1459 (1.2 %)** [0.4, 2.0] | 8/883 (0.9 %) |
+| 25 % | 5 | sin elecciones | sin elecciones | 0/2 |
+| 25 % | 10 | 16/57 (28 %) | 0/24 (0 %) | 0/1 |
+| 25 % | 20 | **94/457 (20.6 %)** | **9/192 (4.7 %)** [0, 9.3] | 1/119 (0.8 %) |
+| Junto | | **344/2917 (11.8 %)** | **36/2031 (1.8 %)** | **10/1317 (0.8 %)** |
+
+Con la P marginal, la tasa demasiado liviana bajó de 1.8–22.8 % a **0 % en todas las celdas**. Sin compuertas, bajó
+de 8–16 % a 0.5–4 %.
+
+**Cobertura del intervalo al 90 % de P(falla)** (pares tramo × tipo):
+
+| Prevalencia | Eventos/parám. | Marginal antes | Marginal después (4 z) | Condicional antes | Condicional después (4 z) |
+|---:|---:|---|---|---|---|
+| 10 % | 5 | 0.862 | 0.940 | 0.690 | 0.823 |
+| 10 % | 10 | 0.838 | 0.954 | 0.567 | 0.742 |
+| 10 % | 20 | 0.797 | 0.953 | 0.464 | 0.652 |
+| 25 % | 5 | 0.862 | 0.936 | 0.723 | 0.845 |
+| 25 % | 10 | 0.790 | 0.935 | 0.542 | 0.762 |
+| 25 % | 20 | 0.777 | 0.933 | 0.451 | 0.700 |
+
+Con 6 zonas, la marginal cubre 0.92–0.97 y la condicional 0.69–0.83.
+
+**Potencia, elección y nulo de frontera:**
+
+| Prevalencia | Eventos/parám. | «site» antes | «site» después (4 z / 6 z) | Elige antes | Elige después (4 z / 6 z) |
+|---:|---:|---|---|---|---|
+| 10 % | 5 | 1/50 | 2/50 / 2/50 | 1.1 % | 1.0 % / 2.0 % |
+| 10 % | 10 | 5/50 | 5/50 / 4/50 | 7.3 % | 6.1 % / 4.2 % |
+| 10 % | 20 | 25/50 | 25/50 / 15/50 | 39.7 % | 29.2 % / 17.7 % |
+| 25 % | 5 | 0/50 | 0/50 / 2/50 | 0 % | 0 % / 0.04 % |
+| 25 % | 10 | 2/50 | 2/50 / 1/50 | 1.1 % | 0.5 % / 0.02 % |
+| 25 % | 20 | 11/50 | 9/50 / 10/50 | 9.1 % | 3.8 % / 2.4 % |
+
+- **Nulo de frontera:** antes 0/300 y después **0/300 (4 zonas) y 0/300 (6 zonas)**, también con β_rank
+  identificado. Junto después: 0/600, IC 95 % [0 %, 0.64 %]. El modelo de la librería en el mismo nulo también da
+  0/300 y 0/300.
+- **Motivos de no elegir en los modelos «site»:** «ningún tipo elegible cumple el umbral» pasó de 14–60 % a
+  25–77 %, porque la cota de una labor nueva es más alta. La extrapolación quedó en 2–13 %. β_rank no identificado y
+  las cotas en calidad o luz siguieron en 0 %.
+- Las coberturas de los coeficientes quedaron entre 0.86 y 0.98. ln Q con prevalencia 25 % y 20 por parámetro subió
+  de 0.84 a 0.86 con 4 zonas y a 0.98 con 6.
+
+**Lectura:**
+
+1. **La fragilidad resuelve el riesgo principal.** La recomendación demasiado liviana bajó de 11.8 % a 1.8 % con
+   4 zonas y a 0.8 % con 6: la cota de una labor nueva es conservadora, como se buscó. El intervalo cubre ahora la
+   P marginal en 92–97 %, sobre el 90 % nominal y ya sin empeorar con más datos.
+2. **El precio es elegir menos.** Con prevalencia 10 % y 20 por parámetro se elige en 29 % de los tramos (antes
+   40 %); con 6 zonas, en 18 %. Con prevalencia 25 %, en 2–4 %. El modelo dice más veces «ningún tipo cumple el
+   umbral», que es la respuesta honesta cuando la variabilidad entre labores no deja asegurar el 10 %.
+3. **La validación no cambió de carácter:** el nulo de frontera sigue en 0, y la potencia («site») es casi la misma
+   con 4 zonas. Con 6 zonas baja en la celda grande (25 → 15 de 50), porque la zona fuera tiene más pliegues que
+   ganar.
+4. La cobertura condicional (65–85 %) sigue bajo el 90 %, y eso es lo esperado: el intervalo es para una labor
+   nueva cualquiera, no para la labor concreta. Lo que importa para la seguridad es que la cola alta esté cubierta,
+   y la tasa demasiado liviana muestra que lo está.
+
 ## 5. Mínimos propuestos
 
 Cada uno es una **decisión de diseño respaldada por simulación**. No cambié las constantes de `history.py`: decide
@@ -222,22 +312,23 @@ el orquestador.
 | `MIN_LABORS_LEVEL1` | 5 | **5 (se confirma; 8 es mejor)** | Con 3 labores la cobertura del IC cae a 80–85 %. Con 5 es 84–89 % y con 8, 88–92 %. Subir a 8 mejora la cobertura, pero no la lleva al 95 %: el sesgo es del método. |
 | `MIN_TRAMOS_PER_TYPE_LEVEL2` | 10 | **10 (se confirma)** | Con 10 se detecta ln Q en 98 % y ln De en 56 %; lo no detectado sale como «not significant». El falso «incoherent» baja de 8 % (con 5) a 2 %. El conjunto conforme ya cubre. |
 | `MIN_LABORS_PER_TYPE_LEVEL2` | 5 | **5 (se confirma)** | Una mina que llega a 10 por tipo tiene en promedio 5.1 labores en su tipo más escaso: las dos condiciones van juntas. Con 5 por tipo no pasa de 2.8. |
-| `MIN_EVENTS_PER_PARAMETER_LEVEL3` | 10 | **10 (se confirma como piso de «not_calibrated»)** | El mínimo no es lo que protege: la regla de validación no recomienda en el nulo con ningún tamaño (0/300) y casi nunca con 5 por parámetro (≤ 2 %). Subirlo a 20 no baja la tasa demasiado liviana (sigue en 10–21 %); solo pasaría casos «partial» a «not_calibrated». Hay que decir que con 10 por parámetro el modelo llega a «site» en 4–10 % de las minas: para esperarlo en la mitad hacen falta ~20 por parámetro y ~100 labores. |
+| `MIN_EVENTS_PER_PARAMETER_LEVEL3` | 10 | **10 (se confirma como piso de «not_calibrated»; vale antes y después de la fragilidad)** | El mínimo no es lo que protege. Lo que protege es la regla de validación, que no recomienda en el nulo con ningún tamaño (0/300 antes, 0/600 después) y casi nunca con 5 por parámetro (≤ 4 %), y, desde la fragilidad, la cota de una labor nueva: 0–4.7 % de elecciones demasiado livianas por celda. Subirlo a 20 solo pasaría casos «partial» a «not_calibrated». Hay que decir que con 10 por parámetro el modelo llega a «site» en 2–10 % de las minas: para esperarlo en un tercio o en la mitad hacen falta ~20 por parámetro y ~100 labores. |
 | `MIN_ZONES_LEVEL3` | 3 | **3 (no se probó)** | Todas las celdas usaron un pozo de 4 zonas. La simulación no lo confirma ni lo corrige. |
 
 ## 6. Riesgos y propuestas para el orquestador
 
-1. **Recomendación demasiado liviana de 10–21 % con suficiente información** (7 % con pocos «site»). Es el riesgo
-   principal. Propuesta, por decidir: que el intervalo de P de un tramo nuevo incluya la variabilidad entre labores
-   y entre zonas (intervalo de predicción para una labor nueva, con la varianza del efecto estimada o con un
-   inflado conservador). Si no, el ingeniero debe saber que el umbral es para la labor promedio, no para la labor
-   que tiene delante.
-2. **Potencia baja del nivel 3.** Con el mínimo vigente casi nunca se llega a «site». Si se quiere más potencia sin
-   perder tamaño, hay margen: el tamaño real es ≤ 1.3 % frente a la meta de 5 %. Por ejemplo, exigir la zona fuera
-   como no inferioridad, como la temporal, en lugar de superioridad. Habría que volver a simular.
-3. **IC optimistas por agrupamiento.** Afecta al bootstrap de percentiles del nivel 1 (84–89 % con 5 labores), al
-   intervalo de Laplace de P en el nivel 3 (78–86 % de la marginal) y, en menor medida, a ln Q en el nivel 3 con
-   prevalencia alta. Son propiedades de los métodos y no se arreglan subiendo mínimos.
+1. **Recomendación demasiado liviana: resuelta con la fragilidad.** Con el modelo exponencial era 10–21 % con
+   suficiente información (11.8 % junto). Con la fragilidad gamma por labor y la cota de una labor nueva bajó a
+   1.8 % con 4 zonas y 0.8 % con 6 (§4.4). Queda un riesgo residual: el generador usa efectos lognormales por labor
+   **y por zona**, y el modelo solo tiene fragilidad por labor (la zona entra en la covarianza). Con efectos de zona
+   mucho más grandes que los simulados, la tasa podría subir.
+2. **Potencia baja del nivel 3, y ahora se elige menos.** Con el mínimo vigente casi nunca se llega a «site», y la
+   cota conservadora hace que se elija en 29 % de los tramos en el mejor caso (antes 40 %). Si se quiere más
+   potencia, hay margen en el tamaño: es ≤ 0.64 % frente a la meta de 5 %. Por ejemplo, exigir la zona fuera como no
+   inferioridad, como la temporal, en lugar de superioridad. Habría que volver a simular.
+3. **IC optimistas por agrupamiento.** En el nivel 3 la fragilidad lo corrigió: el intervalo de P cubre ahora
+   92–97 % de la marginal, cuando antes cubría 78–86 %. Queda en el nivel 1, donde el bootstrap de percentiles cubre
+   84–89 % con 5 labores. Es propiedad del método y no se arregla subiendo mínimos.
 
 ## 7. Limitaciones
 
@@ -247,7 +338,7 @@ el orquestador.
   - tasa de falla constante en el tiempo (exponencial);
   - un solo mecanismo de práctica;
   - 3 tipos de labor y 5 tipos de sostenimiento;
-  - 4 zonas;
+  - 4 zonas (6 en la sensibilidad de §4.4);
   - sin errores de registro.
 
   Una mina real puede tener efectos de labor más fuertes, dominios mezclados, tasas que cambian con la edad de la

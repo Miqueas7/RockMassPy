@@ -28,8 +28,9 @@ from rockmasspy.history import History, level3_parameters, level3_rows
 from rockmasspy.predictive import (SyntheticTruth, audit_practice, fit_performance, fit_site_correlation, recommend,
                                    synthetic_history, tramo_groups, validate)
 from rockmasspy.predictive import correlations as _corr
-from rockmasspy.predictive.performance import _labor_types, _row, _signs, poisson_deviance
-from rockmasspy.predictive.stats import exponential_hazard_map_fit
+from rockmasspy.predictive import performance as _perf
+from rockmasspy.predictive.performance import MIN_CLUSTERS, _coef_ci, _labor_types, _row, _signs, poisson_deviance
+from rockmasspy.predictive.stats import exponential_hazard_map_fit, frailty_hazard_map_fit
 from rockmasspy.predictive.validation import ngi_category
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -37,6 +38,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 THRESHOLD = 0.10  # P(falla) aceptable fija para la métrica de recomendación demasiado liviana
 EXPOSURE = 365.0  # días, fija
 N_TEST = 100  # tramos nuevos (labores y zonas nuevas) por réplica
+ZONES_L3 = 4  # zonas del pozo del nivel 3 (--zones-l3); la covarianza agrupada por zona pide ≥ 5
 PREVALENCES = (0.10, 0.25)
 EVENTS = (5, 10, 20)
 L1_PAIRS, L1_LABORS = (15, 30, 60), (3, 5, 8)
@@ -207,7 +209,8 @@ def _level3_ready(events):
 
 
 def _cell_history(truth, events, seed):
-    pool, _ = synthetic_history(n_zones=4, labors_per_zone=60, tramos_per_labor=12, truth=truth, seed=seed)
+    pool, _ = synthetic_history(n_zones=ZONES_L3, labors_per_zone=240 // ZONES_L3, tramos_per_labor=12, truth=truth,
+                                seed=seed)
     ready = _level3_ready(events)
     ready.failed = _failed_ids(pool)
     h = grow(pool, np.random.default_rng(seed), ready)
@@ -325,11 +328,14 @@ def level3_effect(out: Out, reps: int, n_boot: int, seed: int, beta0: dict):
 
 def boundary_recommends(h: History, n_boot: int, seed: int) -> tuple[bool, bool]:
     """Regla de `fit_performance` con un modelo del sitio que TAMBIÉN tiene la categoría NGI: anida a la línea base
-    (la categoría sola), así que en el nulo de frontera la regla se mide en su tamaño real. Devuelve (la validación
-    recomienda y el ajuste final convergió; lo anterior y además β_rank identificado y sin cotas en calidad o luz)."""
+    (la categoría sola, exponencial sin fragilidad = fragilidad con θ → 0), así que en el nulo de frontera la regla se
+    mide en su tamaño real. El sitio usa la misma verosimilitud que la librería: fragilidad gamma por labor y
+    covarianza agrupada por zona. Devuelve (la validación recomienda y el ajuste final convergió; lo anterior y
+    además β_rank identificado y sin cotas en calidad o luz, como `recommendation_blockers`)."""
     rows = level3_rows(h)
-    order = {s.codigo_tipo: s.orden for s in h.support_types}
+    order = {s.codigo_tipo: i for i, s in enumerate(sorted(h.support_types, key=lambda s: s.orden))}  # posición
     ts = [t for _, t in rows]
+    labors, zones, years = tramo_groups(ts)
     y = np.array([o.failed for o, _ in rows], dtype=float)
     days = np.array([o.exposure_days for o, _ in rows], dtype=float)
     lnq = np.array([math.log(t.q_valor) for t in ts])
@@ -346,7 +352,9 @@ def boundary_recommends(h: History, n_boot: int, seed: int) -> tuple[bool, bool]
 
     def fit(idx, lt):  # la categoría queda libre, como en la línea base
         idx = np.asarray(idx)
-        return exponential_hazard_map_fit(design(idx, lt), y[idx], days[idx], signs=_signs(use_depth, lt) + (0,))
+        return frailty_hazard_map_fit(design(idx, lt), y[idx], days[idx], [labors[i] for i in idx],
+                                      clusters=[zones[i] for i in idx], signs=_signs(use_depth, lt) + (0,),
+                                      min_clusters=MIN_CLUSTERS)
 
     def site_fp(train, test):
         lt = _labor_types([tipos[i] for i in train])
@@ -362,14 +370,12 @@ def boundary_recommends(h: History, n_boot: int, seed: int) -> tuple[bool, bool]
             raise ValueError("no events in train")
         return -np.expm1(-y[train].sum() / days[train].sum() * days[test])
 
-    labors, zones, years = tramo_groups(ts)
     report = validate(y, {"site": site_fp, "baseline_ngi": baseline_fp, "dummy": dummy_fp}, kind="proba",
                       labors=labors, zones=zones, years=years, metric=poisson_deviance, higher_is_better=False,
                       reference=("dummy", "baseline_ngi"), k=5, n_boot=n_boot, seed=seed)
     final = fit(np.arange(y.size), _labor_types(tipos))
     rec = bool(report.recommend and final.converged)
-    sd = np.sqrt(np.diag(final.cov)[:-1])
-    identified = final.coef[2] + 1.959963984540054 * sd[2] < 0 and not {0, 1, 2} & set(final.active_bounds)
+    identified = _coef_ci(final)[2][1] < 0 and not {0, 1, 2} & set(final.active_bounds)
     return rec, bool(rec and identified)
 
 
@@ -461,12 +467,16 @@ def main(argv=None):
     ap.add_argument("--out", default="simulacion_minimos.csv")
     ap.add_argument("--quick", action="store_true", help="prueba corta: 3 réplicas, n_boot 100")
     ap.add_argument("--levels", default="1,2,3", help="niveles a correr, p. ej. 3")
+    ap.add_argument("--zones-l3", type=int, default=4, help="zonas del pozo del nivel 3 (240 labores en total)")
     a = ap.parse_args(argv)
     if a.quick:
         a.reps, a.reps_l1, a.n_boot = 3, 5, 100
     # solo dentro de este proceso: cada celda se mide con la regla de validación, sin el corte del mínimo vigente
     _corr.MIN_PAIRS_LEVEL1 = _corr.MIN_LABORS_LEVEL1 = 1
-    _hist.MIN_EVENTS_PER_PARAMETER_LEVEL3 = 1  # lo lee history._readiness, que usa fit_performance
+    _hist.MIN_EVENTS_PER_PARAMETER_LEVEL3 = 1  # lo lee history._readiness (audit_history)
+    _perf.MIN_EVENTS_PER_PARAMETER_LEVEL3 = 1  # y performance._readiness, que usa fit_performance
+    global ZONES_L3
+    ZONES_L3 = a.zones_l3
     levels = {int(x) for x in a.levels.split(",")}
     out, t0 = Out(), time.time()
     if 1 in levels:
@@ -483,7 +493,7 @@ def main(argv=None):
     if 2 in levels:
         level2(out, a.reps, a.n_boot, a.seed)
     meta = (0, "meta", f"seed={a.seed};reps={a.reps};reps_l1={a.reps_l1};n_boot={a.n_boot};umbral={THRESHOLD};"
-            f"exposicion_dias={EXPOSURE:g};n_test={N_TEST}", "segundos", round(time.time() - t0, 1), "", "", "", "")
+            f"exposicion_dias={EXPOSURE:g};n_test={N_TEST};zonas_l3={ZONES_L3}", "segundos", round(time.time() - t0, 1), "", "", "", "")
     with open(a.out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(COLUMNS)
