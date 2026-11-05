@@ -1185,8 +1185,7 @@ def _f(v, fmt: str = ".3f") -> str:
 
 def recommendation_blockers(model) -> tuple[str, ...]:
     """Motivos globales por los que `recommend` nunca elegiría un tipo con este modelo (vacío: puede elegir)."""
-    # shortcut: getattr hasta que PerformanceModel.recommendation_blockers exista en fase-4bc; luego, el campo directo
-    return tuple(getattr(model, "recommendation_blockers", ()))
+    return tuple(model.recommendation_blockers)
 
 
 def gain_text(i, fmt: str = ".3f") -> str:
@@ -1197,10 +1196,9 @@ def gain_text(i, fmt: str = ".3f") -> str:
 def _blockers_cell(partition, c, lang) -> str:
     """Cómo pesa la partición en la decisión: labor y zona por superioridad (sus motivos para no recomendar), la
     temporal por no inferioridad (mejora puntual ≥ 0) y la aleatoria no cuenta."""
-    from ..predictive.validation import is_noninferior
 
     if partition == "temporal":
-        return t("noninf_met" if is_noninferior(c) else "noninf_not", lang)
+        return t("noninf_met" if c.noninferior else "noninf_not", lang)
     if partition == "random":
         return t("random_no_weight", lang)
     return "; ".join(c.blockers) or "-"

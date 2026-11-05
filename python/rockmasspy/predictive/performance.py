@@ -1,32 +1,36 @@
 """Nivel 3: modelo de desempeño y recomendación de sostenimiento (Fase 4C, tarea 12; plan R9, R10, R13 y R14).
 
-Modelo de tasa de falla constante (exponencial; MLE de Poisson con offset log t): evento_i ~ Poisson(λ_i·t_i),
-log λ = intercepto + X·β, con t_i = días de exposición hasta la primera falla o hasta la última inspección
-(censurada). P(falla dentro de H días) = 1 − exp(−λ·H). La exposición entra como offset y no como variable: con una
-logística, los tramos fallados (exposición cortada por la falla) empujarían su coeficiente a 0 o al signo contrario.
-MAP con prior Cauchy y Laplace (Gelman et al. 2008 [V2], `stats.exponential_hazard_map_fit`) y restricciones de
-signo (`MODELOS_SOSTENIMIENTO.md` §3.3, decisión de diseño): peor macizo, más luz y más profundidad no bajan la tasa;
-más sostenimiento no la sube. Las filas salen de `history.level3_rows`, la misma selección que cuenta la preparación
-del nivel 3.
+Modelo de tasa de falla constante con fragilidad gamma compartida por labor: evento_i ~ Poisson(λ_i·Z_g·t_i),
+log λ = intercepto + X·β, Z_g ~ Gamma(media 1, varianza θ), con t_i = días de exposición hasta la primera falla o
+hasta la última inspección (censurada). La exposición entra como offset y no como variable: con una logística, los
+tramos fallados (exposición cortada por la falla) empujarían su coeficiente a 0 o al signo contrario. La fragilidad
+recoge la heterogeneidad entre labores (las labores de una mina no son copias), que sin ella deja los intervalos
+demasiado angostos. MAP de β y log θ sobre la verosimilitud marginal cerrada (`stats.frailty_hazard_map_fit`): prior
+Cauchy en β (Gelman et al. 2008 [V2]), normal(0, 2) en log θ y restricciones de signo (`MODELOS_SOSTENIMIENTO.md`
+§3.3, decisión de diseño): peor macizo, más luz y más profundidad no bajan la tasa; más sostenimiento no la sube. La
+covarianza es la sándwich agrupada por zona (los tramos de una zona comparten efecto), con t de Student; con menos de
+5 zonas, la de Laplace con aviso. Las filas salen de `history.level3_rows`.
 
 Validación (R7) con `validate`. Métrica de decisión: la devianza de Poisson por tramo, media de μ − d·log μ con
-μ_i = λ_i·t_i (menor es mejor), que es la regla de puntaje propia de este modelo. Decisión de diseño: NO se usa el
-Brier de P(falla dentro de la exposición propia), 1 − exp(−λ_i·t_i), porque en un tramo fallado la exposición
-termina en la falla (ventana informativa): con ese Brier el ficticio de prevalencia le gana al modelo verdadero.
-Por lo mismo, las métricas fuera de pliegue son las de una tasa: devianza, eventos observados/esperados, pendiente
-de calibración y C de Harrell. Referencias: el ficticio de tasa constante (la de train) y la línea base de nivel 0,
-que es el mismo modelo exponencial con una sola variable, la categoría de la carta Q NGI (`ngi_category`), sin cota
-de signo (la referencia más fuerte con esa variable); la exposición entra como offset en las tres. Se reajusta en
-cada pliegue.
+μ_i = λ_i·t_i, la media marginal de eventos (menor es mejor), que es la regla de puntaje propia de una tasa con
+exposición. Decisión de diseño: NO se usa el Brier de P(falla dentro de la exposición propia), porque en un tramo
+fallado la exposición termina en la falla (ventana informativa): con ese Brier el ficticio de prevalencia le gana al
+modelo verdadero. Por lo mismo, las métricas fuera de pliegue son las de una tasa: devianza, eventos
+observados/esperados, pendiente de calibración y C de Harrell. Referencias: el ficticio de tasa constante (la de
+train) y la línea base de nivel 0, el modelo exponencial con una sola variable, la categoría de la carta Q NGI
+(`ngi_category`), sin cota de signo; la exposición entra como offset en las tres. Se reajusta en cada pliegue.
 
-La recomendación (R10, §4 punto 7) muestra P(falla en H días) con su intervalo para CADA tipo de la mina; elige el
-más liviano elegible cuyo límite superior queda bajo el umbral del ingeniero (umbral y H obligatorios), solo si el
-modelo está calibrado al sitio, el efecto del sostenimiento está identificado y el tramo no extrapola. La decisión
-final queda en las columnas `decision_ingeniero` y `motivo`.
+La recomendación (R10, §4 punto 7) es para una labor NUEVA: muestra P(falla en H días) para CADA tipo de la mina
+(central = la media marginal 1 − (1 + θλH)^(−1/θ)); elige el más liviano elegible cuyo límite superior
+1 − exp(−λ_sup·H·Z_q) queda bajo el umbral del ingeniero (umbral y H obligatorios), con λ_sup la cota de η al nivel y
+Z_q el cuantil `level` de la fragilidad (doblemente conservador). Solo elige si el modelo está calibrado al sitio,
+el efecto del sostenimiento está identificado y el tramo no extrapola. La decisión final queda en las columnas
+`decision_ingeniero` y `motivo`.
 
 Privacidad (R13): el modelo y su JSON nunca llevan filas ni ids; los mensajes y las razones solo llevan nombres de
 variables, códigos de tipo de sostenimiento y conteos. El `id_tramo` va como campo de `Recommendation` y en la
-tabla de resultados, nunca dentro de un texto. Los rangos se guardan redondeados hacia afuera a 3 cifras.
+tabla de resultados, nunca dentro de un texto. Los rangos se guardan redondeados hacia afuera a 3 cifras y un modelo
+de menos de 100 tramos no se guarda (sus resúmenes casi reconstruyen las filas).
 """
 
 from __future__ import annotations
@@ -41,23 +45,28 @@ from types import SimpleNamespace
 
 import numpy as np
 from scipy.stats import norm
+from scipy.stats import t as student_t
 
 from .. import __version__
 from ..batch import write_table
-from ..history import MIN_TRAMOS_PER_TYPE_LEVEL2, History, _readiness, level3_rows
-from .stats import ExponentialHazardFit, exponential_hazard_map_fit
-from .validation import (Comparison, Improvement, ValidationReport, group_kfold, is_noninferior, ngi_category,
+from ..history import (MIN_EVENTS_PER_PARAMETER_LEVEL3, MIN_TRAMOS_PER_TYPE_LEVEL2, MIN_ZONES_LEVEL3, History,
+                       LevelReadiness, labor_key, level3_parameters, level3_rows)
+from .stats import FrailtyHazardFit, exponential_hazard_map_fit, frailty_hazard_map_fit
+from .validation import (Comparison, Improvement, ValidationReport, _tramo_number, group_kfold, ngi_category,
                          out_of_fold, tramo_groups, validate)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CALIBRATION_LEVELS = ("site", "partial", "not_calibrated")
 QUALITIES = ("q", "rmr")
 MAIN, BASELINE, DUMMY = "site", "baseline_ngi", "dummy"
-COEF_LEVEL = 0.95  # IC de Laplace de los coeficientes
+COEF_LEVEL = 0.95  # IC de los coeficientes (covarianza agrupada por zona)
 MAHALANOBIS_PERCENTILE = 99.0
-FEW_ROWS_WARNING = 100  # con menos tramos, los resúmenes guardados se acercan a las filas
+FEW_ROWS = 100  # con menos tramos, los resúmenes guardados casi reconstruyen las filas: no se guarda el modelo
+MIN_CLUSTERS = 5  # zonas mínimas para la covarianza agrupada; con menos, Laplace con aviso
+MISSING_LABOR_TYPE = "(missing)"  # tipo_labor vacío en el entrenamiento: un nivel propio, como en el nivel 2
+NO_LABOR, NO_ZONE = "(no labor)", "(no zone)"
 _ONEHOT = "tipo_labor="
-_RANK = 2  # columna del rango del sostenimiento
+_RANK = 2  # columna del rango del sostenimiento (posición 0..K−1 en el orden de `orden`)
 
 
 # ---------- datos del nivel 3 ----------
@@ -68,9 +77,10 @@ def _get(t, name):
 
 
 def _labor_types(tipos) -> tuple[str, ...]:
-    """Tipos de labor para la codificación una-caliente: el primero (orden alfabético) es la referencia."""
-    lt = sorted({x for x in tipos if x is not None})
-    return tuple(lt) if len(lt) >= 2 else ()
+    """Niveles de tipo_labor para la una-caliente (alfabéticos, «(missing)» al final); el primero es la referencia.
+    Vacío con menos de 2 niveles."""
+    lv = sorted({MISSING_LABOR_TYPE if x is None else x for x in tipos}, key=lambda x: (x == MISSING_LABOR_TYPE, x))
+    return tuple(lv) if len(lv) >= 2 else ()
 
 
 def _feature_names(quality: str, use_depth: bool, labor_types) -> tuple[str, ...]:
@@ -85,6 +95,7 @@ def _signs(use_depth: bool, labor_types) -> tuple[int, ...]:
 
 
 def _row(quality_value: float, lnde: float, rank: float, depth, tipo, use_depth, labor_types):
+    tipo = MISSING_LABOR_TYPE if tipo is None else tipo
     return [quality_value, lnde, rank] + ([depth] if use_depth else []) + [float(tipo == x) for x in labor_types[1:]]
 
 
@@ -97,25 +108,34 @@ def _round_out(x: float, up: bool) -> float:
     return max(r, x) if up else min(r, x)
 
 
+def _calibration(fit: FrailtyHazardFit | None, ready: bool, validation_recommend: bool) -> str:
+    """El estado de calibración: una sola regla para el ajuste y para la carga del JSON (I3)."""
+    if fit is None or not ready:
+        return "not_calibrated"
+    return "site" if fit.converged and validation_recommend else "partial"
+
+
 # ---------- el modelo ----------
 
 @dataclass(frozen=True)
 class PerformanceModel:
     """Modelo de desempeño del nivel 3. No lleva filas ni ids: solo coeficientes, rangos, métricas y conteos.
 
-    `fit` es la tasa de falla exponencial MAP en la escala ORIGINAL de `features` (ln Q o RMR, ln De, rango del
-    tipo, profundidad si está en todas las filas y `tipo_labor=<tipo>` una-caliente contra `labor_types[0]`), con
-    λ por día. `coef_ci` = IC 95 % de Laplace de cada coeficiente. `support_counts` = tramos usables de cada tipo
-    en el entrenamiento (solo el conteo). `train_min`/`train_max`, `exposure_min`/`exposure_max` (redondeados hacia
+    `fit` es la tasa de falla con fragilidad gamma por labor, en la escala ORIGINAL de `features` (ln Q o RMR,
+    ln De, rango del tipo = su posición 0..K−1 en el orden de `orden`, profundidad si está en todas las filas y
+    `tipo_labor=<nivel>` una-caliente contra `labor_types[0]`), con λ por día y `fit.theta` la varianza de la
+    fragilidad. `coef_ci` = IC 95 % de cada coeficiente con la covarianza agrupada por zona (t con C − 1 grados de
+    libertad) o la de Laplace con menos de 5 zonas. `support_counts` = tramos usables de cada tipo en el
+    entrenamiento (solo el conteo). `train_min`/`train_max`, `exposure_min`/`exposure_max` (redondeados hacia
     afuera a 3 cifras), `maha_mean`, `maha_inv` (pseudoinversa de la covarianza) y `maha_p99` son el dominio de
     aplicabilidad.
     """
 
     quality: str
     features: tuple[str, ...]
-    labor_types: tuple[str, ...]  # () si hay menos de 2 tipos con datos
+    labor_types: tuple[str, ...]  # () si hay menos de 2 niveles con datos
     use_depth: bool
-    fit: ExponentialHazardFit | None = field(repr=False)  # None: todos los tramos con el mismo resultado
+    fit: FrailtyHazardFit | None = field(repr=False)  # None: todos los tramos con el mismo resultado
     signs: tuple[int, ...]
     coef_ci: tuple[tuple[float, float], ...]
     active_bounds: tuple[str, ...]  # variables con la cota de signo activa (coeficiente 0)
@@ -124,7 +144,7 @@ class PerformanceModel:
     calibration: str  # uno de CALIBRATION_LEVELS
     calibration_reason: str
     metrics: dict  # fuera de pliegue (partición por labor): devianza, observados/esperados, pendiente, C
-    calibration_curve: tuple[tuple[float, float, int], ...]  # (μ medio, falla observada, n) por decil de μ
+    calibration_curve: tuple[tuple[float, float, int], ...]  # (μ medio, falla observada, n) por decil de λ
     validation: ValidationReport | None = field(repr=False)
     train_min: tuple[float, ...]
     train_max: tuple[float, ...]
@@ -142,6 +162,22 @@ class PerformanceModel:
     def coefficients(self) -> dict[str, float]:
         return {} if self.fit is None else dict(zip(self.features, map(float, self.fit.coef)))
 
+    @property
+    def recommendation_blockers(self) -> tuple[str, ...]:
+        """Motivos globales por los que `recommend` nunca elige un tipo con este modelo (vacío: puede elegir).
+        Se derivan de los campos guardados, así que no pueden quedar desfasados del modelo."""
+        out = []
+        if self.calibration != "site":
+            out.append(f"no choice ({self.calibration}): {self.calibration_reason}")
+        if self.fit is not None:
+            if "support_rank" in self.active_bounds:
+                out.append("support effect not identified (bound active)")
+            elif not self.coef_ci[_RANK][1] < 0:  # el IC 95 % de β_rank toca el cero
+                out.append("support effect not identified")
+            if self.features[0] in self.active_bounds or "ln_de" in self.active_bounds:
+                out.append("model ignores rock quality/span (bound active)")
+        return tuple(out)
+
 
 def _expected_events(p) -> np.ndarray:
     """μ_i = λ_i·t_i desde P_i = 1 − exp(−μ_i) (lo que devuelven los `fit_predict`)."""
@@ -150,8 +186,8 @@ def _expected_events(p) -> np.ndarray:
 
 def poisson_deviance(y, p) -> float:
     """Media de μ − d·log μ (−log verosimilitud de Poisson por tramo, sin constantes): la métrica de decisión del
-    nivel 3. Es una regla de puntaje propia para la tasa con exposición; el Brier de P(falla dentro de la exposición
-    propia) no lo es, porque en un tramo fallado la exposición termina en la falla (ventana informativa)."""
+    nivel 3, con μ = −log(1 − p). Es una regla de puntaje propia para la tasa con exposición; el Brier de P(falla
+    dentro de la exposición propia) no lo es, porque en un tramo fallado la exposición termina en la falla."""
     mu = _expected_events(p)
     return float(np.mean(mu - np.asarray(y, dtype=float) * np.log(mu)))
 
@@ -196,10 +232,25 @@ def _validation_reason(report: ValidationReport) -> str:
         else:
             parts.append(f"{name}: {report.skipped.get(name, 'not run')}")
     temporal = report.results.get("temporal")
-    if temporal is not None and not is_noninferior(temporal):  # no inferioridad (ValidationReport.recommend)
+    if temporal is not None and not temporal.noninferior:  # no inferioridad (ValidationReport.recommend)
         parts += [f"temporal: {temporal.main} worse than {r} in the last year"
                   for r, i in temporal.improvements.items() if i.value < 0]
     return "; ".join(parts)
+
+
+def _readiness(rows) -> LevelReadiness:
+    """Preparación del nivel 3 sobre las filas que de verdad usa el ajuste (I2), con los mínimos de history."""
+    failures = sum(o.failed for o, _ in rows)
+    return LevelReadiness(3, "performance", {"minority_class": min(failures, len(rows) - failures),
+                                             "zones": len({t.zona_nivel for _, t in rows} - {None})},
+                          {"minority_class": MIN_EVENTS_PER_PARAMETER_LEVEL3 * level3_parameters(rows),
+                           "zones": MIN_ZONES_LEVEL3})
+
+
+def _coef_ci(fit: FrailtyHazardFit) -> tuple[tuple[float, float], ...]:
+    z = norm.ppf(0.5 + COEF_LEVEL / 2) if fit.df is None else float(student_t.ppf(0.5 + COEF_LEVEL / 2, fit.df))
+    sd = np.sqrt(np.diag(fit.cov)[:-1])
+    return tuple((float(c - z * s), float(c + z * s)) for c, s in zip(fit.coef, sd))
 
 
 def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot: int = 2000,
@@ -207,30 +258,31 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
     """Ajusta el modelo de desempeño del nivel 3 (R9, R10) y lo valida contra el ficticio y la línea base NGI (R7).
 
     - `quality`: "q" (ln Q, por defecto) o "rmr" (RMR tal como viene; las filas sin RMR quedan fuera, con aviso).
-    - Estado: "site" (cumple la preparación del nivel 3 de `audit_history`, `ValidationReport.recommend` es
-      verdadero y el ajuste convergió), "partial" (cumple el mínimo pero no lo demás: muestra P(falla), no elige)
-      y "not_calibrated" (bajo el mínimo: el ajuste igual se hace, es la curva del prior actualizada con pocos
-      datos; sin fallas o sin tramos estables no hay ajuste).
+    - Estado: "site" (cumple la preparación del nivel 3 sobre las filas del ajuste, `ValidationReport.recommend`
+      es verdadero y el ajuste convergió), "partial" (cumple el mínimo pero no lo demás: muestra P(falla), no
+      elige) y "not_calibrated" (bajo el mínimo: el ajuste igual se hace, es la curva del prior actualizada con
+      pocos datos; sin fallas o sin tramos estables no hay ajuste).
     """
     if quality not in QUALITIES:
         raise ValueError(f"quality must be one of {', '.join(QUALITIES)}")
     rows = level3_rows(history)
     warns = []
     if quality == "rmr":
-        kept = tuple(r for r in rows if r[1].rmr_valor is not None)
+        kept = tuple(r for r in rows if _tramo_number(r[1], "rmr_valor", allow_zero=True) is not None)
         if len(kept) < len(rows):
             warns.append(f"{len(rows) - len(kept)} tramo(s) without rmr_valor left out")
         rows = kept
     if len(rows) < 2:
         raise ValueError(f"level 3 needs at least 2 usable tramos (inspected, with Q, span, ESR, installed support "
                          f"and exposure), got {len(rows)}")
-    order = {s.codigo_tipo: s.orden for s in history.support_types}
+    support = tuple((s.codigo_tipo, s.orden) for s in sorted(history.support_types, key=lambda s: s.orden))
+    position = {c: i for i, (c, _) in enumerate(support)}  # I1: la posición, no el valor de `orden`
     ts = [t for _, t in rows]
     y = np.array([o.failed for o, _ in rows], dtype=float)
     days = np.array([o.exposure_days for o, _ in rows], dtype=float)
     qual = np.array([math.log(t.q_valor) if quality == "q" else t.rmr_valor for t in ts], dtype=float)
     lnde = np.array([math.log(t.luz_m / t.esr) for t in ts])
-    rank = np.array([order[t.sost_instalado] for t in ts], dtype=float)
+    rank = np.array([position[t.sost_instalado] for t in ts], dtype=float)
     tipos = [t.tipo_labor for t in ts]
     use_depth = all(t.profundidad_m is not None for t in ts)
     depth = np.array([t.profundidad_m for t in ts], dtype=float) if use_depth else None
@@ -241,6 +293,10 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
     for name, col in zip(("quality", "ln_de", "support_rank"), (qual, lnde, rank)):
         if np.ptp(col) == 0:
             raise ValueError(f"level 3: {name} is the same in every usable tramo; its effect cannot be estimated")
+    labors, zones, years = tramo_groups(ts)
+    frail = [NO_LABOR if g is None else g for g in labors]  # sin labor: un solo grupo, como en el nivel 2
+    clusters = [NO_ZONE if z is None else z for z in zones]
+    labors = [g if g is not None else (None, i) for i, g in enumerate(labors)]  # validación: su propio grupo
 
     def design(idx, lt):
         return np.array([_row(qual[i], lnde[i], rank[i], None if depth is None else depth[i], tipos[i], use_depth,
@@ -248,8 +304,9 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
 
     def site_fp(train, test):  # la codificación de tipo_labor se arma con train (R7)
         lt = _labor_types([tipos[i] for i in train])
-        f = exponential_hazard_map_fit(design(train, lt), y[train], days[train], signs=_signs(use_depth, lt))
-        return f.prob_within(design(test, lt), days[test])
+        f = frailty_hazard_map_fit(design(train, lt), y[train], days[train], [frail[i] for i in train],
+                                   clusters=[clusters[i] for i in train], signs=_signs(use_depth, lt))
+        return f.prob_within(design(test, lt), days[test])  # μ = λ·t, la media marginal de eventos
 
     X0 = np.array([[ngi_category(t)] for t in ts], dtype=float)
 
@@ -261,8 +318,6 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
             raise ValueError("no events in train")
         return -np.expm1(-y[train].sum() / days[train].sum() * days[test])
 
-    labors, zones, years = tramo_groups(ts)
-    labors = [g if g is not None else (None, i) for i, g in enumerate(labors)]  # sin labor: su propio grupo
     report = validate(y, {MAIN: site_fp, BASELINE: baseline_fp, DUMMY: dummy_fp}, kind="proba",
                       labors=labors, zones=zones, years=years, metric=poisson_deviance, higher_is_better=False,
                       reference=(DUMMY, BASELINE), k=k, n_boot=n_boot, seed=seed)
@@ -280,49 +335,52 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
     signs = _signs(use_depth, labor_types)
     names = _feature_names(quality, use_depth, labor_types)
     # sin fallas o sin tramos estables no hay tasa que ajustar (la guarda de stats): sin modelo
-    fit = exponential_hazard_map_fit(X, y, days, signs=signs) if 0 < y.sum() < y.size else None
+    fit = (frailty_hazard_map_fit(X, y, days, frail, clusters=clusters, signs=signs, min_clusters=MIN_CLUSTERS)
+           if 0 < y.sum() < y.size else None)
     coef_ci, active = (), ()
     if fit is None:
         warns.append("no events / no non-events: every usable tramo has the same outcome; no model is fitted")
     else:
-        z = norm.ppf(0.5 + COEF_LEVEL / 2)
-        sd = np.sqrt(np.diag(fit.cov)[:-1])
-        coef_ci = tuple((float(c - z * s), float(c + z * s)) for c, s in zip(fit.coef, sd))
+        coef_ci = _coef_ci(fit)
         active = tuple(names[j] for j in fit.active_bounds)
         if not fit.converged:
             warns.append(f"the final fit did not converge: {fit.message}")
+        if fit.cov_kind != "cluster":
+            warns.append(f"fewer than {MIN_CLUSTERS} zones: Laplace covariance (it ignores the correlation within "
+                         "a zone, so the intervals may be too narrow)")
     warns += [f"sign bound active for {a}: its coefficient is 0 (the data push it the other way)" for a in active]
-    if labor_types and any(x is None for x in tipos):
-        warns.append(f"{sum(x is None for x in tipos)} tramo(s) without tipo_labor read as the reference type")
+    n_missing = sum(x is None for x in tipos)
+    if labor_types and n_missing:
+        warns.append(f"{n_missing} tramo(s) without tipo_labor: own level {MISSING_LABOR_TYPE}")
     n_eval = sum(o.start_from_evaluation for o, _ in rows)
     if n_eval:
         warns.append(f"{n_eval} tramo(s) without fecha_instalacion: exposure counted from fecha_evaluacion")
-    if y.size < FEW_ROWS_WARNING:
-        warns.append(f"fewer than {FEW_ROWS_WARNING} usable tramos: the stored ranges, mean and covariance are "
-                     "close to the training rows; share the model file with care")
+    if y.size < FEW_ROWS:
+        warns.append(f"fewer than {FEW_ROWS} usable tramos: the stored ranges, mean and covariance are close to the "
+                     "training rows, so the model cannot be saved")
 
-    ready = next(r for r in _readiness(history) if r.level == 3)
+    ready = _readiness(rows)
+    level = _calibration(fit, ready.ready, report.recommend)
     if fit is None:
-        level, reason = "not_calibrated", "not calibrated to the site: no events / no non-events, no model is fitted"
+        reason = "not calibrated to the site: no events / no non-events, no model is fitted"
     elif not ready.ready:
         miss = ", ".join(f"{k} short by {v}" for k, v in ready.missing.items() if v)
-        level, reason = "not_calibrated", (f"not calibrated to the site: below the level-3 minimum ({miss}); the "
-                                           "fit is the prior updated with few data")
+        reason = f"not calibrated to the site: below the level-3 minimum ({miss}); the fit is the prior updated " \
+                 "with few data"
     elif not fit.converged:
-        level, reason = "partial", "the final fit did not converge"
-    elif not report.recommend:
-        level, reason = "partial", _validation_reason(report)
+        reason = "the final fit did not converge"
+    elif level == "partial":
+        reason = _validation_reason(report)
     else:
-        level, reason = "site", "calibrated to the site: the labor and zone validations recommend"
+        reason = "calibrated to the site: the labor and zone validations recommend"
 
     cov = np.cov(X, rowvar=False).reshape(X.shape[1], X.shape[1])
     inv = np.linalg.pinv(cov)
     mean = X.mean(axis=0)
     dist = np.sqrt(np.einsum("ij,jk,ik->i", X - mean, inv, X - mean).clip(min=0))
-    support = tuple((s.codigo_tipo, s.orden) for s in sorted(history.support_types, key=lambda s: s.orden))
     installed = Counter(t.sost_instalado for t in ts)
     counts = {"tramos": int(y.size), "failures": int(y.sum()), "non_failures": int(y.size - y.sum()),
-              "labors": len(set(labors)), "zones": len({x for x in zones if x is not None}),
+              "labors": len(set(labors)), "zones": ready.counts["zones"],
               "parameters": len(names), "start_from_evaluation": n_eval,
               "minority_class": ready.counts["minority_class"],
               "minority_class_minimum": ready.minimums["minority_class"]}
@@ -344,9 +402,9 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
 class SupportOption:
     code: str
     order: int
-    p_failure: float  # P(falla dentro del horizonte)
+    p_failure: float  # P(falla dentro del horizonte) para una labor nueva (media marginal)
     p_low: float
-    p_high: float
+    p_high: float  # cota conservadora: 1 − exp(−λ_sup·H·Z_q)
     meets_threshold: bool  # límite superior ≤ umbral
     mahalanobis: float
     extrapolated: bool  # el tramo extrapola, o este tipo (rango fuera del entrenamiento o Mahalanobis > p99)
@@ -413,14 +471,14 @@ def _rec_level(level) -> float:
 def _tramo_inputs(model: PerformanceModel, t):
     """(calidad, ln De, profundidad, tipo, faltantes) de un tramo; faltantes = nombres de columnas, sin valores."""
     qcol = "q_valor" if model.quality == "q" else "rmr_valor"
-    vals = {c: _get(t, c) for c in (qcol, "luz_m", "esr", "profundidad_m")}
-    missing = [c for c in (qcol, "luz_m", "esr")
-               if not _number(vals[c]) or (c != "rmr_valor" and vals[c] <= 0)]
-    if model.use_depth and (not _number(vals["profundidad_m"]) or vals["profundidad_m"] < 0):
+    vals = {c: _tramo_number(t, c, allow_zero=c in ("rmr_valor", "profundidad_m"))
+            for c in (qcol, "luz_m", "esr", "profundidad_m")}
+    missing = [c for c in (qcol, "luz_m", "esr") if vals[c] is None]
+    if model.use_depth and vals["profundidad_m"] is None:
         missing.append("profundidad_m")
     if missing:
         return None, None, None, None, missing
-    qual = math.log(vals[qcol]) if model.quality == "q" else float(vals[qcol])
+    qual = math.log(vals[qcol]) if model.quality == "q" else vals[qcol]
     return qual, math.log(vals["luz_m"] / vals["esr"]), vals["profundidad_m"], _get(t, "tipo_labor"), []
 
 
@@ -428,32 +486,19 @@ def _model_row(model, qual, lnde, rank, depth, tipo):
     return _row(qual, lnde, rank, depth, tipo, model.use_depth, model.labor_types)
 
 
-def _block_reason(model: PerformanceModel) -> str | None:
-    """Motivo del modelo para no elegir en ningún tramo, o None (R10 y la revisión del nivel 3)."""
-    if model.calibration != "site":
-        return f"no choice ({model.calibration}): {model.calibration_reason}"
-    if "support_rank" in model.active_bounds:
-        return "support effect not identified (bound active)"
-    if not model.coef_ci[_RANK][1] < 0:  # el IC 95 % de β_rank toca el cero
-        return "support effect not identified"
-    if model.features[0] in model.active_bounds or "ln_de" in model.active_bounds:
-        return "model ignores rock quality/span (bound active)"
-    return None
-
-
 def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, practice=None,
               level: float = 0.9) -> tuple[Recommendation, ...]:
-    """P(falla dentro de `exposure_days`) con su intervalo (`level` en [0.5, 1), 90 % por defecto) de cada tipo de
-    la mina para cada tramo (R10). Nunca hace caer el lote: un tramo con datos inválidos sale sin opciones.
+    """P(falla dentro de `exposure_days`) para una labor nueva, con su intervalo (`level` en [0.5, 1), 90 % por
+    defecto), de cada tipo de la mina para cada tramo (R10). Nunca hace caer el lote: un tramo con datos
+    inválidos sale sin opciones.
 
     - `threshold` (P(falla) aceptable) y `exposure_days` (horizonte H en días) son OBLIGATORIOS: los fija el
       ingeniero.
-    - Se elige el tipo más liviano ELEGIBLE cuyo límite SUPERIOR queda ≤ el umbral. Elegible: con al menos
-      `MIN_TRAMOS_PER_TYPE_LEVEL2` tramos en el entrenamiento y sin extrapolar ese tipo (rango del tipo fuera del
-      entrenamiento o Mahalanobis sobre el p99). No se elige en ningún tipo si: la calibración no es "site"; el
-      efecto del sostenimiento no está identificado (cota activa, o el IC 95 % de β_rank no queda bajo 0); la cota
-      está activa en la calidad o en ln De; o el tramo extrapola (Q, De, profundidad o H fuera del rango de
-      entrenamiento, o tipo de labor no visto o vacío). Las opciones se muestran igual.
+    - Se elige el tipo más liviano ELEGIBLE cuyo límite SUPERIOR, 1 − exp(−λ_sup·H·Z_q), queda ≤ el umbral.
+      Elegible: con al menos `MIN_TRAMOS_PER_TYPE_LEVEL2` tramos en el entrenamiento y sin extrapolar ese tipo
+      (rango del tipo fuera del entrenamiento o Mahalanobis sobre el p99). No se elige en ningún tipo si
+      `model.recommendation_blockers` no está vacío o si el tramo extrapola (Q, De, profundidad o H fuera del rango
+      de entrenamiento, o tipo de labor no visto o vacío). Las opciones se muestran igual.
     - `tramos`: `HistoryTramo`, o cualquier objeto (o dict) con `id_tramo`, `q_valor` (o `rmr_valor`), `luz_m`,
       `esr`, `tipo_labor` y `profundidad_m` (si el modelo la usa).
     - `practice`: el nivel 2, opcional. Protocolo: cualquier objeto con `conformal_set(tramo) -> tuple[str, ...]`
@@ -465,7 +510,8 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
     lo_tr, hi_tr = np.array(model.train_min), np.array(model.train_max)
     mean, inv = np.array(model.maha_mean), np.array(model.maha_inv)
     n_cont = 3 + model.use_depth  # columnas no una-caliente
-    block = _block_reason(model) if model.fit is not None else None
+    blockers = model.recommendation_blockers
+    block = blockers[0] if blockers else None
     bound_notes = tuple(f"sign bound active for {a}" for a in model.active_bounds)
     out = []
     for t in tramos:
@@ -482,13 +528,13 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
             return Recommendation(tid, (), None, reason, (), False, (), model.calibration, thr, exp, lv, cset,
                                   tuple(notes))
         if model.fit is None:
-            out.append(empty(f"no choice ({model.calibration}): {model.calibration_reason}"))
+            out.append(empty(block))
             continue
         qual, lnde, depth, tipo, missing = _tramo_inputs(model, t)
         if missing:
             out.append(empty(f"missing or invalid input: {', '.join(missing)}"))
             continue
-        X = np.array([_model_row(model, qual, lnde, r, depth, tipo) for _, r in model.support_types])
+        X = np.array([_model_row(model, qual, lnde, i, depth, tipo) for i in range(len(model.support_types))])
         p, p_lo, p_hi = model.fit.prob_interval(X, exp, lv)
         d = np.sqrt(np.einsum("ij,jk,ik->i", X - mean, inv, X - mean).clip(min=0))
         outside = (X[:, :n_cont] < lo_tr[:n_cont]) | (X[:, :n_cont] > hi_tr[:n_cont])
@@ -497,7 +543,7 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
                      if j != _RANK and outside[0, j]]
         if not model.exposure_min <= exp <= model.exposure_max:
             ext_notes.append("exposure_days outside the training range of exposures")
-        if model.labor_types and tipo not in model.labor_types:
+        if model.labor_types and (tipo is None or tipo not in model.labor_types):
             ext_notes.append("tipo_labor missing or not seen in training")
         tramo_ext = bool(ext_notes)
         options = []
@@ -560,8 +606,8 @@ def save_recommendations(recs, path) -> Path:
 
 @dataclass(frozen=True)
 class IsoprobabilityGrid:
-    """Mallas n×n en el plano (log10 Q, log10 De) y P(falla en `exposure_days`) para un tipo de sostenimiento
-    (al estilo de Mawdesley et al. 2001)."""
+    """Mallas n×n en el plano (log10 Q, log10 De) y P(falla en `exposure_days`) de una labor nueva (media
+    marginal) para un tipo de sostenimiento (al estilo de Mawdesley et al. 2001)."""
 
     log10_q: np.ndarray
     log10_de: np.ndarray
@@ -581,7 +627,7 @@ def isoprobability_grid(model: PerformanceModel, *, support_code: str, exposure_
         raise ValueError("the isoprobability grid in (Q, De) needs a model fitted with quality='q'")
     if model.fit is None:
         raise ValueError("the model has no fit (no events / no non-events): there is no isoprobability grid")
-    ranks = dict(model.support_types)
+    ranks = {c: i for i, (c, _) in enumerate(model.support_types)}
     if support_code not in ranks:
         raise ValueError(f"support_code must be one of {', '.join(ranks)}")
     exp = _exposure(exposure_days)
@@ -598,18 +644,26 @@ def isoprobability_grid(model: PerformanceModel, *, support_code: str, exposure_
     LQ, LD = np.meshgrid(lq, ld)
     X = np.array([_model_row(model, a * math.log(10), b * math.log(10), ranks[support_code], depth_m, tipo)
                   for a, b in zip(LQ.ravel(), LD.ravel())])
-    return IsoprobabilityGrid(LQ, LD, model.fit.prob_within(X, exp).reshape(LQ.shape), support_code, exp, tipo,
+    return IsoprobabilityGrid(LQ, LD, model.fit.prob_marginal(X, exp).reshape(LQ.shape), support_code, exp, tipo,
                               None if not model.use_depth else float(depth_m))
 
 
 # ---------- JSON ----------
 
 _FIT_KEYS = ("coef", "intercept", "cov", "active_bounds", "converged", "n", "loglik", "x_mean", "x_scale", "message",
-             "signs", "n_events")
+             "signs", "n_events", "theta", "log_theta_sd", "cov_kind", "n_clusters", "df", "n_groups")
+
+
+class _ModelFileError(ValueError):
+    """Un archivo de modelo inválido; el mensaje nombra la clave, nunca su valor."""
 
 
 def save_model(model: PerformanceModel, path) -> Path:
-    """Guarda el modelo en JSON (con `schema_version`). Nunca lleva filas ni ids (R10, R13)."""
+    """Guarda el modelo en JSON (con `schema_version`). Nunca lleva filas ni ids (R10, R13). Un modelo de menos de
+    100 tramos no se guarda: su media, su covarianza y sus rangos casi reconstruyen las filas."""
+    if model.counts.get("tramos", 0) < FEW_ROWS:
+        raise ValueError(f"the model was fitted with fewer than {FEW_ROWS} usable tramos: its stored summaries "
+                         "would nearly rebuild the training rows, so it is not saved")
     f = model.fit
     d = {k: getattr(model, k) for k in model.__dataclass_fields__ if k not in ("fit", "validation")}
     d["fit"] = None if f is None else {
@@ -627,58 +681,148 @@ def _tuples(x):
     return tuple(_tuples(i) for i in x) if isinstance(x, list) else x
 
 
+_KNOWN_KEYS = set(_FIT_KEYS)  # se completa con los campos del modelo abajo
+
+
 def _check_keys(what: str, got, expected) -> None:
-    extra, missing = sorted(set(got) - set(expected)), sorted(set(expected) - set(got))
+    extra, missing = set(got) - set(expected), sorted(set(expected) - set(got))
     if extra or missing:
-        raise ValueError(f"{what}: unexpected keys {extra}, missing keys {missing}")
+        named = sorted(k for k in extra if k in _KNOWN_KEYS)
+        unknown = len(extra) - len(named)
+        parts = ([f"unexpected keys {named}"] if named else []) + ([f"{unknown} unknown key(s)"] if unknown else []) \
+            + ([f"missing keys {missing}"] if missing else [])
+        raise _ModelFileError(f"{what}: {', '.join(parts)}")
+
+
+def _is_num(x, *, finite=True) -> bool:
+    return (isinstance(x, (int, float)) and not isinstance(x, bool)
+            and (math.isfinite(x) or (not finite and math.isnan(x))))
+
+
+def _is_int(x) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def _nums(x, n=None, *, finite=True) -> bool:
+    return isinstance(x, list) and (n is None or len(x) == n) and all(_is_num(v, finite=finite) for v in x)
+
+
+def _strs(x) -> bool:
+    return isinstance(x, list) and all(isinstance(v, str) for v in x)
+
+
+_TOP_CHECKS = {
+    "quality": lambda v: v in QUALITIES,
+    "features": lambda v: _strs(v) and len(v) >= 3,
+    "labor_types": _strs,
+    "use_depth": lambda v: isinstance(v, bool),
+    "signs": lambda v: isinstance(v, list) and all(_is_int(s) and s in (-1, 0, 1) for s in v),
+    "coef_ci": lambda v: isinstance(v, list) and all(_nums(c, 2, finite=False) for c in v),
+    "active_bounds": _strs,
+    "support_types": lambda v: isinstance(v, list) and len(v) >= 1 and all(
+        isinstance(s, list) and len(s) == 2 and isinstance(s[0], str) and _is_int(s[1]) for s in v),
+    "support_counts": lambda v: isinstance(v, list) and all(_is_int(c) and c >= 0 for c in v),
+    "calibration": lambda v: v in CALIBRATION_LEVELS,
+    "calibration_reason": lambda v: isinstance(v, str),
+    "metrics": lambda v: isinstance(v, dict) and all(_is_num(x, finite=False) for x in v.values()),
+    "calibration_curve": lambda v: isinstance(v, list) and all(_nums(c, 3) for c in v),
+    "train_min": _nums, "train_max": _nums,
+    "exposure_min": lambda v: _is_num(v) and v > 0, "exposure_max": lambda v: _is_num(v) and v > 0,
+    "maha_mean": _nums,
+    "maha_inv": lambda v: isinstance(v, list) and all(_nums(r) for r in v),
+    "maha_p99": lambda v: _is_num(v) and v >= 0,
+    "counts": lambda v: isinstance(v, dict) and all(_is_int(x) for x in v.values())
+    and {"tramos", "zones", "minority_class", "minority_class_minimum"} <= set(v),
+    "warnings": _strs, "version": lambda v: isinstance(v, str), "schema_version": _is_int,
+    "fit": lambda v: v is None or isinstance(v, dict), "validation": lambda v: v is None or isinstance(v, dict),
+}
+_FIT_CHECKS = {
+    "coef": _nums, "intercept": _is_num, "cov": lambda v: isinstance(v, list) and all(
+        _nums(r, finite=False) for r in v), "active_bounds": lambda v: isinstance(v, list) and all(map(_is_int, v)),
+    "converged": lambda v: isinstance(v, bool), "n": _is_int, "loglik": lambda v: _is_num(v, finite=False),
+    "x_mean": _nums, "x_scale": lambda v: _nums(v) and all(x > 0 for x in v), "message": lambda v: isinstance(v, str),
+    "signs": lambda v: isinstance(v, list) and all(_is_int(s) and s in (-1, 0, 1) for s in v), "n_events": _is_int,
+    "theta": lambda v: _is_num(v) and v >= 0, "log_theta_sd": lambda v: _is_num(v, finite=False),
+    "cov_kind": lambda v: v in ("cluster", "laplace"), "n_clusters": _is_int, "df": lambda v: v is None or (
+        _is_int(v) and v >= 1), "n_groups": _is_int,
+}
 
 
 def _check_model(m: PerformanceModel) -> None:
-    """Coherencia de un modelo leído (C): estado válido, tipos en orden y largos iguales."""
-    if m.calibration not in CALIBRATION_LEVELS:
-        raise ValueError(f"calibration must be one of {', '.join(CALIBRATION_LEVELS)}")
+    """Coherencia de un modelo leído (C, I3): orden de los tipos, largos, signos y la calibración recalculada."""
     orders = [o for _, o in m.support_types]
-    if not orders or any(b <= a for a, b in zip(orders, orders[1:])):
-        raise ValueError("support_types must be in strictly increasing order")
+    if any(b <= a for a, b in zip(orders, orders[1:])):
+        raise _ModelFileError("performance model: support_types must be in strictly increasing order")
     if len(m.support_counts) != len(m.support_types):
-        raise ValueError("support_counts must have one count per support type")
+        raise _ModelFileError("performance model: support_counts must have one count per support type")
     p = len(m.features)
     lengths = {"signs": len(m.signs), "train_min": len(m.train_min), "train_max": len(m.train_max),
                "maha_mean": len(m.maha_mean), "maha_inv": len(m.maha_inv)}
     if m.fit is not None:
         lengths.update({"coef_ci": len(m.coef_ci), "fit.coef": m.fit.coef.size, "fit.signs": len(m.fit.signs),
                         "fit.x_mean": m.fit.x_mean.size, "fit.x_scale": m.fit.x_scale.size})
-        if m.fit.cov.shape != (p + 1, p + 1):
-            raise ValueError(f"fit.cov must be {p + 1}x{p + 1}")
-    bad = sorted(k for k, n in lengths.items() if n != p) + (["maha_inv"] if any(len(r) != p for r in m.maha_inv)
-                                                              else [])
+    bad = {k for k, n in lengths.items() if n != p} | ({"maha_inv"} if any(len(r) != p for r in m.maha_inv) else set())
+    if m.fit is not None and m.fit.cov.shape != (p + 1, p + 1):
+        bad.add("fit.cov")
     if bad:
-        raise ValueError(f"lengths do not match the {p} features: {', '.join(sorted(set(bad)))}")
+        raise _ModelFileError(f"performance model: lengths do not match the features: {', '.join(sorted(bad))}")
+    if not set(m.active_bounds) <= set(m.features):
+        raise _ModelFileError("performance model: active_bounds must name features")
+    if m.fit is not None:
+        if tuple(m.fit.signs) != tuple(m.signs):
+            raise _ModelFileError("performance model: fit.signs differ from signs")
+        if any(s * c < 0 for s, c in zip(m.signs, m.fit.coef)):
+            raise _ModelFileError("performance model: a coefficient breaks its sign constraint")
+        if m.fit.converged and not np.all(np.isfinite(m.fit.cov)):
+            raise _ModelFileError("performance model: fit.cov must be finite in a converged fit")
+    ready = (m.counts["minority_class"] >= m.counts["minority_class_minimum"]
+             and m.counts["zones"] >= MIN_ZONES_LEVEL3)
+    if m.calibration != _calibration(m.fit, ready, m.validation is not None and m.validation.recommend):
+        raise _ModelFileError("performance model: calibration does not match the stored validation, readiness and "
+                              "convergence")
 
 
 def load_model(path) -> PerformanceModel:
     """Lee un modelo guardado con `save_model`; la predicción es exactamente la misma. Valida el esquema: claves
-    exactas, estado, orden de los tipos y largos coherentes (ValueError si algo no cuadra)."""
-    d = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(d, dict) or d.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(f"unsupported performance model schema_version {d.get('schema_version')!r} "
-                         f"(this version reads {SCHEMA_VERSION})" if isinstance(d, dict)
-                         else "the performance model file must hold a JSON object")
+    exactas, tipos y números finitos, orden de los tipos, largos, signos y la calibración recalculada con lo
+    guardado (ValueError si algo no cuadra; el mensaje nombra la clave, nunca su valor)."""
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("the performance model file is not valid JSON") from None
+    if not isinstance(d, dict):
+        raise ValueError("the performance model file must hold a JSON object")
+    if d.get("schema_version") != SCHEMA_VERSION or isinstance(d.get("schema_version"), bool):
+        raise ValueError(f"unsupported performance model schema_version (this version reads {SCHEMA_VERSION})")
     _check_keys("performance model", d, PerformanceModel.__dataclass_fields__)
+    for k, chk in _TOP_CHECKS.items():
+        if not chk(d[k]):
+            raise ValueError(f"performance model: {k} is not valid")
     f = d.pop("fit")
     if f is not None:
         _check_keys("fit", f, _FIT_KEYS)
-    fit = None if f is None else ExponentialHazardFit(
-        coef=np.array(f["coef"], dtype=float), intercept=f["intercept"], cov=np.array(f["cov"], dtype=float),
-        active_bounds=tuple(f["active_bounds"]), converged=f["converged"], n=f["n"], loglik=f["loglik"],
-        x_mean=np.array(f["x_mean"], dtype=float), x_scale=np.array(f["x_scale"], dtype=float), message=f["message"],
-        signs=tuple(f["signs"]), n_events=f["n_events"])
-    v = d.pop("validation")
-    report = None if v is None else ValidationReport(
-        results={k: Comparison(**{**c, "improvements": {r: Improvement(**i) for r, i in c["improvements"].items()}})
-                 for k, c in v["results"].items()}, skipped=v["skipped"])
+        for k, chk in _FIT_CHECKS.items():
+            if not chk(f[k]):
+                raise ValueError(f"performance model: fit.{k} is not valid")
+    try:
+        fit = None if f is None else FrailtyHazardFit(
+            coef=np.array(f["coef"], dtype=float), intercept=float(f["intercept"]),
+            cov=np.array(f["cov"], dtype=float), active_bounds=tuple(f["active_bounds"]), converged=f["converged"],
+            n=f["n"], loglik=f["loglik"], x_mean=np.array(f["x_mean"], dtype=float),
+            x_scale=np.array(f["x_scale"], dtype=float), message=f["message"], signs=tuple(f["signs"]),
+            n_events=f["n_events"], theta=float(f["theta"]), log_theta_sd=f["log_theta_sd"], cov_kind=f["cov_kind"],
+            n_clusters=f["n_clusters"], df=f["df"], n_groups=f["n_groups"])
+        v = d.pop("validation")
+        report = None if v is None else ValidationReport(
+            results={k: Comparison(**{**c, "improvements": {r: Improvement(**i) for r, i in c["improvements"].items()}})
+                     for k, c in v["results"].items()}, skipped=dict(v["skipped"]))
+    except (TypeError, KeyError, AttributeError, ValueError):
+        raise ValueError("performance model: fit or validation is not valid") from None
     keep = ("metrics", "counts")  # dicts: se quedan como dicts
     m = PerformanceModel(fit=fit, validation=report,
                          **{k: (val if k in keep else _tuples(val)) for k, val in d.items()})
     _check_model(m)
     return m
+
+
+_KNOWN_KEYS |= set(PerformanceModel.__dataclass_fields__)

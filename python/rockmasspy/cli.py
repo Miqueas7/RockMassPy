@@ -613,10 +613,9 @@ def _fit_correlations(history, group_by, deming_ratio) -> list:
 def _decision_note(partition: str, c) -> str:
     """Cómo pesa la partición en la decisión (ValidationReport.recommend): labor y zona por superioridad (con sus
     motivos genéricos: nombres de modelo y conteos), la temporal por no inferioridad, la aleatoria no cuenta."""
-    from .predictive.validation import is_noninferior
 
     if partition == "temporal":
-        return "non-inferiority " + ("met" if is_noninferior(c) else "not met")
+        return "non-inferiority " + ("met" if c.noninferior else "not met")
     if partition == "random":
         return "optimistic, does not count"
     return f"blockers {len(c.blockers)}" + (f" ({'; '.join(c.blockers)})" if c.blockers else "")

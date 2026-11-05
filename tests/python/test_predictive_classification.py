@@ -4,6 +4,7 @@ Solo datos sintéticos. statsmodels y scikit-learn entran como oráculos (R1), n
 """
 
 import dataclasses
+import math
 import warnings
 
 import pytest
@@ -15,6 +16,7 @@ from scipy.special import expit  # noqa: E402
 
 from rockmasspy.predictive import (average_precision, balanced_accuracy, brier, calibration_curve,  # noqa: E402
                                    calibration_intercept_slope, exponential_hazard_map_fit, f1_macro,
+                                   frailty_hazard_map_fit,
                                    logistic_map_fit, ordinal_logit_fit,
                                    quadratic_weighted_kappa, recall_per_class, roc_auc)
 
@@ -594,3 +596,103 @@ def test_hazard_cobertura_del_intervalo_al_90():
         _, lo, hi = exponential_hazard_map_fit(X, d, t).prob_interval(x0, H, level=0.9)
         cover += lo[0] <= true <= hi[0]
     assert 80 <= cover <= 98, cover
+
+
+# ---------- tasa de falla con fragilidad gamma (nivel 3) ----------
+
+def _frailty_data(n_groups=40, per=12, beta=(-0.5, 0.8), b=-6.0, theta=0.5, seed=11, n_clusters=8):
+    """Tiempos exponenciales con λ·Z_g, Z_g ~ Gamma(media 1, varianza θ) por grupo, censurados al azar."""
+    rng = np.random.default_rng(seed)
+    g = np.repeat(np.arange(n_groups), per)
+    X = rng.normal(size=(g.size, len(beta))) * [1.0, 0.5] + [0.5, 1.0]
+    z = rng.gamma(1 / theta, theta, n_groups)[g] if theta > 0 else np.ones(g.size)
+    lam = np.exp(b + X @ np.asarray(beta)) * z
+    T, C = rng.exponential(1 / lam), rng.uniform(30, 900, g.size)
+    return X, (T <= C).astype(float), np.minimum(T, C), g, g % n_clusters
+
+
+def _frailty_marginal_numeric(X, d, t, g, coef, b, theta):
+    """log L marginal por integración numérica de Z (oráculo independiente de la fórmula cerrada)."""
+    from scipy import integrate, stats
+    eta = X @ coef + b
+    k = 1 / theta
+    out = float(np.sum(d * eta))
+    for grp in np.unique(g):
+        m = g == grp
+        dg, lam = d[m].sum(), np.sum(np.exp(eta[m]) * t[m])
+        f = lambda z: z ** dg * np.exp(-z * lam) * stats.gamma.pdf(z, k, scale=theta)  # noqa: E731
+        out += math.log(integrate.quad(f, 0, np.inf, limit=200)[0])
+    return out
+
+
+def test_fragilidad_con_theta_cero_es_la_exponencial():
+    X, d, t, g, c = _frailty_data(n_groups=60, theta=0.0)
+    f = frailty_hazard_map_fit(X, d, t, g, clusters=c, signs=[-1, 1])
+    e = exponential_hazard_map_fit(X, d, t, signs=[-1, 1])
+    assert f.converged and f.theta < 0.1
+    np.testing.assert_allclose(f.coef, e.coef, atol=0.03)
+    assert f.intercept == pytest.approx(e.intercept, abs=0.05)
+    # con θ ≈ 0 la media marginal es la condicional
+    x0 = X[:3]
+    np.testing.assert_allclose(f.prob_marginal(x0, 365.0), f.prob_within(x0, 365.0), rtol=0.05)
+
+
+def test_fragilidad_marginal_cerrada_contra_integracion_numerica():
+    optimize = pytest.importorskip("scipy.optimize")
+    X, d, t, g, _ = _frailty_data(n_groups=12, per=8, theta=0.6, seed=5)
+    f = frailty_hazard_map_fit(X, d, t, g)
+    assert f.converged and f.cov_kind == "laplace" and f.df is None and f.n_groups == 12
+    assert f.loglik == pytest.approx(_frailty_marginal_numeric(X, d, t, g, f.coef, f.intercept, f.theta), rel=1e-7)
+    mean, scale = X.mean(axis=0), 2.0 * X.std(axis=0)
+
+    def neg_post(v):  # (γ, log θ, α) con los mismos priors, escrito aparte
+        gam, phi, alpha = v[:2], v[2], v[3]
+        coef = gam / scale
+        b = alpha - coef @ mean
+        return (-_frailty_marginal_numeric(X, d, t, g, coef, b, math.exp(phi)) + np.sum(np.log1p((gam / 2.5) ** 2))
+                + math.log1p((alpha / 10.0) ** 2) + phi ** 2 / 8.0)
+
+    # arranca lejos del óptimo de la función (γ en 0, θ = 0.3): BFGS con gradiente numérico
+    res = optimize.minimize(neg_post, np.array([0.0, 0.0, math.log(0.3), math.log(d.sum() / t.sum())]),
+                            method="BFGS", options={"gtol": 1e-7})
+    np.testing.assert_allclose(res.x[:2] / scale, f.coef, rtol=2e-3, atol=2e-4)
+    assert math.exp(res.x[2]) == pytest.approx(f.theta, rel=5e-3)
+
+
+def test_fragilidad_recupera_theta_del_generador():
+    from rockmasspy.history import labor_key, level3_rows
+    from rockmasspy.predictive import synthetic_history
+    # θ verdadero ≈ var(exp(b)) normalizada = exp(σ²) − 1, σ² = 0.4² + 0.5² (zona + labor): 0.51; el generador es
+    # lognormal y la zona es compartida entre labores, así que se pide el orden de magnitud
+    target = math.exp(0.4 ** 2 + 0.5 ** 2) - 1
+    for seed in range(3):
+        h, _ = synthetic_history(seed=seed, n_zones=8, labors_per_zone=12, tramos_per_labor=15)
+        rows = level3_rows(h)
+        order = {s.codigo_tipo: s.orden for s in h.support_types}
+        X = np.array([[math.log(r.q_valor), math.log(r.luz_m / r.esr), order[r.sost_instalado]] for _, r in rows])
+        d = np.array([o.failed for o, _ in rows], dtype=float)
+        t = np.array([o.exposure_days for o, _ in rows], dtype=float)
+        f = frailty_hazard_map_fit(X, d, t, [labor_key(r) for _, r in rows], clusters=[r.zona_nivel for _, r in rows],
+                                   signs=[-1, 1, -1])
+        assert f.converged and f.cov_kind == "cluster" and f.df == 7
+        assert 0.3 * target < f.theta < 2.0 * target, f.theta
+
+
+def test_fragilidad_intervalo_y_covarianza_agrupada():
+    X, d, t, g, c = _frailty_data()
+    f = frailty_hazard_map_fit(X, d, t, g, clusters=c, signs=[-1, 1])
+    lap = frailty_hazard_map_fit(X, d, t, g, signs=[-1, 1])
+    assert f.cov_kind == "cluster" and f.n_clusters == 8 and f.df == 7 and lap.cov_kind == "laplace"
+    np.testing.assert_allclose(f.coef, lap.coef)  # misma estimación, otra covarianza
+    few = frailty_hazard_map_fit(X, d, t, g, clusters=c % 3, signs=[-1, 1])
+    assert few.cov_kind == "laplace" and few.n_clusters == 3
+    x0 = X[:5]
+    c0, lo, hi = f.prob_interval(x0, 365.0, level=0.9)
+    assert np.all(lo <= c0) and np.all(c0 <= hi)
+    # el superior lleva el cuantil de la fragilidad: supera a la condicional con la cota de η
+    assert f.frailty_quantile(0.9) > 1 and np.all(hi > f.prob_within(x0, 365.0))
+    assert f.theta > 0.2
+    with pytest.raises(ValueError, match="at least one event and one non-event"):
+        frailty_hazard_map_fit(X, np.zeros(len(d)), t, g)
+    with pytest.raises(ValueError, match="one label per row"):
+        frailty_hazard_map_fit(X, d, t, g[:-1])

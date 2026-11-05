@@ -37,6 +37,7 @@ from ..batch import write_table
 from ..history import (MIN_LABORS_PER_TYPE_LEVEL2, MIN_TRAMOS_PER_TYPE_LEVEL2, History, audit_history, labor_key,
                        level2_rows)
 from .stats import OrdinalLogitFit, ordinal_logit_fit, quadratic_weighted_kappa
+from .validation import _tramo_number  # validación común de las entradas (niveles 2 y 3)
 from .validation import (ValidationReport, dummy_class_fit_predict, group_kfold, ngi_category, out_of_fold,
                          tramo_groups, validate)
 
@@ -166,8 +167,7 @@ class PracticeDesign:
         for i, t in enumerate(tramos):
             who = "tramo" if len(tramos) == 1 else f"tramo at position {i}"
             for name in ("q_valor", "luz_m", "esr"):
-                v = getattr(t, name)
-                if v is None or not v > 0:
+                if _tramo_number(t, name) is None:
                     raise ValueError(f"{who}: {name} must be a number > 0 for the practice model")
             row = [math.log(t.q_valor), math.log(t.luz_m / t.esr)]
             if self.permanent:

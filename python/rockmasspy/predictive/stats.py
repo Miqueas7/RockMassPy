@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.optimize import linprog, minimize
 from scipy.special import expit
+from scipy.stats import gamma as gamma_dist
 from scipy.stats import norm, rankdata
 from scipy.stats import t as student_t
 
@@ -509,7 +510,11 @@ def _eta_interval(fit, X, level):
             # cuantil u de N(r, 1) truncada en 0, medido desde r: Φ⁻¹(1 − (1 − u)·Φ(r))
             factor[j] = max(1.0, norm.ppf(1.0 - (1.0 - u) * norm.cdf(r)) / z)
     Zt = np.column_stack([(Xa - fit.x_mean) / fit.x_scale, np.ones(Xa.shape[0])]) * factor
-    half = z * np.sqrt(np.einsum("ij,jk,ik->i", Zt, cov_w, Zt))
+    # con covarianza agrupada (`df` = conglomerados − 1) el cuantil es el de la t; el factor de la truncada se mide
+    # en la normal
+    df = getattr(fit, "df", None)
+    zq = z if df is None else float(student_t.ppf(u, df))
+    half = zq * np.sqrt(np.einsum("ij,jk,ik->i", Zt, cov_w, Zt))
     return eta, eta - half, eta + half
 
 
@@ -751,6 +756,183 @@ def exponential_hazard_map_fit(X, events, exposure, *, prior_scale: float = 2.5,
                                 active_bounds=tuple(int(j) for j in np.nonzero(at_bound[:p])[0]),
                                 converged=converged, n=n, loglik=-float(nll(w)[0]), x_mean=mean, x_scale=scale,
                                 message=message, signs=tuple(int(g) for g in sg), n_events=int(d.sum()))
+
+
+# ---------- tasa de falla con fragilidad gamma compartida (nivel 3) ----------
+
+@dataclass(frozen=True)
+class FrailtyHazardFit:
+    """Tasa de falla constante con fragilidad gamma compartida por grupo (labor), por MAP sobre la verosimilitud
+    marginal: λ_i·Z_g, Z_g ~ Gamma(media 1, varianza θ). Mismos campos que `ExponentialHazardFit` más `theta`.
+
+    `cov` (escala original, orden (coef..., intercepto)) es la sándwich agrupada por conglomerado (zona) si
+    `cov_kind == "cluster"`, con `df` = conglomerados − 1 para el cuantil t; si no, la de Laplace (`df` None).
+    `log_theta_sd` = desviación de log θ con esa misma covarianza. `loglik` = log-verosimilitud marginal sin las
+    constantes Σ d·log t ni el prior.
+    """
+
+    coef: np.ndarray
+    intercept: float
+    cov: np.ndarray
+    active_bounds: tuple[int, ...]
+    converged: bool
+    n: int
+    loglik: float
+    x_mean: np.ndarray
+    x_scale: np.ndarray
+    message: str = ""
+    signs: tuple[int, ...] = ()
+    n_events: int = 0
+    theta: float = 0.0
+    log_theta_sd: float = math.nan
+    cov_kind: str = "laplace"
+    n_clusters: int = 0
+    df: int | None = None
+    n_groups: int = 0
+
+    def _eta(self, X):
+        Xa = _matrix("X", X, self.coef.size)
+        return Xa, Xa @ self.coef + self.intercept
+
+    def rate(self, X) -> np.ndarray:
+        """λ de cada fila para Z = 1 (la media de la fragilidad)."""
+        return np.exp(self._eta(X)[1])
+
+    def prob_within(self, X, days) -> np.ndarray:
+        """1 − exp(−λ·days): P(falla) con Z = 1. Su −log(1 − P) = λ·days es la media marginal de eventos."""
+        return -np.expm1(-self.rate(X) * _exposure_days(days))
+
+    def _marginal(self, lam, d):
+        # transformada de Laplace de la gamma: E[exp(−Z·λ·d)] = (1 + θλd)^(−1/θ)
+        if self.theta < 1e-12:
+            return -np.expm1(-lam * d)
+        return -np.expm1(-np.log1p(self.theta * lam * d) / self.theta)
+
+    def prob_marginal(self, X, days) -> np.ndarray:
+        """P(falla dentro de `days`) para una labor NUEVA: 1 − (1 + θλ·days)^(−1/θ)."""
+        return self._marginal(self.rate(X), _exposure_days(days))
+
+    def frailty_quantile(self, level: float) -> float:
+        """Cuantil `level` de la Gamma(media 1, varianza θ); 1 con θ = 0."""
+        lv = _level(level)
+        return 1.0 if self.theta < 1e-12 else float(gamma_dist.ppf(lv, 1.0 / self.theta, scale=self.theta))
+
+    def prob_interval(self, X, days, level: float = 0.9):
+        """(central, inferior, superior) de P(falla dentro de `days`) para una labor NUEVA.
+
+        Central = la media marginal con λ̂; inferior = la media marginal con la cota inferior de η. Superior =
+        1 − exp(−λ_sup·days·Z_q), con λ_sup = la cota superior de η al nivel (con `cov` y el ajuste por cota activa)
+        y Z_q = el cuantil `level` de la fragilidad: doblemente conservador (dos cuantiles a la vez)."""
+        d = _exposure_days(days)
+        eta, lo, hi = _eta_interval(self, X, level)
+        return (self._marginal(np.exp(eta), d), self._marginal(np.exp(lo), d),
+                -np.expm1(-np.exp(hi) * d * self.frailty_quantile(level)))
+
+
+def _group_codes(name, values, n):
+    vals = list(values)
+    if len(vals) != n:
+        raise ValueError(f"{name} must have one label per row ({len(vals)} != {n})")
+    seen: dict = {}
+    try:
+        return np.array([seen.setdefault(v, len(seen)) for v in vals], dtype=np.intp), len(seen)
+    except TypeError:
+        raise ValueError(f"{name} must hold hashable labels") from None
+
+
+def _sum_by_count(d_g, k, kind):
+    """Σ_{j<d_g} f(j) por grupo, exacto para d entero: kind 0 → log1p(j/k) (= lnΓ(k+d) − lnΓ(k) − d·ln k, sin la
+    cancelación de restar dos lnΓ enormes cuando θ → 0); kind 1 → j/(k + j)."""
+    jmax = int(d_g.max(initial=0))
+    if jmax == 0:
+        return np.zeros(d_g.size)
+    j = np.arange(jmax, dtype=float)
+    f = np.log1p(j / k) if kind == 0 else j / (k + j)
+    return np.concatenate([[0.0], np.cumsum(f)])[d_g]
+
+
+def frailty_hazard_map_fit(X, events, exposure, groups, *, clusters=None, prior_scale: float = 2.5,
+                           intercept_scale: float = 10.0, signs: Sequence[int] | None = None,
+                           log_theta_sd: float = 2.0, min_clusters: int = 5) -> FrailtyHazardFit:
+    """Tasa de falla con fragilidad gamma compartida por `groups` (labores), por MAP sobre la marginal cerrada.
+
+    Para el grupo g, con d_g fallas y Λ_g = Σ λ_i·t_i, la verosimilitud marginal es
+    Γ(k + d_g)/Γ(k) · k^k/(k + Λ_g)^(k + d_g) · Π λ_i^(d_i), k = 1/θ. β y log θ se estiman juntos con los priors
+    de `exponential_hazard_map_fit` (Cauchy en β estandarizados, binarias solo centradas, cotas de signo) y, para
+    log θ, una normal(0, `log_theta_sd` = 2): débil, cubre θ entre 0.02 y 50 al 95 % y deja que los datos
+    decidan; con θ → 0 el modelo es el exponencial.
+
+    `clusters` (zonas): si trae ≥ `min_clusters` conglomerados, la covarianza es la sándwich agrupada (los scores
+    de la marginal sumados por conglomerado, corrección C/(C − 1)) y los intervalos usan la t con C − 1 grados de
+    libertad; si no, la de Laplace (`cov_kind = "laplace"`). Un grupo tiene que caer entero en un conglomerado
+    (las labores van dentro de su zona).
+    """
+    Xa = _matrix("X", X)
+    n, p = Xa.shape
+    d = _binary("events", events)
+    t = _vector("exposure", exposure, 1)
+    if d.size != n or t.size != n:
+        raise ValueError(f"X, events and exposure must have the same number of rows ({n}, {d.size}, {t.size})")
+    if np.any(t <= 0):
+        raise ValueError("exposure must be positive")
+    if d.min() == d.max():
+        raise ValueError("frailty_hazard_map_fit needs at least one event and one non-event")
+    _positive("log_theta_sd", log_theta_sd)
+    gc, G = _group_codes("groups", groups, n)
+    sg, mean, scale, Z, scales2 = _map_design(Xa, signs, prior_scale, intercept_scale)
+    Zs, log_t = Z[:, :p], np.log(t)
+    d_g = np.bincount(gc, weights=d, minlength=G).astype(np.intp)
+    s2_phi = float(log_theta_sd) ** 2
+    # w = (γ…, φ = log θ, α): el prior normal de φ va dentro de nll; su Cauchy de _map_solve queda anulada
+    sg_w = np.concatenate([sg, [0]])
+    scales2_w = np.concatenate([scales2[:p], [1e100], scales2[p:]])
+
+    def group_terms(w):
+        """(ℓ_g por grupo, ∂ℓ/∂η_i por fila, ∂ℓ_g/∂φ por grupo)."""
+        eta = Zs @ w[:p] + w[p + 1]
+        mu = np.exp(np.minimum(eta + log_t, 700.0))
+        lam_g = np.bincount(gc, weights=mu, minlength=G)
+        k = math.exp(min(-w[p], 700.0))
+        ell = (_sum_by_count(d_g, k, 0) - (k + d_g) * np.log1p(lam_g / k)
+               + np.bincount(gc, weights=d * eta, minlength=G))
+        r = d - ((k + d_g) / (k + lam_g))[gc] * mu
+        dphi = _sum_by_count(d_g, k, 1) + k * np.log1p(lam_g / k) - (k + d_g) * lam_g / (k + lam_g)
+        return ell, r, dphi
+
+    def nll(w):
+        ell, r, dphi = group_terms(w)
+        g = np.concatenate([-(Zs.T @ r), [-dphi.sum() + w[p] / s2_phi], [-r.sum()]])
+        return -ell.sum() + w[p] ** 2 / (2 * s2_phi), g
+
+    def nll_hessian(w):  # diferencias centrales del gradiente analítico, simetrizadas
+        h = 1e-5 * np.maximum(1.0, np.abs(w))
+        H = np.array([(nll(w + e)[1] - nll(w - e)[1]) / (2 * e[j]) for j, e in enumerate(np.diag(h))])
+        return (H + H.T) / 2
+
+    w0 = np.zeros(p + 2)
+    w0[p], w0[p + 1] = math.log(0.5), math.log(d.sum() / t.sum())
+    w, cov_w, at_bound, converged, message = _map_solve(Z, sg_w, scales2_w, nll, nll_hessian, w0, n)
+    cov_kind, n_clusters, df = "laplace", 0, None
+    if clusters is not None:
+        cc, n_clusters = _group_codes("clusters", clusters, n)
+        if converged and n_clusters >= min_clusters:
+            _, r, dphi = group_terms(w)
+            # scores (γ, α) por fila y φ por grupo; el φ de cada grupo va al conglomerado de su primera fila
+            first = np.full(G, -1, dtype=np.intp)
+            first[gc[::-1]] = np.arange(n)[::-1]
+            S = np.zeros((n_clusters, p + 2))
+            np.add.at(S, cc, np.column_stack([Zs * r[:, None], np.zeros(n), r]))
+            np.add.at(S[:, p], cc[first], dphi)
+            cov_w = cov_w @ (n_clusters / (n_clusters - 1) * (S.T @ S)) @ cov_w
+            cov_kind, df = "cluster", n_clusters - 1
+    keep = np.r_[np.arange(p), p + 1]
+    coef, intercept, cov = _map_original(w[keep], cov_w[np.ix_(keep, keep)], mean, scale)
+    return FrailtyHazardFit(coef=coef, intercept=intercept, cov=cov,
+                            active_bounds=tuple(int(j) for j in np.nonzero(at_bound[:p])[0]), converged=converged,
+                            n=n, loglik=float(group_terms(w)[0].sum()), x_mean=mean, x_scale=scale, message=message,
+                            signs=tuple(int(g) for g in sg), n_events=int(d.sum()), theta=float(math.exp(w[p])),
+                            log_theta_sd=float(math.sqrt(cov_w[p, p])) if np.isfinite(cov_w[p, p]) else math.nan,
+                            cov_kind=cov_kind, n_clusters=int(n_clusters), df=df, n_groups=G)
 
 
 # ---------- métricas de clasificación (R7) ----------
