@@ -8,6 +8,7 @@ en el texto de un hallazgo: el `id_tramo` y la fila van como campos, para la tab
 """
 
 import datetime
+import math
 import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping
@@ -36,13 +37,16 @@ MIN_EVENTS_PER_PARAMETER_LEVEL3 = 10  # se aplica a la clase menor: min(fallas, 
 LEVEL3_BASE_PARAMETERS = 3  # ln Q, ln De y rango del sostenimiento; la exposición entra como offset (R9); decisión de diseño
 MIN_ZONES_LEVEL3 = 3
 
-# Tolerancias de la auditoría (R3)
-Q_ABS_TOL = 0.005
+# Tolerancias de la auditoría (R3). Q en escala logarítmica: |ln Q registrado − ln Q recalculado| > ln(1 + Q_REL_TOL)
+# y además |diferencia| > Q_ABS_TOL. El piso absoluto solo cubre el redondeo de un Q escrito con 4 decimales
+# (Fase 5B: el piso anterior de 0.005 escondía un Q ×3 con Q < 0.0075)
+Q_ABS_TOL = 0.00005
 Q_REL_TOL = 0.01
 RMR_TOL_POINTS = 1.0
 
 FINDING_KINDS = ("q_mismatch", "rmr_mismatch", "not_recomputed", "overlapping_chainage", "repeated_components",
-                 "unknown_support", "unknown_tramo", "inspection_before_installation", "inspection_after_abandonment")
+                 "unknown_support", "unknown_tramo", "inspection_before_installation", "inspection_after_abandonment",
+                 "missing_values")
 
 
 @dataclass(frozen=True)
@@ -406,7 +410,7 @@ def _audit_q(t):
         q = rm.q_value(rm.QInput(*params), ed).q
     except ValueError as e:  # parámetros fuera de dominio: el mensaje solo trae nombres y números
         return _finding("not_recomputed", f"Q not recomputed: {e}", t)
-    if abs(t.q_valor - q) > max(Q_ABS_TOL, Q_REL_TOL * q):
+    if t.q_valor <= 0 or (abs(math.log(t.q_valor / q)) > math.log1p(Q_REL_TOL) and abs(t.q_valor - q) > Q_ABS_TOL):
         return _finding("q_mismatch", f"recorded Q {t.q_valor:g} differs from Q {q:.4g} recomputed from "
                                       f"RQD, Jn, Jr, Ja, Jw and SRF ({ed.name}{note})", t)
     return None
@@ -476,6 +480,29 @@ def _audit_independence(tramos):
                 out.append(_finding("repeated_components", f"same classification components as row {prev.fila}, "
                                                            f"the previous tramo of the same labor; records are not "
                                                            f"independent", t))
+    return out
+
+
+# columnas que usan los niveles (o la auditoría para recalcular Q y RMR) → niveles que las usan
+_LEVEL_COLUMNS = {
+    **dict.fromkeys(("rqd_pct", "jn", "jr", "ja"), "1"), **dict.fromkeys(("rmr_valor", "rmr_edicion", "gsi_valor"), "1"),
+    "q_valor": "1, 2 and 3", **dict.fromkeys(("luz_m", "esr", "sost_instalado", "tipo_labor", "zona_nivel",
+                                               "fecha_evaluacion"), "2 and 3"),
+    "labor_codigo": "1, 2 and 3", "vida_util": "2", **dict.fromkeys(("profundidad_m", "fecha_instalacion"), "3"),
+    **dict.fromkeys(("jw", "srf", "ucs_mpa", "espaciamiento_m", "puntaje_condicion_juntas", "agua"),
+                    "the audit (Q and RMR recomputation)")}
+
+
+def _audit_missing(tramos):
+    """Un hallazgo por columna usada que está vacía en algunos tramos (no en todos: una columna que la mina no
+    registra ya la reporta la preparación de cada nivel). Solo conteos: nunca valores ni filas."""
+    out = []
+    for col, levels in _LEVEL_COLUMNS.items():
+        n = sum(getattr(t, col) is None for t in tramos)
+        if 0 < n < len(tramos):
+            used = levels if levels.startswith("the") else f"level{'s' * (len(levels) > 1)} {levels}"
+            out.append(HistoryFinding("missing_values", f"column {col} is empty in {n} of {len(tramos)} tramos "
+                                      f"(used by {used})", "Tramos", None, None))
     return out
 
 
@@ -628,10 +655,10 @@ def _readiness(history):
 
 
 def audit_history(history: History) -> HistoryAudit:
-    """Auditoría de ingesta: Q y RMR89 recalculados, registros no independientes, coherencia entre hojas y
-    preparación de cada nivel (solo conteos). Avisa, nunca bloquea."""
+    """Auditoría de ingesta: Q y RMR89 recalculados, registros no independientes, coherencia entre hojas, celdas
+    vacías por columna (conteos) y preparación de cada nivel (solo conteos). Avisa, nunca bloquea."""
     findings = [f for t in history.tramos for f in (_audit_q(t), _audit_q_prime(t), _audit_rmr(t)) if f is not None]
-    findings += _audit_independence(history.tramos) + _audit_coherence(history)
+    findings += _audit_independence(history.tramos) + _audit_coherence(history) + _audit_missing(history.tramos)
     findings.sort(key=lambda f: (HISTORY_SHEETS.index(f.sheet), f.fila or 0, FINDING_KINDS.index(f.kind)))
     return HistoryAudit(tuple(findings), _readiness(history), len(history.tramos), len(history.support_types),
                         len(history.inspections))
