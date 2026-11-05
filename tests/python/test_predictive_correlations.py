@@ -94,8 +94,15 @@ def test_prior_por_edicion_y_tipo():
     assert g.prior_correlation == "GsiFromRmr89Prime_HoekDiederichs2006"
     assert g.prior_mean == pytest.approx((1.0, -5.0))
     assert any("RMR89'" in w and "orientation" in w for w in g.warnings)
+    # Fase 5B: GSI y RMR comparten la condición de juntas y el RQD; el IC de la pendiente es optimista
+    shared = [w for w in g.warnings if "share components" in w]
+    assert len(shared) == 1 and "optimistic" in shared[0] and "quantified GSI" not in shared[0]
+    gq = fit_site_correlation(_edit(h, lambda i, t: dataclasses.replace(t, gsi_tabla="GSI cuantificado 2013")),
+                              "gsi_from_rmr", group_by=None)
+    assert any(f"{gq.mine.n} pair(s) use the quantified GSI" in w for w in gq.warnings)
     qp = fit_site_correlation(h, "gsi_from_q_prime", group_by=None)
     assert qp.prior_correlation == "GsiFromQPrime_Hoek1995" and qp.mine.x_from == "Q'"
+    assert not any("share components" in w for w in r76.warnings + qp.warnings)
 
 
 def test_pares_iguales_a_la_preparacion_del_nivel_1():
