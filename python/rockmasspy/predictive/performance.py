@@ -498,7 +498,8 @@ def save_model(model: PerformanceModel, path) -> Path:
     d = {k: getattr(model, k) for k in model.__dataclass_fields__ if k not in ("fit", "validation")}
     d["fit"] = None if f is None else {"coef": f.coef.tolist(), "intercept": f.intercept, "cov": f.cov.tolist(),
                 "active_bounds": list(f.active_bounds), "converged": f.converged, "n": f.n, "loglik": f.loglik,
-                "x_mean": f.x_mean.tolist(), "x_scale": f.x_scale.tolist(), "message": f.message}
+                "x_mean": f.x_mean.tolist(), "x_scale": f.x_scale.tolist(), "message": f.message,
+                "signs": list(f.signs)}  # sin signos, predict_interval pierde el ajuste por cota activa
     v = model.validation
     d["validation"] = None if v is None else {"results": {k: asdict(c) for k, c in v.results.items()},
                                               "skipped": v.skipped}
@@ -521,7 +522,8 @@ def load_model(path) -> PerformanceModel:
     fit = None if f is None else LogisticMapFit(
         coef=np.array(f["coef"], dtype=float), intercept=f["intercept"], cov=np.array(f["cov"], dtype=float),
         active_bounds=tuple(f["active_bounds"]), converged=f["converged"], n=f["n"], loglik=f["loglik"],
-        x_mean=np.array(f["x_mean"], dtype=float), x_scale=np.array(f["x_scale"], dtype=float), message=f["message"])
+        x_mean=np.array(f["x_mean"], dtype=float), x_scale=np.array(f["x_scale"], dtype=float), message=f["message"],
+        signs=tuple(f["signs"]))
     v = d.pop("validation")
     report = None if v is None else ValidationReport(
         results={k: Comparison(**{**c, "improvements": {r: Improvement(**i) for r, i in c["improvements"].items()}})
