@@ -59,6 +59,22 @@ def test_ordinal_contra_statsmodels():
     np.testing.assert_allclose(np.sqrt(np.diag(J @ fit.cov @ J.T)), ref.bse, rtol=1e-3)
 
 
+def test_ordinal_n_grande_converge_contra_statsmodels():
+    # Fase 5B: con la log-verosimilitud sumada y gtol absoluto, trust-exact terminaba en «bad approximation» con
+    # n grande (sin separación) y el ajuste salía no convergido; con −log L / n converge y coincide con el oráculo
+    om = pytest.importorskip("statsmodels.miscmodels.ordinal_model")
+    n, rng = 10000, np.random.default_rng(0)
+    X = np.column_stack([rng.normal(0, 2.0, n), rng.normal(1.0, 0.4, n), rng.random(n) < 0.5]).astype(float)
+    y = np.digitize(X @ np.array([-1.5, 1.2, 0.8]) + rng.logistic(size=n), [-3.0, -1.0, 1.0, 3.0])
+    fit = ordinal_logit_fit(X, y, n_classes=5)
+    assert fit.converged and fit.message == "" and np.all(np.isfinite(fit.cov))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = om.OrderedModel(y, X, distr="logit").fit(method="bfgs", disp=False, maxiter=5000, gtol=1e-8)
+    np.testing.assert_allclose(fit.coef, ref.params[:3], rtol=1e-4)
+    assert fit.loglik == pytest.approx(ref.llf, rel=1e-9)
+
+
 def test_ordinal_dos_clases_es_la_logistica():
     sm = pytest.importorskip("statsmodels.api")
     X, y = _binary_data()
