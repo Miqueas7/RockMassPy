@@ -17,6 +17,8 @@ del de desempeño (§7.2) y aquí solo se audita.
   1 − p(clase verdadera) y cuantil con la corrección de muestra finita. La garantía de cobertura supone que las
   labores son intercambiables; con zonas muy distintas entre sí no se cumple (§4, punto 3).
 - Concordancia entre `sost_recomendado` y `sost_instalado` (matriz y kappa ponderado).
+- Tramos nuevos: `PracticeAudit.predict_proba` y `conformal_set` usan el ajuste final y la misma codificación; es
+  el protocolo `practice` que recibe `recommend` del nivel 3. Un `tipo_labor` no visto lanza ValueError.
 
 Privacidad (R13): los avisos y veredictos llevan conteos, nombres de variables y códigos de tipo de sostenimiento;
 nunca labor, zona, coordenadas ni litología. Los `id_tramo` van solo en campos (`outside_set`, `tramos`) y en el
@@ -35,7 +37,7 @@ from ..batch import write_table
 from ..history import (MIN_LABORS_PER_TYPE_LEVEL2, MIN_TRAMOS_PER_TYPE_LEVEL2, History, audit_history, labor_key,
                        level2_rows)
 from ..q_support import read_q_chart
-from .stats import ordinal_logit_fit, quadratic_weighted_kappa
+from .stats import OrdinalLogitFit, ordinal_logit_fit, quadratic_weighted_kappa
 from .validation import (ValidationReport, dummy_class_fit_predict, group_kfold, out_of_fold, tramo_groups,
                          validate)
 
@@ -105,6 +107,10 @@ class PracticeAudit:
     missing_types: tuple[str, ...]  # tipos definidos bajo el mínimo del nivel 2
     dropped_columns: tuple[str, ...]  # columnas colineales (o constantes) fuera del ajuste final
     warnings: tuple[str, ...]
+    # lo mínimo del ajuste final para predecir tramos nuevos (coeficientes, cortes y codificación; nunca filas)
+    fit: OrdinalLogitFit = field(repr=False)
+    design: PracticeDesign = field(repr=False)
+    columns: tuple[int, ...] = field(repr=False)  # columnas de `design.names` que entraron al ajuste final
 
     @property
     def beyond_chart(self) -> bool:
@@ -112,23 +118,75 @@ class PracticeAudit:
         r = self.validation.results.get("labor")
         return r is not None and r.beats("ngi")
 
+    def predict_proba(self, tramos) -> np.ndarray:
+        """P de cada tipo de `types` (n, K) para tramos nuevos, con el ajuste final (todos los datos) y sus mismas
+        columnas. ValueError si a un tramo le falta una variable que el modelo usa o trae un tipo_labor no visto."""
+        X = self.design.matrix(list(tramos))[:, list(self.columns)]
+        if not (np.all(np.isfinite(self.fit.coef)) and np.all(np.isfinite(self.fit.cuts))):
+            raise ValueError("the final practice fit has non-finite parameters: it cannot predict")
+        return self.fit.predict_proba(X)
 
-def _candidates(rows) -> tuple[np.ndarray, list[str], list[str]]:
-    """Columnas candidatas (sin y): no usan la respuesta, así que se arman con todas las filas; la selección por
-    rango se rehace con el train de cada pliegue."""
+    def conformal_set(self, tramo) -> tuple[str, ...]:
+        """Tipos (en orden, del más liviano al más pesado) con 1 − p_k ≤ `conformal_threshold` para un tramo nuevo.
+        La cobertura vale si las labores nuevas son intercambiables con las del histórico."""
+        if math.isnan(self.conformal_threshold):
+            raise ValueError("no conformal threshold was computed for this audit (see its warnings)")
+        p = self.predict_proba([tramo])[0]
+        return tuple(c for c, pk in zip(self.types, p) if 1.0 - pk <= self.conformal_threshold)
+
+
+_MISSING_LEVEL = "(missing)"
+
+
+@dataclass(frozen=True)
+class PracticeDesign:
+    """Codificación de las variables (sin y, sin filas ni ids): se fija con el histórico y se aplica igual a
+    tramos nuevos. `labor_levels` vacío = tipo_labor no entra."""
+
+    permanent: bool
+    labor_levels: tuple[str, ...]
+
+    @property
+    def names(self) -> list[str]:
+        return ["ln_q", "ln_de", *(["permanent"] if self.permanent else []),
+                *[f"tipo_labor={lv}" for lv in self.labor_levels]]
+
+    def matrix(self, tramos) -> np.ndarray:
+        """Columnas candidatas de cada tramo. Los mensajes dicen la posición en la lista, nunca un identificador.
+        Un tipo_labor no visto lanza ValueError: el histórico no dice nada de esa práctica (decisión de diseño;
+        tratarlo como la categoría de referencia inventaría un dato)."""
+        out = []
+        for i, t in enumerate(tramos):
+            for name in ("q_valor", "luz_m", "esr"):
+                v = getattr(t, name)
+                if v is None or not v > 0:
+                    raise ValueError(f"tramo at position {i}: {name} must be a number > 0 for the practice model")
+            row = [math.log(t.q_valor), math.log(t.luz_m / t.esr)]
+            if self.permanent:
+                if t.vida_util is None:
+                    raise ValueError(f"tramo at position {i}: vida_util is required by the practice model")
+                row.append(float(t.vida_util == "Permanente"))
+            if self.labor_levels:
+                lv = t.tipo_labor or _MISSING_LEVEL
+                if lv not in self.labor_levels:
+                    raise ValueError(f"tramo at position {i}: tipo_labor was not seen in the history, so the "
+                                     "practice model has no information about it")
+                row += [float(lv == x) for x in self.labor_levels]
+            out.append(row)
+        return np.array(out, dtype=float).reshape(len(out), len(self.names))
+
+
+def _design(rows) -> tuple[PracticeDesign, list[str]]:
+    """Codificación con todas las filas: no usa la respuesta; la selección por rango se rehace en cada pliegue."""
     warns = []
-    cols = {"ln_q": [math.log(t.q_valor) for t in rows], "ln_de": [math.log(t.luz_m / t.esr) for t in rows]}
     missing_vida = sum(t.vida_util is None for t in rows)
     if missing_vida:  # como la profundidad del nivel 3: la variable entra solo si todas las filas la traen
         warns.append(f"vida_util is missing in {missing_vida} of {len(rows)} rows: the permanent indicator is "
                      "left out of the model")
-    else:
-        cols["permanent"] = [float(t.vida_util == "Permanente") for t in rows]
-    levels = sorted({t.tipo_labor or "(missing)" for t in rows})
+    levels = ()
     if len({t.tipo_labor for t in rows} - {None}) >= 2:
-        for lv in levels:
-            cols[f"tipo_labor={lv}"] = [float((t.tipo_labor or "(missing)") == lv) for t in rows]
-    return np.column_stack(list(cols.values())), list(cols), warns
+        levels = tuple(sorted({t.tipo_labor or _MISSING_LEVEL for t in rows}))
+    return PracticeDesign(not missing_vida, levels), warns
 
 
 def _select(X: np.ndarray) -> np.ndarray:
@@ -206,7 +264,8 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
                          f"got {len(types)}")
     K = len(types)
     y = np.array([types.index(t.sost_instalado) for t in rows], dtype=np.intp)
-    X, names, warns = _candidates(rows)
+    design, warns = _design(rows)
+    X, names = design.matrix(rows), design.names
 
     readiness = [r for r in audit_history(history).readiness if r.level == 2]
     missing = tuple(r.item for r in readiness if not r.ready)
@@ -271,7 +330,7 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
         verdicts=verdicts, converged=fit.converged, validation=validation, conformal_level=float(conformal_level),
         conformal_threshold=q_hat, coverage=coverage, outside_set=tuple(t.id_tramo for t in tramos if t.outside),
         tramos=tramos, concordance=_concordance(history), status=status, missing_types=missing,
-        dropped_columns=dropped, warnings=tuple(warns))
+        dropped_columns=dropped, warnings=tuple(warns), fit=fit, design=design, columns=tuple(cols.tolist()))
 
 
 def save_practice_results(audit: PracticeAudit, path) -> Path:

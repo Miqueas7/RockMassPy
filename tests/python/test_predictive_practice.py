@@ -11,7 +11,7 @@ pytest.importorskip("scipy")
 
 import numpy as np  # noqa: E402
 
-from rockmasspy.history import History  # noqa: E402
+from rockmasspy.history import History, level2_rows  # noqa: E402
 from rockmasspy.predictive import (PRACTICE_RESULT_COLUMNS, SyntheticTruth, audit_practice,  # noqa: E402
                                    quadratic_weighted_kappa, save_practice_results, synthetic_history)
 from rockmasspy.predictive.practice import VERDICTS  # noqa: E402
@@ -149,3 +149,25 @@ def test_save_practice_results_csv_y_xlsx(coherent, tmp_path):
     outside = {r[0] for r in rows[1:] if r[4] == "sí"}
     assert outside == set(a.outside_set)
     assert all(set(r[3].split("|")) <= set(a.types) for r in rows[1:])
+
+
+def test_conjunto_conforme_en_labores_nuevas(coherent):
+    _, a = coherent
+    new = [t for s in (7, 8) for t in level2_rows(_history(0.0, seed=s))]  # otras semillas: labores nuevas
+    p = a.predict_proba(new)
+    assert p.shape == (len(new), len(a.types)) and np.allclose(p.sum(axis=1), 1.0)
+    sets = [a.conformal_set(t) for t in new]
+    assert all(s == tuple(c for c in a.types if c in s) for s in sets)  # en orden, del más liviano al más pesado
+    cov = np.mean([t.sost_instalado in s for t, s in zip(new, sets)])
+    assert abs(cov - 0.9) <= 3 * math.sqrt(0.9 * 0.1 / len(new)) + 1 / a.n
+
+
+def test_tramo_nuevo_incompleto_o_con_tipo_de_labor_no_visto(coherent):
+    _, a = coherent
+    t = dataclasses.replace(level2_rows(_history(0.0, seed=7))[0], labor_codigo="ZZSENT", zona_nivel="ZZSENT")
+    for bad, match in ((dict(q_valor=None), "q_valor"), (dict(luz_m=0.0), "luz_m"), (dict(esr=None), "esr"),
+                       (dict(vida_util=None), "vida_util"), (dict(tipo_labor="ZZSENT"), "tipo_labor")):
+        with pytest.raises(ValueError, match=match) as e:
+            a.conformal_set(dataclasses.replace(t, **bad))
+        assert "ZZSENT" not in str(e.value)
+    assert a.conformal_set(t)  # con todo, funciona
