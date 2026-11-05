@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
+import numpy as np
+
 import rockmasspy as rm
 
 from .style import Style, footer, new_figure, text
@@ -37,8 +39,8 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
     """Puntos (x, y) del usuario más una curva por correlación, rotulada con su method_id.
 
     Q y Q′ van en escala logarítmica. Cada curva se dibuja solo donde el núcleo la acepta. `bands`: ajustes con
-    `predict(x)` → (ŷ, inferior, superior) y rango `x_min`/`x_max` (p. ej. `predictive.SiteCorrelationFit`); se
-    sombrea su intervalo de predicción al 95 % dentro del rango observado.
+    `predict(x)` → (ŷ, inferior, superior), rango `x_min`/`x_max`, `x_from`/`y_to` y `label` (p. ej.
+    `predictive.SiteCorrelationFit`); se sombrea su intervalo de predicción al 95 % dentro del rango observado.
     """
     pairs = list(pairs)
     if not pairs:
@@ -53,6 +55,8 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
         _check_ends(c.name, _global_ends(c), x, y)
     for c in site:
         _check_ends(f"site:{c.name}", (c.from_, c.to), x, y)
+    for f in bands:
+        _check_ends(f"band:{f.label}", (f.x_from, f.y_to), x, y)
 
     xs = [p[0] for p in pairs]
     lo, hi = min(xs), max(xs)
@@ -88,7 +92,8 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
         if a < b:
             gx = _grid(a, b, log)
             _, low, high = f.predict(gx, 0.95)
-            ax.fill_between(gx, low, high, alpha=0.15, linewidth=0,
+            # recortada a [0, 100] como los valores del núcleo: RMR y GSI no salen de esa escala
+            ax.fill_between(gx, np.clip(low, 0, 100), np.clip(high, 0, 100), alpha=0.15, linewidth=0,
                             label=text("prediction_band", style.lang) if k == 0 else None)
     for c in site:
         a, b = max(lo, c.valid_min), min(hi, c.valid_max)

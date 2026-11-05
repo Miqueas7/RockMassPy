@@ -361,7 +361,8 @@ def _usable(k, **kw):
     """Tramo completo para los niveles 2 y 3: Q, luz, ESR, tipo definido y fecha de instalación."""
     # cada labor en una sola zona: la clave (zona, labor) da 6 labores
     base = dict(labor_codigo=f"L{k % 6:03d}", zona_nivel=f"Z{k % 6 % 3}", q_valor=5, luz_m=4, esr=1.6,
-                sost_instalado="I" if k % 2 else "II", fecha_instalacion="2026-01-01", tipo_labor="Galería")
+                rmr_edicion="RMR89", sost_instalado="I" if k % 2 else "II", fecha_instalacion="2026-01-01",
+                tipo_labor="Galería")
     return tramo(f"T{k:04d}", k + 2, **{**base, **kw})
 
 
@@ -422,3 +423,30 @@ def test_centinela_no_aparece_en_mensajes(libro):
     assert all(f.id_tramo.startswith(s) for f in a.findings)
     textos = [f.message for f in a.findings] + [str(r) for r in a.readiness] + [str(rm.history_audit_counts(a))]
     assert not [x for x in textos if s in x]
+
+
+def test_q_prime_fuera_de_dominio_es_hallazgo_y_no_cuenta_en_el_nivel_1():
+    ts = (tramo("T1", 2, gsi_valor=50, rqd_pct=150, jn=6, jr=2, ja=1),  # sin Q completo: lo reporta el Q′
+          tramo("T2", 3, gsi_valor=50, rqd_pct=80, jn=0, jr=2, ja=1),
+          tramo("T3", 4, gsi_valor=50, rqd_pct=80, jn=6, jr=2, ja=0, q_valor=5, jw=1, srf=1),  # ya lo dice _audit_q
+          tramo("T4", 5, gsi_valor=50, rqd_pct=80, jn=6, jr=2, ja=1))
+    h = rm.History(ts, (), ())
+    a = rm.audit_history(h)
+    assert kinds(a) == [("not_recomputed", "T1"), ("not_recomputed", "T2"), ("not_recomputed", "T3")]
+    assert [f.message.startswith("Q' not computable") for f in a.findings] == [True, True, False]
+    assert {r.item: r.counts["pairs"] for r in a.readiness if r.level == 1}["gsi_from_q_prime"] == 1
+    sel = rm.level1_rows(h, "gsi_from_q_prime")
+    assert [t.id_tramo for t in sel.tramos] == ["T4"] and sel.excluded_x == 3
+    assert sel.x == pytest.approx((80 / 6 * 2,))
+
+
+def test_nivel_1_usa_la_edicion_mayoritaria_de_rmr():
+    ts = tuple(tramo(f"T{k}", k + 2, q_valor=5, rmr_valor=60, rmr_edicion=e)
+               for k, e in enumerate(["RMR89", "RMR-89", "RMR76", None, "RMR14", "rmr 89"]))
+    h = rm.History(ts, (), ())
+    sel = rm.level1_rows(h, "rmr_from_q")
+    assert (sel.edition, len(sel.tramos), sel.excluded_edition) == ("RMR89", 3, 3)
+    assert rm.level1_rows(h, "rmr_from_q", rmr_edition="RMR-76").edition == "RMR76"
+    assert rm.level1_rows(rm.History(ts[3:5], (), ()), "rmr_from_q").edition is None
+    with pytest.raises(ValueError, match="rmr_edition"):
+        rm.level1_rows(h, "rmr_from_q", rmr_edition="RMR14")

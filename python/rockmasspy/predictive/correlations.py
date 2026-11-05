@@ -1,9 +1,10 @@
-"""Nivel 1: correlaciones propias del sitio (Fase 4A, tarea 6; plan R5, R6 y R13).
+"""Nivel 1: correlaciones propias del sitio (Fase 4A, tarea 6; plan R5, R6, R13 y R14).
 
 Ajusta RMR = a·ln Q + b, GSI = a·RMR + b o GSI = a·ln Q′ + b por dominio (`group_by`, por defecto la litología;
 Somodi et al. 2021) y para toda la mina, con los métodos de `stats.py`: OLS con intervalo de predicción (la que
 predice), Deming solo con la razón de varianzas de error, bootstrap por labor y bayesiano con la correlación global
-del núcleo como *prior* (`docs/investigacion/MODELOS_SOSTENIMIENTO.md` §2.2).
+del núcleo como *prior* (`docs/investigacion/MODELOS_SOSTENIMIENTO.md` §2.2). Los pares salen de
+`history.level1_rows`, la misma selección que cuenta la preparación del nivel 1.
 
 Privacidad (R13): el valor del dominio (la litología) solo va como clave de `SiteCorrelationResult.domains`, para la
 tabla de resultados. Los avisos, el `name` y el `source` de la `CustomCorrelation` llevan códigos genéricos («D1»),
@@ -13,18 +14,17 @@ conteos y métodos, nunca un valor de una columna de identificación ni la litol
 from __future__ import annotations
 
 import math
-import re
-from collections import Counter
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .. import _rockmasspy_core as rm
-from ..history import _PAIRS, MIN_LABORS_LEVEL1, MIN_PAIRS_LEVEL1, History, HistoryTramo, _pos, labor_key
+from ..history import (LEVEL1_KINDS, LEVEL1_RMR_EDITIONS, MIN_LABORS_LEVEL1, MIN_PAIRS_LEVEL1, History, HistoryTramo,
+                       labor_key, level1_rows)
 from .stats import (BayesLinearFit, BootstrapResult, DemingFit, OlsFit, _positive, bayes_linear_fit, deming_fit,
                     group_bootstrap, ols_fit)
 
-KINDS = ("rmr_from_q", "gsi_from_rmr", "gsi_from_q_prime")
+KINDS = LEVEL1_KINDS
 STATUSES = ("site", "unstable", "not_calibrated")
 NO_DOMAIN = "(no domain)"
 
@@ -42,11 +42,6 @@ _GLOBAL = {("rmr_from_q", "RMR89"): rm.Correlation.RmrFromQ_Huang2026,
            ("gsi_from_rmr", "RMR89"): rm.Correlation.GsiFromRmr89Prime_HoekDiederichs2006,
            ("gsi_from_rmr", "RMR76"): rm.Correlation.GsiFromRmr76Prime_HoekDiederichs2006,
            ("gsi_from_q_prime", None): rm.Correlation.GsiFromQPrime_Hoek1995}
-_RMR_EDITIONS = ("RMR76", "RMR89")
-
-
-def _rmr_ed(t: HistoryTramo) -> str:
-    return re.sub(r"[\s-]", "", t.rmr_edicion or "").upper()  # RMR-89, RMR 89 → RMR89, como la auditoría
 
 
 @dataclass(frozen=True)
@@ -78,6 +73,7 @@ class SiteCorrelationFit:
     bayes: BayesLinearFit
     x_center: float
     prior_correlation: str  # method_id de la correlación global usada como prior
+    prior_verification: str  # su marca en el núcleo (Primary, Secondary…), R14
     warnings: tuple[str, ...]
 
     @property
@@ -106,16 +102,17 @@ class SiteCorrelationFit:
         t = np.log(t) if self.log_x else t
         return self.ols.predict(t, level) if self.method == "OLS" else self.bayes.predict(t - self.x_center, level)
 
-    def to_custom_correlation(self) -> rm.CustomCorrelation:
-        """CustomCorrelation para las tablas por labor (1B) y `plot_correlation` (1C).
+    def to_custom_correlation(self) -> rm.CustomCorrelation | None:
+        """CustomCorrelation para las tablas por labor (1B) y `plot_correlation` (1C), o None si no se puede armar:
+        con un solo valor de x observado no hay rango de validez (valid_min < valid_max).
 
-        El nombre y el `source` solo llevan el código genérico, conteos, método y estado (R13).
+        El nombre y el `source` solo llevan el código genérico, conteos, método y estado (R13); con el bayesiano,
+        también el prior y su marca de verificación (R14).
         """
         if not self.x_min < self.x_max:
-            raise ValueError(f"site correlation {self.label}: the observed x range is a single value; "
-                             "a CustomCorrelation needs valid_min < valid_max")
+            return None
         form = rm.CorrelationForm.LogLinear if self.log_x else rm.CorrelationForm.Linear
-        prior = f", prior {self.prior_correlation}" if self.method == "Bayesian" else ""
+        prior = f", prior {self.prior_correlation} ({self.prior_verification})" if self.method == "Bayesian" else ""
         source = (f"RockMassPy site fit {self.kind}: n={self.n}, labors={self.n_labors}, "
                   f"method={self.method}{prior}, status={self.status}")
         return rm.CustomCorrelation(name=f"{self.kind}_{self.label}", from_=self.x_from, to=self.y_to, form=form,
@@ -145,42 +142,6 @@ def _global_line(c, log_x: bool):
     return a, r1.value - a * t1, r1.info
 
 
-def _pairs(history: History, kind: str):
-    """Filas del ajuste: las mismas que cuenta la preparación del nivel 1 (`history._readiness`)."""
-    rows = [t for t in history.tramos if all(getattr(t, c) is not None for c in _PAIRS[kind])
-            and (kind != "rmr_from_q" or _pos(t.q_valor))]  # ln Q
-    xs, ys = [], []
-    for t in rows:
-        if kind == "rmr_from_q":
-            x, y = t.q_valor, t.rmr_valor
-        elif kind == "gsi_from_rmr":
-            x, y = t.rmr_valor, t.gsi_valor
-        else:
-            try:  # Q′ del núcleo: RQD < 10 se toma como 10 (NGI); jw = srf = 1 no entran en q_base
-                x = rm.q_value(rm.QInput(t.rqd_pct, t.jn, t.jr, t.ja, 1.0, 1.0), rm.QEdition.NGI2025).q_base
-            except ValueError as e:
-                raise ValueError(f"Tramos row {t.fila}: cannot compute Q' from rqd_pct, jn, jr, ja: {e}") from None
-            y = t.gsi_valor
-        xs.append(float(x))
-        ys.append(float(y))
-    return rows, np.array(xs), np.array(ys)
-
-
-def _edition(kind: str, rows) -> str | None:
-    if kind == "gsi_from_q_prime":
-        return None
-    eds = Counter(_rmr_ed(t) for t in rows)
-    bad = sum(v for k, v in eds.items() if k not in _RMR_EDITIONS)
-    if bad:  # el valor no se repite: puede ser cualquier texto
-        raise ValueError(f"{kind}: {bad} pair(s) have a missing or unsupported rmr_edicion; "
-                         f"supported: {', '.join(_RMR_EDITIONS)}")
-    if len(eds) > 1:
-        counts = ", ".join(f"{k}: {v}" for k, v in sorted(eds.items()))
-        raise ValueError(f"{kind}: rmr_edicion mixes editions ({counts}); RMR editions are not mixed in one fit, "
-                         "filter the history to one edition")
-    return next(iter(eds), "RMR89")
-
-
 def _fit(kind, label, domain, rows, x, y, groups, edition, prior, deming_ratio, n_boot, seed):
     log_x = _LOG_X[kind]
     t = np.log(x) if log_x else x
@@ -193,90 +154,105 @@ def _fit(kind, label, domain, rows, x, y, groups, edition, prior, deming_ratio, 
     bayes = bayes_linear_fit(t - xc, y, prior_mean=(a_g, a_g * xc + b_g), prior_sd=prior_sd, prior_sigma=prior_sigma)
     ols = deming = boot = a_ci = b_ci = None
     status = "not_calibrated"
+    below = n < MIN_PAIRS_LEVEL1 or n_labors < MIN_LABORS_LEVEL1
     if n_labors < MIN_LABORS_LEVEL1:
         warns.append(f"few labors: {n_labors} (needs {MIN_LABORS_LEVEL1})")
-    if n < MIN_PAIRS_LEVEL1 or n_labors < MIN_LABORS_LEVEL1:
+    if below:
         warns.append(f"not calibrated to the site: {n} pairs from {n_labors} labors (needs {MIN_PAIRS_LEVEL1} "
                      f"from {MIN_LABORS_LEVEL1}); Bayesian fit only, close to the global correlation")
-        deming_reason = "below the level-1 minimum"
     else:
         try:
             ols = ols_fit(t, y)
         except ValueError:
             warns.append("not calibrated to the site: x has no spread; Bayesian fit only")
-        if ols is not None:
-            boot = group_bootstrap(groups, lambda idx: (lambda f: (f.a, f.b))(ols_fit(t[idx], y[idx])),
-                                   n_boot=n_boot, seed=seed)
-            frac = boot.n_discarded / boot.n_boot
-            if len(boot.replicates):
-                (a_lo, b_lo), (a_hi, b_hi) = boot.percentile_ci(0.95)
-                a_ci, b_ci = (float(a_lo), float(a_hi)), (float(b_lo), float(b_hi))
-            tol = SLOPE_CI_REL_TOL * abs(ols.a)
-            narrow = a_ci is not None and ols.a - tol <= a_ci[0] and a_ci[1] <= ols.a + tol
-            status = "site" if narrow and frac <= MAX_DISCARDED_FRACTION else "unstable"
-            if not narrow:
-                warns.append(f"unstable: bootstrap 95 % CI of the slope wider than ±{SLOPE_CI_REL_TOL:.0%} "
-                             "of the OLS slope")
-            if frac > MAX_DISCARDED_FRACTION:
-                warns.append(f"unstable: {boot.n_discarded} of {boot.n_boot} bootstrap replicates discarded "
-                             f"(over {MAX_DISCARDED_FRACTION:.0%})")
+    if ols is not None:
+        def slope_intercept(idx):
+            f = ols_fit(t[idx], y[idx])
+            return f.a, f.b
+
+        boot = group_bootstrap(groups, slope_intercept, n_boot=n_boot, seed=seed)
+        frac = boot.n_discarded / boot.n_boot
+        if len(boot.replicates):
+            (a_lo, b_lo), (a_hi, b_hi) = boot.percentile_ci(0.95)
+            a_ci, b_ci = (float(a_lo), float(a_hi)), (float(b_lo), float(b_hi))
+        tol = SLOPE_CI_REL_TOL * abs(ols.a)
+        narrow = a_ci is not None and ols.a - tol <= a_ci[0] and a_ci[1] <= ols.a + tol
+        same_sign = np.sign(ols.a) == np.sign(a_g)
+        status = "site" if narrow and same_sign and frac <= MAX_DISCARDED_FRACTION else "unstable"
+        if not narrow:
+            warns.append(f"unstable: bootstrap 95 % CI of the slope wider than ±{SLOPE_CI_REL_TOL:.0%} "
+                         "of the OLS slope")
+        if frac > MAX_DISCARDED_FRACTION:
+            warns.append(f"unstable: {boot.n_discarded} of {boot.n_boot} bootstrap replicates discarded "
+                         f"(over {MAX_DISCARDED_FRACTION:.0%})")
+        if not same_sign:
+            warns.append("unstable: slope sign opposite to the global correlation; check the data")
+    if deming_ratio is None:
+        deming_reason = ("deming_ratio not given: without the error-variance ratio the Deming line is "
+                         "arbitrary (Carroll et al. 2006)")
+    elif below:
+        deming_reason = "below the level-1 minimum"
+    elif ols is None:
+        deming_reason = "x has no spread: no regression is possible"
+    else:
         deming_reason = None
-        if ols is None:
-            deming_reason = "below the level-1 minimum"
-        elif deming_ratio is None:
-            deming_reason = ("deming_ratio not given: without the error-variance ratio the Deming line is "
-                             "arbitrary (Carroll et al. 2006)")
-        else:
-            try:
-                deming = deming_fit(t, y, deming_ratio)
-            except ValueError as e:
-                deming_reason = str(e)
+        try:
+            deming = deming_fit(t, y, deming_ratio)
+        except ValueError as e:
+            deming_reason = str(e)
     x_from, y_to = {"rmr_from_q": ("Q", edition), "gsi_from_rmr": (edition, "GSI"),
                     "gsi_from_q_prime": ("Q'", "GSI")}[kind]
     return SiteCorrelationFit(kind=kind, label=label, domain=domain, status=status, n=n, n_labors=n_labors,
                               x_min=float(x.min()), x_max=float(x.max()), x_from=x_from, y_to=y_to, log_x=log_x,
                               ols=ols, deming=deming, deming_reason=deming_reason, bootstrap=boot, a_ci=a_ci,
                               b_ci=b_ci, bayes=bayes, x_center=xc, prior_correlation=info.method_id,
-                              warnings=tuple(warns))
+                              prior_verification=info.verification.name, warnings=tuple(warns))
 
 
 def fit_site_correlation(history: History, kind: str, *, group_by: str | None = "litologia",
-                         deming_ratio: float | None = None, prior_sd: tuple[float, float] | None = None,
-                         prior_sigma: float | None = None, n_boot: int = 2000, seed: int = 0) -> SiteCorrelationResult:
+                         rmr_edition: str | None = None, deming_ratio: float | None = None,
+                         prior_sd: tuple[float, float] | None = None, prior_sigma: float | None = None,
+                         n_boot: int = 2000, seed: int = 0) -> SiteCorrelationResult:
     """Correlación propia del sitio por dominio y para toda la mina (nivel 1, R5).
 
     - `kind`: "rmr_from_q" (RMR = a·ln Q + b), "gsi_from_rmr" (GSI = a·RMR + b) o "gsi_from_q_prime"
       (GSI = a·ln Q′ + b, Q′ = RQD/Jn·Jr/Ja de los componentes, con el RQD < 10 tomado como 10).
     - `group_by`: atributo de `HistoryTramo` que define el dominio; None = solo la mina. Sin valor → "(no domain)".
+    - `rmr_edition`: edición de RMR que entra al ajuste (RMR76 o RMR89); None = la mayoritaria. Las ediciones no
+      se mezclan: las filas de otra edición o sin edición quedan fuera, con aviso.
     - `deming_ratio`: var(error de y)/var(error de x) en las unidades del ajuste (x = ln Q para Q y Q′).
     - `prior_sd` = (desviación de a, desviación del nivel de la curva en el centro de los datos); por defecto
       (50 % de |a global|, 10 puntos). `prior_sigma` = desviación residual a priori, por defecto 8.
-    - Estados: "site" (≥ 30 pares de ≥ 5 labores e IC bootstrap de la pendiente dentro de ±25 % de la OLS, con a
-      lo más 10 % de réplicas descartadas), "unstable" (cumple el mínimo pero no lo demás) y "not_calibrated"
-      (bajo el mínimo: solo el bayesiano).
+    - Estados: "site" (≥ 30 pares de ≥ 5 labores, IC bootstrap de la pendiente dentro de ±25 % de la OLS, a lo
+      más 10 % de réplicas descartadas y pendiente con el signo de la global), "unstable" (cumple el mínimo pero
+      no lo demás) y "not_calibrated" (bajo el mínimo: solo el bayesiano).
     """
-    if kind not in KINDS:
-        raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     if group_by is not None and (group_by == "fila" or group_by not in HistoryTramo.__dataclass_fields__):
         raise ValueError(f"group_by must be None or a HistoryTramo attribute, got '{group_by}'")
     if deming_ratio is not None:
         _positive("deming_ratio", deming_ratio)
-    rows, x, y = _pairs(history, kind)
+    sel = level1_rows(history, kind, rmr_edition=rmr_edition)  # valida kind y rmr_edition
+    rows, x, y = sel.tramos, np.array(sel.x), np.array(sel.y)
     if not rows:
-        raise ValueError(f"{kind}: no complete pairs in the history")
-    edition = _edition(kind, rows)
-    corr = _GLOBAL[(kind, edition)]
-    a_g, b_g, info = _global_line(corr, _LOG_X[kind])
+        need = f" with rmr_edicion {' or '.join(LEVEL1_RMR_EDITIONS)}" if kind != "gsi_from_q_prime" else ""
+        raise ValueError(f"{kind}: no usable pairs{need} in the history")
+    a_g, b_g, info = _global_line(_GLOBAL[(kind, sel.edition)], _LOG_X[kind])
     sd = prior_sd if prior_sd is not None else (PRIOR_SD_A_FRACTION * abs(a_g), PRIOR_SD_B_POINTS)
     sigma = PRIOR_SIGMA if prior_sigma is None else prior_sigma
     prior = ((a_g, b_g), sd, sigma, info)
 
     warns = []
+    if sel.excluded_edition:
+        warns.append(f"{sel.excluded_edition} pair(s) excluded: rmr_edicion missing or other than {sel.edition}; "
+                     "RMR editions are not mixed in one fit")
+    if sel.excluded_x:  # gsi_from_rmr no excluye por x
+        what = "Q <= 0" if kind == "rmr_from_q" else "Q' components out of range"
+        warns.append(f"{sel.excluded_x} pair(s) excluded: {what}")
     if kind == "gsi_from_rmr":
-        warns.append(f"the global prior uses {edition}' (dry, no orientation adjustment); rmr_valor may include "
+        warns.append(f"the global prior uses {sel.edition}' (dry, no orientation adjustment); rmr_valor may include "
                      "the water and orientation ratings (not recorded), which shifts the site line")
-    if kind != "gsi_from_rmr":
-        q_eds = {re.sub(r"[\s-]", "", t.q_edicion).upper() for t in rows if t.q_edicion}
+    else:
+        q_eds = {t.q_edicion.strip().casefold() for t in rows if t.q_edicion}
         if len(q_eds) > 1:
             warns.append(f"q_edicion mixes {len(q_eds)} editions; pairs from different Q table editions are pooled")
     unlabeled = sum(labor_key(t) is None for t in rows)
@@ -287,7 +263,7 @@ def fit_site_correlation(history: History, kind: str, *, group_by: str | None = 
 
     def fit(label, domain, idx):
         return _fit(kind, label, domain, [rows[i] for i in idx], x[idx], y[idx], [groups[i] for i in idx],
-                    edition, prior, deming_ratio, n_boot, seed)
+                    sel.edition, prior, deming_ratio, n_boot, seed)
 
     mine = fit("mine", None, np.arange(len(rows)))
     domains = {}
