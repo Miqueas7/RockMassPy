@@ -30,14 +30,15 @@ de una mina, y nada de lo que el generador produce se entrega como modelo entren
    dominio D3 tiene solo 3 labores y queda «no calibrada al sitio».
 4. Escribe el informe `historico.html` (y `historico.docx` si tienes python-docx): datos, auditoría de ingesta,
    preparación por nivel, nivel 1 con sus figuras y limitaciones.
-5. Corre `rockmass history historico.xlsx --correlations --output resultados/`, que escribe:
+5. Escribe los resultados en `resultados/` con `rm.save_history_findings` y `save_site_correlations`:
    - `history_findings.csv`: un hallazgo por fila, con su `id_tramo` y su fila;
    - `site_correlations.csv`: un ajuste por fila, con su dominio (aquí sí va la litología), n, labores, estado,
      a, b, sus IC y el *prior*;
-   - `site_correlations.json`: las correlaciones en el formato `correlations` de las tablas por labor, para
-     pegarlas en la tuya.
+   - `site_correlations.json`: solo las correlaciones con estado «sitio», en el formato `correlations` de las
+     tablas por labor, para pegarlas en la tuya. Las «inestables» y las «no calibradas al sitio» se quedan en el CSV.
 
-   La CLI sale con código 2: no hay hallazgos, pero D3 no queda «sitio». Tarda unos 5 s.
+   Lo mismo se hace desde la terminal con `rockmass history historico.xlsx --correlations --output resultados/`,
+   que sale con código 2 porque D3 no queda «sitio». El ejemplo tarda unos 3 s.
 
 ## Los históricos reales: privacidad
 

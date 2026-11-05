@@ -522,6 +522,38 @@ conservative|upper|lower` (both need `--criteria`) and, in `rockmass le`, `--pro
 
 See `examples/11-criterios-sarma/`.
 
+## Mine history: ingest audit and site correlations
+
+Needs the extra `pip install "rockmasspy[ml]"` (numpy and scipy) for the correlations; reading and auditing the
+history need only the base package (Excel needs `[io]`). `rm.load_history` reads the history template
+(`plantillas/Plantilla_historico_geomecanico.xlsx`: sheets `Tramos`, `Tipos_sostenimiento` and `Desempeno`), and
+`rm.audit_history` recomputes Q and the basic RMR89, flags non-independent records and cross-sheet inconsistencies,
+and counts how far each predictive level is from its minimum (a design decision, not a published value).
+
+```python
+import rockmasspy as rm
+from rockmasspy.predictive import fit_site_correlation, save_site_correlations
+
+h = rm.load_history("historico.xlsx")
+audit = rm.audit_history(h)
+fit = fit_site_correlation(h, "rmr_from_q", group_by="litologia")
+print(fit.mine.status, fit.mine.a, fit.mine.b)       # "site", "unstable" or "not_calibrated"
+save_site_correlations(fit, "results/")              # CSV with every fit, JSON with the "site" ones only
+```
+
+Level 1 fits `rmr_from_q`, `gsi_from_rmr` and `gsi_from_q_prime` per domain and for the whole mine: OLS with a
+prediction interval, Deming only when you give the error-variance ratio, a bootstrap that resamples whole
+excavations, and a conjugate Bayesian fit centred on the published global correlation, so few data stay close to it.
+`to_custom_correlation()` turns a fit into a `CustomCorrelation` for your per-labor tables. From the command line:
+
+```bash
+rockmass history historico.xlsx --correlations --output results/ --report historico.docx
+```
+
+The CLI and the report print counts and codes (domains as D1, D2…), never the excavation, zone, coordinates or
+lithology, and never the input file name. Result files do carry `id_tramo` and the domain: keep them in the mine's
+protected folder, like the history. See `examples/12-historico-prediccion/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a

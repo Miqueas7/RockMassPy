@@ -530,6 +530,44 @@ imprime `meets: a, fails: b, not verifiable: c` y los «no cumple» agrupados po
 
 Mira `examples/11-criterios-sarma/`.
 
+## Histórico de la mina: auditoría de ingesta y correlaciones propias
+
+Las correlaciones necesitan el extra `pip install "rockmasspy[ml]"` (numpy y scipy). Leer y auditar el histórico solo
+pide el paquete base (el Excel pide `[io]`). `rm.load_history` lee la plantilla del histórico
+(`plantillas/Plantilla_historico_geomecanico.xlsx`: hojas `Tramos`, `Tipos_sostenimiento` y `Desempeno`), y
+`rm.audit_history` recalcula el Q y el RMR89 básico, marca los registros no independientes y las incoherencias
+entre hojas, y cuenta cuánto le falta a cada nivel predictivo para su mínimo (decisión de diseño, no un valor
+publicado).
+
+```python
+import rockmasspy as rm
+from rockmasspy.predictive import fit_site_correlation, save_site_correlations
+
+h = rm.load_history("historico.xlsx")
+audit = rm.audit_history(h)
+fit = fit_site_correlation(h, "rmr_from_q", group_by="litologia")
+print(fit.mine.status, fit.mine.a, fit.mine.b)       # "site", "unstable" o "not_calibrated"
+save_site_correlations(fit, "resultados/")           # CSV con todos los ajustes, JSON solo con los «site»
+```
+
+El nivel 1 ajusta `rmr_from_q`, `gsi_from_rmr` y `gsi_from_q_prime` por dominio y para toda la mina:
+- OLS con intervalo de predicción;
+- Deming, solo si das el cociente de varianzas de error;
+- bootstrap que remuestrea labores enteras;
+- un bayesiano conjugado centrado en la correlación global publicada: con pocos datos se queda cerca de ella.
+
+`to_custom_correlation()` convierte un ajuste en una `CustomCorrelation` para tus tablas por labor. Desde la
+terminal:
+
+```bash
+rockmass history historico.xlsx --correlations --output resultados/ --report historico.docx
+```
+
+La CLI y el informe muestran conteos y códigos (los dominios salen como D1, D2…). Nunca muestran la labor, la zona,
+las coordenadas ni la litología, ni tampoco el nombre del archivo de entrada. Los archivos de resultados sí traen el
+`id_tramo` y el dominio: guárdalos en la carpeta protegida de la mina, junto con el histórico. Mira
+`examples/12-historico-prediccion/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
