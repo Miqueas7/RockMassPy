@@ -120,8 +120,25 @@ def test_falta_tramos(tmp_path):
     (tmp_path / "csv").mkdir()
     with pytest.raises(ValueError, match="missing file 'Tramos.csv'"):
         rm.load_history(tmp_path / "csv")
-    with pytest.raises(ValueError, match="unsupported input"):
+    (tmp_path / "x.txt").write_text("a")
+    with pytest.raises(ValueError, match="unsupported history input"):
         rm.load_history(tmp_path / "x.txt")
+
+
+def test_archivo_inexistente_o_invalido_sin_ruta(tmp_path):
+    for p, msg in [(tmp_path / "ZZSENT.xlsx", "history file not found"),
+                   (tmp_path / "ZZSENT", "history folder not found")]:
+        with pytest.raises(FileNotFoundError, match=msg) as e:
+            rm.load_history(p)
+        assert "ZZSENT" not in str(e.value)
+    (tmp_path / "ZZSENT.xlsx").write_text("no es un xlsx")
+    with pytest.raises(ValueError, match="history file is not a valid .xlsx file") as e:
+        rm.load_history(tmp_path / "ZZSENT.xlsx")
+    assert "ZZSENT" not in str(e.value)
+    (tmp_path / "ZZSENT.txt").write_text("a")
+    with pytest.raises(ValueError, match="unsupported history input") as e:
+        rm.load_history(tmp_path / "ZZSENT.txt")
+    assert "ZZSENT" not in str(e.value)
 
 
 def test_csv_carpeta_igual_que_excel(libro, tmp_path):
@@ -160,6 +177,8 @@ def test_errores_con_fila_y_columna_sin_ids(libro):
               "sheet 'Tramos', row 2, column 'este_m': invalid value"),
              ({"Tramos": [{"id_tramo": "ZZSENT-T1", "zona_nivel": "ZZSENT", "norte_m": "ZZSENT"}]},
               "sheet 'Tramos', row 2, column 'norte_m': invalid value"),
+             ({"Tramos": [{"id_tramo": "ZZSENT-T1", "cota_m": "ZZSENT"}]},
+              "sheet 'Tramos', row 2, column 'cota_m': invalid value"),
              ({"Tramos": [{"id_tramo": "ZZSENT-T1", "litologia": "ZZSENT", "luz_m": "x"}]},
               "sheet 'Tramos', row 2, column 'luz_m': expected a number, got 'x'"),
              ({"Tramos": [{"id_tramo": "ZZSENT-T1", "fecha_instalacion": "31/31/2026"}]},
@@ -229,8 +248,19 @@ def test_q_recalculado():
           tramo("T4", 5, q_valor=5.0, **{**comp, "jn": -1}),
           tramo("T5", 6, q_valor=5.0, rqd_pct=80))  # sin todos los componentes: no se revisa
     a = rm.audit_history(rm.History(ts, (), ()))
-    assert kinds(a) == [("q_mismatch", "T2"), ("not_recomputed", "T3"), ("not_recomputed", "T4")]
+    assert kinds(a) == [("q_mismatch", "T2"), ("q_mismatch", "T3"), ("not_recomputed", "T4")]
     assert "NGI2015" in a.findings[0].message and a.findings[0].fila == 3 and a.findings[0].sheet == "Tramos"
+    assert "(NGI2015; parameters taken from the 1974 tables)" in a.findings[1].message  # Q-1974 se recalcula
+
+
+def test_q_edicion_sin_mayusculas_y_desconocida():
+    comp = dict(rqd_pct=80, jn=9, jr=1.5, ja=1, jw=1, srf=1, q_valor=5.0)
+    ts = (tramo("T1", 2, q_edicion=" q-ngi-2015 ", **comp), tramo("T2", 3, q_edicion="q-1974", **comp),
+          tramo("T3", 4, q_edicion="ZZSENT-ED", **comp), tramo("T4", 5, **comp))
+    m = [f.message for f in rm.audit_history(rm.History(ts, (), ())).findings]
+    assert m[0].endswith("(NGI2015)") and "1974 tables" in m[1]
+    assert m[2].endswith("(NGI2025; unknown q_edicion, NGI2025 used)") and "ZZSENT" not in m[2]
+    assert m[3].endswith("(NGI2025)")
 
 
 def test_q_tolerancia_absoluta_en_q_bajo():
@@ -253,6 +283,12 @@ def test_rmr89_basico_recalculado():
     assert "basic RMR89 64" in a.findings[0].message and "basic RMR89 69" in a.findings[2].message
 
 
+def test_rmr_edicion_normalizada():
+    base = dict(ucs_mpa=60, rqd_pct=80, espaciamiento_m=0.3, puntaje_condicion_juntas=20, agua="Húmedo", rmr_valor=50)
+    ts = tuple(tramo(f"T{k}", k + 2, rmr_edicion=e, **base) for k, e in enumerate(["RMR-89", "rmr 89", "RMR89 "]))
+    assert [k for k, _ in kinds(rm.audit_history(rm.History(ts, (), ())))] == ["rmr_mismatch"] * 3
+
+
 def test_registros_no_independientes():
     comp = dict(rqd_pct=70, jn=6, jr=2, ja=1, jw=1, srf=1)
     ts = (tramo("T1", 2, labor_codigo="L001", progresiva_inicio_m=0, progresiva_fin_m=50, rqd_pct=60),
@@ -269,6 +305,23 @@ def test_registros_no_independientes():
     assert "row 2" in a.findings[1].message and "not independent" in a.findings[2].message
 
 
+def test_progresiva_al_reves_y_clave_de_labor():
+    ts = (tramo("T1", 2, labor_codigo="L001", zona_nivel="Z1", progresiva_inicio_m=50, progresiva_fin_m=0),
+          tramo("T2", 3, labor_codigo="L001", zona_nivel="Z1", progresiva_inicio_m=20, progresiva_fin_m=10),
+          tramo("T3", 4, labor_codigo="L001", zona_nivel="Z2", progresiva_inicio_m=10, progresiva_fin_m=20),  # otra zona
+          tramo("T4", 5, labor_codigo="L001", progresiva_inicio_m=60, progresiva_fin_m=70, rqd_pct=70),
+          tramo("T5", 6, labor_codigo="L001", progresiva_inicio_m=70, progresiva_fin_m=80, rqd_pct=70))  # 1 componente
+    a = rm.audit_history(rm.History(ts, (), ()))
+    assert kinds(a) == [("overlapping_chainage", "T2")] and "row 2" in a.findings[0].message
+    assert [rm.labor_key(t) for t in ts[2:4]] == [("Z2", "L001"), (None, "L001")]
+    assert rm.labor_key(tramo("T9")) is None
+
+
+def test_componentes_repetidos_exigen_dos():
+    ts = (tramo("T1", 2, labor_codigo="L001", rqd_pct=70, jn=6), tramo("T2", 3, labor_codigo="L001", rqd_pct=70, jn=6))
+    assert kinds(rm.audit_history(rm.History(ts, (), ()))) == [("repeated_components", "T2")]
+
+
 def test_coherencia_entre_hojas():
     ts = (tramo("T1", 2, sost_instalado="I", sost_recomendado="IV", fecha_instalacion="2026-02-01"),
           tramo("T2", 3, sost_instalado="X"))
@@ -281,39 +334,79 @@ def test_coherencia_entre_hojas():
     assert "sost_recomendado 'IV'" in a.findings[0].message
 
 
-def test_preparacion_por_nivel():
-    ts = []
-    for k in range(40):
-        labor = f"L{k % 6:03d}"
-        ts.append(tramo(f"T{k:04d}", k + 2, labor_codigo=labor, zona_nivel=f"Z{k % 4}", rmr_valor=60, q_valor=5,
-                        gsi_valor=55 if k < 20 else None, rqd_pct=50 + k, jn=6, jr=2, ja=1,
-                        sost_instalado="I" if k < 12 else "II" if k < 30 else "Z",
-                        fecha_instalacion="2026-01-01"))
-    ins = [insp(f"T{k:04d}", "2026-03-01", "Falla") for k in range(35)]
-    a = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2), tipo("III", 3)), tuple(ins)))
+def test_sin_tipos_de_sostenimiento_un_solo_hallazgo():
+    ts = tuple(tramo(f"T{k}", k + 2, sost_instalado="I") for k in range(5)) + (tramo("T9", 9),)
+    a = rm.audit_history(rm.History(ts, (), ()))
+    assert [(f.kind, f.sheet, f.fila, f.id_tramo) for f in a.findings] == [
+        ("unknown_support", "Tipos_sostenimiento", None, None)]
+    assert "5 tramos" in a.findings[0].message
+
+
+def test_inspeccion_despues_de_abandonado():
+    ts = (tramo("T1", fecha_instalacion="2026-01-01"),)
+    ins = (insp("T1", "2026-03-01", "Falla", 4), insp("T1", "2026-02-01", "Abandonado", 3),
+           insp("T1", "2026-01-15", "Estable", 2))
+    hi = rm.History(ts, (), ins)
+    o = rm.tramo_outcomes(hi)[0]
+    assert (o.failed, o.end_date, o.exposure_days, o.inspections) == (False, "2026-02-01", 31, 2)
+    assert [(f.kind, f.fila) for f in rm.audit_history(hi).findings] == [("inspection_after_abandonment", 4)]
+
+
+def test_exposicion_de_cero_dias_se_recorta_a_uno():
+    hi = rm.History((tramo("T1", fecha_instalacion="2026-01-01"),), (), (insp("T1", "2026-01-01", "Falla"),))
+    assert rm.tramo_outcomes(hi)[0].exposure_days == 1
+
+
+def _usable(k, **kw):
+    """Tramo completo para los niveles 2 y 3: Q, luz, ESR, tipo definido y fecha de instalación."""
+    # cada labor en una sola zona: la clave (zona, labor) da 6 labores
+    base = dict(labor_codigo=f"L{k % 6:03d}", zona_nivel=f"Z{k % 6 % 3}", q_valor=5, luz_m=4, esr=1.6,
+                sost_instalado="I" if k % 2 else "II", fecha_instalacion="2026-01-01", tipo_labor="Galería")
+    return tramo(f"T{k:04d}", k + 2, **{**base, **kw})
+
+
+def test_preparacion_niveles_1_y_2_solo_filas_usables():
+    ts = [_usable(k, rmr_valor=60, gsi_valor=55 if k < 20 else None, rqd_pct=50 + k, jn=6, jr=2, ja=1)
+          for k in range(40)]
+    ts[0] = _usable(0, rmr_valor=60, q_valor=0)  # Q = 0: no hay ln Q
+    ts[1] = _usable(1, rmr_valor=60, esr=None)  # sin ESR: no cuenta en el nivel 2
+    ts[3] = _usable(3, rmr_valor=60, sost_instalado="Z")  # tipo no definido
+    a = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2), tipo("III", 3)), ()))
     r = {(x.level, x.item): x for x in a.readiness}
     assert list(r) == [(1, "rmr_from_q"), (1, "gsi_from_rmr"), (1, "gsi_from_q_prime"),
-                       (2, "I"), (2, "II"), (2, "III"), (2, "Z"), (3, "performance")]
-    assert r[1, "rmr_from_q"].counts == {"pairs": 40, "labors": 6} and r[1, "rmr_from_q"].ready
-    assert r[1, "gsi_from_rmr"].counts == {"pairs": 20, "labors": 6}
-    assert r[1, "gsi_from_rmr"].missing == {"pairs": 10, "labors": 0} and not r[1, "gsi_from_rmr"].ready
-    assert r[2, "I"].counts == {"tramos": 12, "labors": 6} and r[2, "I"].ready
-    assert r[2, "III"].counts == {"tramos": 0, "labors": 0} and r[2, "Z"].counts["tramos"] == 10
-    p = r[3, "performance"]
-    assert p.counts == {"failures": 35, "zones": 4, "tramos_with_inspections": 35, "tramos_without_inspections": 5,
-                        "start_from_evaluation": 0, "without_exposure": 0}
-    assert p.minimums == {"failures": 40, "zones": 3} and p.missing == {"failures": 5, "zones": 0}
+                       (2, "I"), (2, "II"), (2, "III"), (3, "performance")]
+    assert r[1, "rmr_from_q"].counts == {"pairs": 39, "labors": 6, "total": 40} and r[1, "rmr_from_q"].ready
+    assert r[1, "gsi_from_rmr"].counts == {"pairs": 17, "labors": 6, "total": 40}
+    assert r[1, "gsi_from_rmr"].missing == {"pairs": 13, "labors": 0} and not r[1, "gsi_from_rmr"].ready
+    assert r[2, "I"].counts == {"tramos": 18, "labors": 3, "total": 19} and not r[2, "I"].ready  # impares: 3 labores
+    assert r[2, "II"].counts == {"tramos": 19, "labors": 3, "total": 20}
+    assert r[2, "III"].counts == {"tramos": 0, "labors": 0, "total": 0}
     c = rm.history_audit_counts(a)
-    assert (c["tramos"], c["support_types"], c["inspections"], c["levels_ready"]) == (40, 3, 35, 4)  # rmr_from_q, I, II, Z
-    assert c["findings"] == c["unknown_support"] == 10  # los diez «Z»
-    assert set(rm.FINDING_KINDS) <= set(c)
+    assert (c["tramos"], c["support_types"], c["inspections"], c["items_ready"]) == (40, 3, 0, 1)
+    assert "levels_ready" not in c and set(rm.FINDING_KINDS) <= set(c)
+
+
+def test_preparacion_nivel_3_clase_menor_y_parametros():
+    ts = [_usable(k) for k in range(60)]
+    ts[0] = _usable(0, luz_m=None)  # no usable
+    ins = [insp(f"T{k:04d}", "2026-03-01", "Falla" if k < 15 else "Estable") for k in range(50)]
+    p = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2)), tuple(ins))).readiness[-1]
+    assert p.counts == {"minority_class": 14, "zones": 3, "usable": 49, "failures": 14, "non_failures": 35,
+                        "parameters": 4, "failures_total": 15, "tramos": 60, "tramos_with_inspections": 50,
+                        "tramos_without_inspections": 10, "start_from_evaluation": 0, "without_exposure": 0}
+    assert p.minimums == {"minority_class": 40, "zones": 3} and p.missing == {"minority_class": 26, "zones": 0}
+    # profundidad en todas las filas usables: +1; tres tipos de labor: +2
+    ts = [_usable(k, profundidad_m=300, tipo_labor=("Galería", "Rampa", "Crucero")[k % 3]) for k in range(60)]
+    p = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2)), tuple(ins))).readiness[-1]
+    assert p.counts["parameters"] == 7 and p.minimums["minority_class"] == 70
 
 
 def test_centinela_no_aparece_en_mensajes(libro):
     """R13: ZZSENT en id, labor, zona y litología; los hallazgos lo llevan en campos, nunca en el texto."""
     s = "ZZSENT"
     comp = dict(rqd_pct=80, jn=9, jr=1.5, ja=1, jw=1, srf=1, ucs_mpa=60, espaciamiento_m=0.3,
-                puntaje_condicion_juntas=20, agua="Húmedo", rmr_edicion="RMR89", rmr_valor=50, q_valor=99)
+                puntaje_condicion_juntas=20, agua="Húmedo", rmr_edicion="RMR89", rmr_valor=50, q_valor=99,
+                q_edicion=s)  # edición desconocida: la nota no la repite
     filas = [{"id_tramo": f"{s}-T{k}", "labor_codigo": f"{s}-L", "zona_nivel": f"{s}-Z", "litologia": s,
               "este_m": 1000.5 + k, "norte_m": 2000.5, "progresiva_inicio_m": 0, "progresiva_fin_m": 10,
               "sost_instalado": "IV", "fecha_instalacion": D(2026, 2, 1), **comp} for k in (1, 2)]

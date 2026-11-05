@@ -15,13 +15,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import _rockmasspy_core as rm
+from .batch import _Q_EDITIONS
 from .csv_io import _CsvSource, _csv_files
 from .excel_io import _open, _row, _support_dicts, _where
-from .gsi_charts import normalize_cell
 from .intact_rock import _strip
 from .support import SupportType
 from .table_io import support_from_dict
-from .tramos import _IDENT, read_records
+from .tramos import _IDENT, _normalize_gsi_cell, read_records
 
 HISTORY_SHEETS = ("Tramos", "Tipos_sostenimiento", "Desempeno")
 INSPECTION_STATES = ("Estable", "Falla", "Reparado", "Abandonado")
@@ -32,7 +32,7 @@ MIN_PAIRS_LEVEL1 = 30
 MIN_LABORS_LEVEL1 = 5
 MIN_TRAMOS_PER_TYPE_LEVEL2 = 10
 MIN_LABORS_PER_TYPE_LEVEL2 = 5
-MIN_FAILURES_PER_PARAMETER_LEVEL3 = 10
+MIN_EVENTS_PER_PARAMETER_LEVEL3 = 10  # se aplica a la clase menor: min(fallas, no fallas)
 LEVEL3_BASE_PARAMETERS = 4  # ln Q, ln De, rango del sostenimiento y ln exposición (R9); decisión de diseño
 MIN_ZONES_LEVEL3 = 3
 
@@ -42,7 +42,7 @@ Q_REL_TOL = 0.01
 RMR_TOL_POINTS = 1.0
 
 FINDING_KINDS = ("q_mismatch", "rmr_mismatch", "not_recomputed", "overlapping_chainage", "repeated_components",
-                 "unknown_support", "unknown_tramo", "inspection_before_installation")
+                 "unknown_support", "unknown_tramo", "inspection_before_installation", "inspection_after_abandonment")
 
 
 @dataclass(frozen=True)
@@ -149,13 +149,10 @@ def _check_dates(vals, sheet, n, cols):
 def _read_tramos(src, column_map):
     out = []
     for n, vals in read_records(src, "Tramos", column_map, columns=HISTORY_TRAMO_COLUMNS, text=_TRAMO_TEXT,
-                                required=("id_tramo",), ident=_IDENT, id_column="id_tramo", dates=_TRAMO_DATES):
+                                required=("id_tramo",), ident=_IDENT | {"cota_m"}, id_column="id_tramo",
+                                dates=_TRAMO_DATES):
         _check_dates(vals, "Tramos", n, _TRAMO_DATES)
-        if vals["gsi_celda"] is not None:
-            try:
-                vals["gsi_celda"] = normalize_cell(vals["gsi_celda"])
-            except ValueError as e:
-                raise ValueError(f"{_where('Tramos', n, 'gsi_celda')}: {e}") from None
+        _normalize_gsi_cell(vals, "Tramos", n)
         out.append(HistoryTramo(**vals, fila=n))
     return tuple(out)
 
@@ -201,14 +198,20 @@ def load_history(path, *, column_map: Mapping[str, str] | None = None) -> Histor
     Tramos es obligatoria; si faltan Tipos_sostenimiento o Desempeno, su tupla queda vacía. `column_map` va de la
     columna del usuario a la de la plantilla, como en `load_tramos`, y se aplica solo a la hoja Tramos (las otras dos
     se llenan con la plantilla tal cual). No se leen `codigo_mina`, `evaluador_codigo` ni `observaciones`.
+    Los errores de archivo no llevan la ruta ni el nombre: el archivo puede llevar el nombre de la mina.
     """
     p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError("history file not found" if p.suffix else "history folder not found")
     if p.is_dir():
         src = _CsvSource(_csv_files(p, HISTORY_SHEETS))
         return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
     if p.suffix.lower() != ".xlsx":
-        raise ValueError(f"{p.name}: unsupported input; give a .xlsx file or a folder of .csv files")
-    src = _open(p)
+        raise ValueError("unsupported history input; give a .xlsx file or a folder of .csv files")
+    try:
+        src = _open(p)
+    except ValueError:  # el mensaje de _open (1D) nombra el archivo
+        raise ValueError("history file is not a valid .xlsx file") from None
     try:
         return History(_read_tramos(src, column_map), _read_support_types(src), _read_inspections(src))
     finally:
@@ -219,34 +222,52 @@ def load_history(path, *, column_map: Mapping[str, str] | None = None) -> Histor
 
 @dataclass(frozen=True)
 class TramoOutcome:
+    """Resultado de desempeño de un tramo (R9).
+
+    `exposure_days`: días desde fecha_instalacion (o fecha_evaluacion, con `start_from_evaluation`) hasta la primera
+    falla o la última inspección usada. Una exposición de 0 días se recorta a 1 (el nivel 3 usa ln de la exposición).
+    None si no hay fecha de inicio o si la inspección es anterior al inicio. Las inspecciones posteriores al primer
+    «Abandonado» no cuentan: el tramo queda censurado en esa fecha y sin falla (la auditoría las señala).
+    """
     id_tramo: str
     failed: bool
-    end_date: str  # primera falla, o la última inspección si no falló
-    exposure_days: int | None  # None sin fecha de inicio o si la inspección es anterior al inicio
+    end_date: str  # primera falla, o la última inspección usada si no falló
+    exposure_days: int | None
     start_from_evaluation: bool  # sin fecha_instalacion: se contó desde fecha_evaluacion (aviso en el informe)
-    inspections: int
+    inspections: int  # inspecciones usadas (hasta el primer «Abandonado»)
 
 
 def _date(s):
     return None if s is None else datetime.date.fromisoformat(s)
 
 
-def tramo_outcomes(history: History) -> tuple[TramoOutcome, ...]:
-    """Un resultado por tramo con inspecciones, en el orden de la hoja Tramos. Un tramo sin inspecciones no entra
-    (nunca se asume estable); las inspecciones de un id_tramo que no existe tampoco (las señala la auditoría)."""
+def _inspections_by_tramo(history):
+    """{id_tramo: (usadas, ignoradas)}, en orden de fecha y fila; se corta en el primer «Abandonado»."""
     by_id = defaultdict(list)
     for i in history.inspections:
         by_id[i.id_tramo].append(i)
+    out = {}
+    for k, ins in by_id.items():
+        ins.sort(key=lambda i: (i.fecha_inspeccion, i.fila))
+        cut = next((j + 1 for j, i in enumerate(ins) if i.estado == "Abandonado"), len(ins))
+        out[k] = (ins[:cut], ins[cut:])
+    return out
+
+
+def tramo_outcomes(history: History) -> tuple[TramoOutcome, ...]:
+    """Un resultado por tramo con inspecciones, en el orden de la hoja Tramos. Un tramo sin inspecciones no entra
+    (nunca se asume estable); las inspecciones de un id_tramo que no existe tampoco (las señala la auditoría)."""
+    by_id = _inspections_by_tramo(history)
     out = []
     for t in history.tramos:
-        insp = sorted(by_id.get(t.id_tramo, ()), key=lambda i: i.fecha_inspeccion)
+        insp = by_id.get(t.id_tramo, ((), ()))[0]
         if not insp:
             continue
         fails = [i for i in insp if i.estado in FAILURE_STATES]
         end = (fails or insp[-1:])[0].fecha_inspeccion
         start = t.fecha_instalacion or t.fecha_evaluacion
         days = None if start is None else (_date(end) - _date(start)).days
-        out.append(TramoOutcome(t.id_tramo, bool(fails), end, None if days is None or days < 0 else days,
+        out.append(TramoOutcome(t.id_tramo, bool(fails), end, None if days is None or days < 0 else max(days, 1),
                                 t.fecha_instalacion is None and start is not None, len(insp)))
     return tuple(out)
 
@@ -258,12 +279,14 @@ class HistoryFinding:
     kind: str  # uno de FINDING_KINDS
     message: str  # sin valores de identificación ni id_tramo
     sheet: str
-    fila: int
+    fila: int | None  # None: el hallazgo es de la hoja entera
     id_tramo: str | None
 
 
 @dataclass(frozen=True)
 class LevelReadiness:
+    """Preparación de un nivel: `counts` trae lo usable (filas completas para las variables base) y los totales;
+    `minimums` se compara con las claves de lo usable."""
     level: int
     item: str  # nivel 1: tipo de par; nivel 2: código del tipo instalado; nivel 3: "performance"
     counts: dict[str, int]
@@ -287,7 +310,9 @@ class HistoryAudit:
     inspections: int
 
 
-_Q_EDITIONS = {"Q-NGI-2015": rm.QEdition.NGI2015, "Q-NGI-2025": rm.QEdition.NGI2025}
+# el producto de Q es el mismo en las tres ediciones: Q-1974 se recalcula con NGI2015 (no está en el núcleo)
+_Q_ED = {**{k.casefold(): (v, "") for k, v in _Q_EDITIONS.items()},
+         "q-1974": (rm.QEdition.NGI2015, "; parameters taken from the 1974 tables")}
 _WATER = {"seco": rm.Water.Dry, "humedo": rm.Water.Damp, "mojado": rm.Water.Wet, "goteo": rm.Water.Dripping,
           "flujo": rm.Water.Flowing}  # Bieniawski (1989), condición general: 15, 10, 7, 4 y 0 puntos
 _COMPONENTS = ("rqd_pct", "jn", "jr", "ja", "jw", "srf", "ucs_mpa", "espaciamiento_m", "puntaje_condicion_juntas",
@@ -296,29 +321,40 @@ _PAIRS = {"rmr_from_q": ("rmr_valor", "q_valor"), "gsi_from_rmr": ("gsi_valor", 
           "gsi_from_q_prime": ("gsi_valor", "rqd_pct", "jn", "jr", "ja")}
 
 
+def labor_key(t: HistoryTramo) -> tuple[str | None, str] | None:
+    """Clave de la labor: (zona_nivel, labor_codigo); sin zona, solo la labor. None sin labor_codigo.
+    La comparten la auditoría, la preparación y la validación agrupada de la 4B."""
+    return None if t.labor_codigo is None else (t.zona_nivel, t.labor_codigo)
+
+
 def _finding(kind, message, t, sheet="Tramos"):
     return HistoryFinding(kind, message, sheet, t.fila, t.id_tramo)
+
+
+def _q_edition(q_edicion):
+    """(edición del núcleo, nota para el mensaje); sin edición, NGI2025; una desconocida no se repite en la nota."""
+    if q_edicion is None:
+        return rm.QEdition.NGI2025, ""
+    return _Q_ED.get(q_edicion.strip().casefold(), (rm.QEdition.NGI2025, "; unknown q_edicion, NGI2025 used"))
 
 
 def _audit_q(t):
     params = (t.rqd_pct, t.jn, t.jr, t.ja, t.jw, t.srf)
     if t.q_valor is None or any(p is None for p in params):
         return None
-    if t.q_edicion == "Q-1974":  # el núcleo no tiene esa edición (como en el lote de la 1D)
-        return _finding("not_recomputed", "Q-1974 is not supported; Q not recomputed", t)
-    ed = _Q_EDITIONS.get(t.q_edicion, rm.QEdition.NGI2025)
+    ed, note = _q_edition(t.q_edicion)
     try:
         q = rm.q_value(rm.QInput(*params), ed).q
     except ValueError as e:  # parámetros fuera de dominio: el mensaje solo trae nombres y números
         return _finding("not_recomputed", f"Q not recomputed: {e}", t)
     if abs(t.q_valor - q) > max(Q_ABS_TOL, Q_REL_TOL * q):
         return _finding("q_mismatch", f"recorded Q {t.q_valor:g} differs from Q {q:.4g} recomputed from "
-                                      f"RQD, Jn, Jr, Ja, Jw and SRF ({ed.name})", t)
+                                      f"RQD, Jn, Jr, Ja, Jw and SRF ({ed.name}{note})", t)
     return None
 
 
 def _audit_rmr(t):
-    if (t.rmr_edicion or "").strip().upper() != "RMR89" or t.rmr_valor is None:
+    if re.sub(r"[\s-]", "", t.rmr_edicion or "").upper() != "RMR89" or t.rmr_valor is None:  # RMR-89, RMR 89
         return None
     if any(v is None for v in (t.ucs_mpa, t.rqd_pct, t.espaciamiento_m, t.puntaje_condicion_juntas, t.agua)):
         return None
@@ -344,10 +380,15 @@ def _audit_independence(tramos):
     out = []
     by_labor = defaultdict(list)
     for t in tramos:
-        if t.labor_codigo is not None:
-            by_labor[t.labor_codigo].append(t)
+        if labor_key(t) is not None:
+            by_labor[labor_key(t)].append(t)
+
+    def start(t):  # la progresiva puede venir al revés (fin < inicio)
+        ps = [p for p in (t.progresiva_inicio_m, t.progresiva_fin_m) if p is not None]
+        return (not ps, min(ps, default=0.0), t.fila)
+
     for ts in by_labor.values():
-        ts.sort(key=lambda t: (t.progresiva_inicio_m is None, t.progresiva_inicio_m or 0.0, t.fila))
+        ts.sort(key=start)
         widest = None  # el tramo que llega más lejos hasta ahora: atrapa también solapes no contiguos
         for t in ts:
             if t.progresiva_inicio_m is None or t.progresiva_fin_m is None:
@@ -360,7 +401,7 @@ def _audit_independence(tramos):
                 widest = (t, hi)
         for prev, t in zip(ts, ts[1:]):
             comp = tuple(getattr(t, c) for c in _COMPONENTS)
-            if any(v is not None for v in comp) and comp == tuple(getattr(prev, c) for c in _COMPONENTS):
+            if sum(v is not None for v in comp) >= 2 and comp ==tuple(getattr(prev, c) for c in _COMPONENTS):
                 out.append(_finding("repeated_components", f"same classification components as row {prev.fila}, "
                                                            f"the previous tramo of the same labor; records are not "
                                                            f"independent", t))
@@ -370,12 +411,23 @@ def _audit_independence(tramos):
 def _audit_coherence(history):
     out = []
     codes = {s.codigo_tipo for s in history.support_types}
+    cols = ("sost_recomendado", "sost_instalado")
+    if not codes:  # sin hoja (o vacía): un solo hallazgo, no uno por tramo
+        n = sum(any(getattr(t, c) is not None for c in cols) for t in history.tramos)
+        if n:
+            out.append(HistoryFinding("unknown_support", f"sheet Tipos_sostenimiento is missing or empty; {n} tramos "
+                                      "give a support code that cannot be checked", "Tipos_sostenimiento", None, None))
+        cols = ()
     for t in history.tramos:
-        for col in ("sost_recomendado", "sost_instalado"):
+        for col in cols:
             code = getattr(t, col)
             if code is not None and code not in codes:
                 out.append(_finding("unknown_support", f"{col} '{code}' is not in sheet Tipos_sostenimiento", t))
     by_id = {t.id_tramo: t for t in history.tramos}
+    for k, (_, ignored) in _inspections_by_tramo(history).items():
+        if k in by_id:
+            out += [HistoryFinding("inspection_after_abandonment", "inspection after the first 'Abandonado' of its "
+                                   "tramo; ignored for the outcome", "Desempeno", i.fila, i.id_tramo) for i in ignored]
     for i in history.inspections:
         t = by_id.get(i.id_tramo)
         if t is None:
@@ -387,28 +439,54 @@ def _audit_coherence(history):
     return out
 
 
+def _pos(x):
+    return x is not None and x > 0
+
+
+def _labors(ts):
+    return len({labor_key(t) for t in ts} - {None})
+
+
 def _readiness(history):
+    """Solo cuenta filas completas para las variables base de cada nivel; los totales van aparte."""
     out = []
+    n_all = len(history.tramos)
     for kind, cols in _PAIRS.items():
-        ts = [t for t in history.tramos if all(getattr(t, c) is not None for c in cols)]
-        out.append(LevelReadiness(1, kind, {"pairs": len(ts), "labors": len({t.labor_codigo for t in ts} - {None})},
+        ts = [t for t in history.tramos if all(getattr(t, c) is not None for c in cols)
+              and (kind != "rmr_from_q" or _pos(t.q_valor))]  # ln Q
+        out.append(LevelReadiness(1, kind, {"pairs": len(ts), "labors": _labors(ts), "total": n_all},
                                   {"pairs": MIN_PAIRS_LEVEL1, "labors": MIN_LABORS_LEVEL1}))
-    used = [s.codigo_tipo for s in sorted(history.support_types, key=lambda s: s.orden)]
-    used += sorted({t.sost_instalado for t in history.tramos} - set(used) - {None})
-    for code in used:
-        ts = [t for t in history.tramos if t.sost_instalado == code]
-        out.append(LevelReadiness(2, code, {"tramos": len(ts), "labors": len({t.labor_codigo for t in ts} - {None})},
+    codes = {s.codigo_tipo for s in history.support_types}
+
+    def base(t):  # ln Q, ln De (luz/ESR) y un tipo instalado definido: lo común a los niveles 2 y 3
+        return t.sost_instalado in codes and _pos(t.q_valor) and _pos(t.luz_m) and _pos(t.esr)
+
+    for s in sorted(history.support_types, key=lambda s: s.orden):
+        total = [t for t in history.tramos if t.sost_instalado == s.codigo_tipo]
+        ts = [t for t in total if base(t)]
+        out.append(LevelReadiness(2, s.codigo_tipo, {"tramos": len(ts), "labors": _labors(ts), "total": len(total)},
                                   {"tramos": MIN_TRAMOS_PER_TYPE_LEVEL2, "labors": MIN_LABORS_PER_TYPE_LEVEL2}))
     outcomes = tramo_outcomes(history)
-    zone = {t.id_tramo: t.zona_nivel for t in history.tramos}
+    by_id = {t.id_tramo: t for t in history.tramos}
+    usable = [(o, by_id[o.id_tramo]) for o in outcomes if o.exposure_days is not None and base(by_id[o.id_tramo])]
+    failures = sum(o.failed for o, _ in usable)
+    labor_types = {t.tipo_labor for _, t in usable} - {None}
+    params = (LEVEL3_BASE_PARAMETERS + (bool(usable) and all(t.profundidad_m is not None for _, t in usable))
+              + (len(labor_types) - 1 if len(labor_types) >= 2 else 0))
     out.append(LevelReadiness(3, "performance", {
-        "failures": sum(o.failed for o in outcomes),
-        "zones": len({zone[o.id_tramo] for o in outcomes} - {None}),
+        "minority_class": min(failures, len(usable) - failures),
+        "zones": len({t.zona_nivel for _, t in usable} - {None}),
+        "usable": len(usable),
+        "failures": failures,
+        "non_failures": len(usable) - failures,
+        "parameters": params,
+        "failures_total": sum(o.failed for o in outcomes),
+        "tramos": n_all,
         "tramos_with_inspections": len(outcomes),
-        "tramos_without_inspections": len(history.tramos) - len(outcomes),  # excluidos: nunca se asumen estables
+        "tramos_without_inspections": n_all - len(outcomes),  # excluidos: nunca se asumen estables
         "start_from_evaluation": sum(o.start_from_evaluation for o in outcomes),
         "without_exposure": sum(o.exposure_days is None for o in outcomes),
-    }, {"failures": MIN_FAILURES_PER_PARAMETER_LEVEL3 * LEVEL3_BASE_PARAMETERS, "zones": MIN_ZONES_LEVEL3}))
+    }, {"minority_class": MIN_EVENTS_PER_PARAMETER_LEVEL3 * params, "zones": MIN_ZONES_LEVEL3}))
     return tuple(out)
 
 
@@ -417,7 +495,7 @@ def audit_history(history: History) -> HistoryAudit:
     preparación de cada nivel (solo conteos). Avisa, nunca bloquea."""
     findings = [f for t in history.tramos for f in (_audit_q(t), _audit_rmr(t)) if f is not None]
     findings += _audit_independence(history.tramos) + _audit_coherence(history)
-    findings.sort(key=lambda f: (f.sheet != "Tramos", f.fila, FINDING_KINDS.index(f.kind)))
+    findings.sort(key=lambda f: (HISTORY_SHEETS.index(f.sheet), f.fila or 0, FINDING_KINDS.index(f.kind)))
     return HistoryAudit(tuple(findings), _readiness(history), len(history.tramos), len(history.support_types),
                         len(history.inspections))
 
@@ -427,4 +505,4 @@ def history_audit_counts(audit: HistoryAudit) -> dict[str, int]:
     c = Counter(f.kind for f in audit.findings)
     return {"tramos": audit.tramos, "support_types": audit.support_types, "inspections": audit.inspections,
             "findings": len(audit.findings), **{k: c.get(k, 0) for k in FINDING_KINDS},
-            "levels_ready": sum(r.ready for r in audit.readiness)}
+            "items_ready": sum(r.ready for r in audit.readiness)}
