@@ -1,4 +1,4 @@
-"""Nivel 3: tasa de falla constante y recomendación (Fase 4C, tarea 12; plan R9, R10 y R13). Solo datos sintéticos."""
+"""Nivel 3: tasa de falla con fragilidad gamma por labor y recomendación (Fase 4C, tarea 12; plan R9, R10 y R13). Solo datos sintéticos."""
 
 import csv
 import dataclasses
@@ -11,10 +11,10 @@ import pytest
 np = pytest.importorskip("numpy")
 pytest.importorskip("scipy")
 
-from rockmasspy.history import audit_history  # noqa: E402
+from rockmasspy.history import History, audit_history  # noqa: E402
 from rockmasspy.predictive import (RECOMMENDATION_COLUMNS, SyntheticTruth, fit_performance,  # noqa: E402
-                                   isoprobability_grid, load_model, recommend, save_model, save_recommendations,
-                                   synthetic_history)
+                                   isoprobability_grid, load_model, poisson_deviance, recommend, save_model,
+                                   save_recommendations, synthetic_history)
 
 SENT = "ZZSENT"
 N_BOOT = 200
@@ -74,6 +74,9 @@ def test_recupera_signos_y_orden_de_magnitud(big):
     assert m.signs[:4] == (-1, 1, -1, 1) and m.use_depth
     assert m.labor_types == ("Galería", "Rampa", "Tajeo")  # una-caliente contra Galería
     assert m.fit.n_events == m.counts["failures"]
+    # fragilidad por labor y covarianza agrupada por zona (8 zonas: t con 7 grados de libertad)
+    assert 0.1 < m.fit.theta < 1.5 and m.fit.cov_kind == "cluster" and m.fit.df == 7
+    assert m.fit.n_groups == m.counts["labors"]
 
 
 def test_con_efecto_del_sitio_y_historico_grande_es_site(big):
@@ -122,8 +125,10 @@ def test_sin_fallas_no_calibrado_sin_caerse(tmp_path):
     assert m.coefficients == {} and any("no events / no non-events" in w for w in m.warnings)
     r = recommend(m, h.tramos[:2], threshold=0.2, exposure_days=365)
     assert all(x.options == () and x.chosen is None and x.reason.startswith("no choice (not_calibrated)") for x in r)
-    m2 = load_model(save_model(m, tmp_path / "m.json"))
-    assert m2.fit is None and m2.calibration == "not_calibrated"
+    assert m.counts["tramos"] < 100
+    with pytest.raises(ValueError, match="fewer than 100 usable tramos"):  # casi reconstruiría las filas
+        save_model(m, tmp_path / "m.json")
+    assert not (tmp_path / "m.json").exists()
     with pytest.raises(ValueError, match="no fit"):
         isoprobability_grid(m, support_code="I", exposure_days=365, q_range=(0.1, 10), de_range=(1, 10))
 
@@ -330,7 +335,7 @@ def test_json_ida_y_vuelta_exacta_y_sin_ids(big, tmp_path):
     assert m2.validation.recommend == m.validation.recommend and m2.coef_ci == m.coef_ci
     assert m2.fit.signs == m.fit.signs and m2.support_counts == m.support_counts
     d = json.loads(text)
-    assert d["schema_version"] == 2 and "version" in d
+    assert d["schema_version"] == 3 and "version" in d
     # nunca filas ni ids: ningún id_tramo, labor, zona, coordenada ni litología del entrenamiento
     assert SENT not in text and "123456" not in text and "654321" not in text
     assert not any(t.id_tramo in text for t in h.tramos)
@@ -345,20 +350,100 @@ def _bad_json(tmp_path, d, name):
 def test_json_validado_al_cargar(big, tmp_path):
     _, m = big
     base = json.loads(save_model(m, tmp_path / "ok.json").read_text(encoding="utf-8"))
+    fit_bad_sign = {**base["fit"], "coef": [abs(c) + 0.1 for c in base["fit"]["coef"]]}
     cases = {
-        "schema": ({**base, "schema_version": 1}, "schema_version"),
-        "extra": ({**base, "rows": []}, "unexpected keys"),
-        "missing": ({k: v for k, v in base.items() if k != "maha_p99"}, "missing keys"),
-        "fit_extra": ({**base, "fit": {**base["fit"], "ids": []}}, "fit: unexpected keys"),
-        "calibration": ({**base, "calibration": "global"}, "calibration must be"),
+        "schema": ({**base, "schema_version": 2}, "unsupported performance model schema_version"),
+        "unknown": ({**base, "rows": []}, "1 unknown key"),
+        "named": ({**base, "theta": 0.5}, r"unexpected keys \['theta'\]"),
+        "missing": ({k: v for k, v in base.items() if k != "maha_p99"}, r"missing keys \['maha_p99'\]"),
+        "fit_extra": ({**base, "fit": {**base["fit"], "ids": []}}, "fit: 1 unknown key"),
+        "calibration": ({**base, "calibration": "global"}, "calibration is not valid"),
         "order": ({**base, "support_types": [["I", 1], ["II", 1], *base["support_types"][2:]]}, "strictly increasing"),
+        "malformed": ({**base, "support_types": [["I"], "II"]}, "support_types is not valid"),
         "lengths": ({**base, "train_min": base["train_min"][:-1]}, "lengths do not match"),
         "coef": ({**base, "fit": {**base["fit"], "coef": base["fit"]["coef"][:-1]}}, "lengths do not match"),
         "counts": ({**base, "support_counts": base["support_counts"][:-1]}, "one count per support type"),
+        "text": ({**base, "maha_p99": "3.2"}, "maha_p99 is not valid"),
+        "nan": ({**base, "train_max": [*base["train_max"][:-1], float("nan")]}, "train_max is not valid"),
+        "signs": ({**base, "fit": fit_bad_sign}, "breaks its sign constraint"),
+        "validation": ({**base, "validation": {"results": {"labor": {"x": 1}}, "skipped": {}}},
+                       "fit or validation is not valid"),
     }
     for name, (d, msg) in cases.items():
-        with pytest.raises(ValueError, match=msg):
+        with pytest.raises(ValueError, match=msg) as e:
             load_model(_bad_json(tmp_path, d, name))
+        assert "global" not in str(e.value) and "3.2" not in str(e.value)  # nunca repite valores del archivo
+    (tmp_path / "raw.json").write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON object"):
+        load_model(tmp_path / "raw.json")
+
+
+def test_json_manipulado_no_cambia_la_decision(null, tmp_path):
+    h, m = null
+    assert m.calibration == "partial"
+    d = json.loads(save_model(m, tmp_path / "p.json").read_text(encoding="utf-8"))
+    d["calibration"] = "site"  # I3: la calibración se recalcula con lo guardado
+    with pytest.raises(ValueError, match="calibration does not match"):
+        load_model(_bad_json(tmp_path, d, "flip"))
+    assert load_model(tmp_path / "p.json").calibration == "partial"
+
+
+def test_bloqueos_de_la_recomendacion(big, null):
+    _, m = big
+    assert m.recommendation_blockers == ()
+    assert null[1].recommendation_blockers[0].startswith("no choice (partial): ")
+    ci = list(m.coef_ci)
+    ci[2] = (ci[2][0], 0.01)
+    assert dataclasses.replace(m, coef_ci=tuple(ci)).recommendation_blockers == ("support effect not identified",)
+    both = dataclasses.replace(m, active_bounds=("support_rank", "ln_de"))
+    assert both.recommendation_blockers == ("support effect not identified (bound active)",
+                                            "model ignores rock quality/span (bound active)")
+
+
+def test_rango_es_la_posicion_y_no_el_valor_de_orden():
+    # I1: con orden 1, 2, 3, 4, 10 el modelo es el mismo que con 1..5 (la escala es la posición)
+    h, _ = synthetic_history(seed=2, n_zones=4, labors_per_zone=5, tramos_per_labor=12)
+    st = tuple(dataclasses.replace(s, orden=10) if s.orden == 5 else s for s in h.support_types)
+    a, b = fit_performance(h, n_boot=50), fit_performance(History(h.tramos, st, h.inspections), n_boot=50)
+    np.testing.assert_allclose(a.fit.coef, b.fit.coef)
+    assert b.support_types[-1] == ("V", 10) and b.train_max[2] == 4.0
+    t = h.tramos[0]
+    assert [o.p_high for o in recommend(a, [t], **REC)[0].options] == \
+        [o.p_high for o in recommend(b, [t], **REC)[0].options]
+
+
+def test_preparacion_con_las_filas_del_ajuste_rmr():
+    # I2: con quality="rmr" la preparación cuenta solo las filas con RMR (aquí, de 2 zonas)
+    h, _ = synthetic_history(seed=1, n_zones=6, labors_per_zone=10, tramos_per_labor=15)
+    ts = tuple(t if t.zona_nivel in ("Z1", "Z2") else dataclasses.replace(t, rmr_valor=None) for t in h.tramos)
+    h2 = History(ts, h.support_types, h.inspections)
+    assert next(r for r in audit_history(h2).readiness if r.level == 3).ready  # la del histórico entero
+    m = fit_performance(h2, quality="rmr", n_boot=50)
+    assert m.calibration == "not_calibrated" and m.counts["zones"] == 2 and "zones short by 1" in m.calibration_reason
+
+
+def test_tipo_labor_vacio_es_un_nivel_propio():
+    h, _ = synthetic_history(seed=2, n_zones=4, labors_per_zone=5, tramos_per_labor=12)
+    labs = sorted({t.labor_codigo for t in h.tramos})[:4]
+    h2 = dataclasses.replace(h, tramos=tuple(dataclasses.replace(t, tipo_labor=None) if t.labor_codigo in labs else t
+                                             for t in h.tramos))
+    m = fit_performance(h2, n_boot=50)
+    assert m.labor_types[-1] == "(missing)" and "tipo_labor=(missing)" in m.features
+    assert any("own level (missing)" in w for w in m.warnings)
+    r = recommend(m, [dataclasses.replace(h.tramos[0], tipo_labor=None)], **REC)[0]
+    assert "tipo_labor missing or not seen in training" in r.extrapolation_notes
+
+
+def test_pocas_zonas_usa_laplace_con_aviso(small):
+    _, m = small
+    assert m.fit.cov_kind == "laplace" and any("fewer than 5 zones: Laplace covariance" in w for w in m.warnings)
+
+
+def test_poisson_deviance_exportada():
+    y = np.array([1.0, 0.0])
+    p = np.array([0.5, 0.2])
+    mu = -np.log1p(-p)
+    assert poisson_deviance(y, p) == pytest.approx(np.mean(mu - y * np.log(mu)))
 
 
 def test_rangos_redondeados_hacia_afuera(big, small):
