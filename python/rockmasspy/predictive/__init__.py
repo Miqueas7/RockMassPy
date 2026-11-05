@@ -17,8 +17,14 @@ from .stats import (BayesLinearFit, BootstrapResult, DemingFit, OlsFit, bayes_li
 # reexportada: vive en history porque no necesita numpy
 from ..history import save_history_xlsx  # noqa: E402
 from .synthetic import SyntheticTruth, synthetic_history  # noqa: E402
+from .validation import (Comparison, Fold, FoldFailure, Improvement, OofPredictions, ValidationReport,  # noqa: E402
+                         compare_models, dummy_class_fit_predict, dummy_proba_fit_predict, group_kfold,
+                         leave_one_group_out, out_of_fold, random_kfold, temporal_split, tramo_groups, validate)
 
 __all__ = ["CORRELATION_RESULT_COLUMNS", "KINDS", "NO_DOMAIN", "STATUSES", "SiteCorrelationFit",
            "SiteCorrelationResult", "fit_site_correlation", "save_site_correlations",
            "BayesLinearFit", "BootstrapResult", "DemingFit", "OlsFit", "bayes_linear_fit", "deming_fit",
            "group_bootstrap", "ols_fit", "SyntheticTruth", "save_history_xlsx", "synthetic_history"]
+__all__ += ["Comparison", "Fold", "FoldFailure", "Improvement", "OofPredictions", "ValidationReport",
+            "compare_models", "dummy_class_fit_predict", "dummy_proba_fit_predict", "group_kfold",
+            "leave_one_group_out", "out_of_fold", "random_kfold", "temporal_split", "tramo_groups", "validate"]
