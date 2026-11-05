@@ -36,10 +36,9 @@ import numpy as np
 from ..batch import write_table
 from ..history import (MIN_LABORS_PER_TYPE_LEVEL2, MIN_TRAMOS_PER_TYPE_LEVEL2, History, audit_history, labor_key,
                        level2_rows)
-from ..q_support import read_q_chart
 from .stats import OrdinalLogitFit, ordinal_logit_fit, quadratic_weighted_kappa
-from .validation import (ValidationReport, dummy_class_fit_predict, group_kfold, out_of_fold, tramo_groups,
-                         validate)
+from .validation import (ValidationReport, dummy_class_fit_predict, group_kfold, ngi_category, out_of_fold,
+                         tramo_groups, validate)
 
 VERDICTS = ("coherent", "not significant", "practice incoherent with rock quality", "practice incoherent with span",
             "not estimable")
@@ -299,8 +298,7 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
 
     # validación: modelo de práctica contra el ficticio y la carta Q (categoría NGI como única variable)
     labors, zones, years = tramo_groups(rows)
-    # shortcut: categoría NGI armada aquí; cuando exista validation.ngi_category(tramo), usarla
-    ngi = np.array([[float(read_q_chart(t.q_valor, t.luz_m / t.esr).category)] for t in rows])
+    ngi = np.array([[float(ngi_category(t))] for t in rows])
     validation = validate(y, {"practice": _model(X, y, K, "class"), "dummy": dummy_class_fit_predict(y),
                               "ngi": _model(ngi, y, K, "class")},
                           kind="class", labors=labors, zones=zones, years=years,

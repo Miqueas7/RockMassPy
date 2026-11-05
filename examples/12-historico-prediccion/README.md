@@ -34,7 +34,7 @@ de una mina, y nada de lo que el generador produce se entrega como modelo entren
 3. Ajusta los tres pares (`rmr_from_q`, `gsi_from_rmr` y `gsi_from_q_prime`) por litología y para toda la mina con
    `fit_site_correlation`: OLS con intervalo de predicción, bootstrap por labor y el bayesiano con la correlación
    global como *prior*. Cada ajuste queda «sitio», «inestable» o «no calibrada al sitio». Con esta semilla, el
-   dominio D3 tiene solo 3 labores y queda «no calibrada al sitio».
+   los dominios D2 y D3 tienen menos de 5 labores y quedan «no calibradas al sitio».
 4. Escribe el informe `historico.html` (y `historico.docx` si tienes python-docx): datos, auditoría de ingesta,
    preparación por nivel, nivel 1 con sus figuras y limitaciones.
 5. Escribe los resultados en `resultados/` con `rm.save_history_findings` y `save_site_correlations`:
@@ -45,7 +45,7 @@ de una mina, y nada de lo que el generador produce se entrega como modelo entren
      tablas por labor, para pegarlas en la tuya. Las «inestables» y las «no calibradas al sitio» se quedan en el CSV.
 
    Lo mismo se hace desde la terminal con `rockmass history historico.xlsx --correlations --output resultados/`,
-   que sale con código 2 porque D3 no queda «sitio». El ejemplo tarda unos 3 s.
+   que sale con código 2 porque D2 y D3 no quedan «sitio». El ejemplo tarda unos 3 s.
 
 ## Parte 2
 
