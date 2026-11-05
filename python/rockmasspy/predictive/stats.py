@@ -1,8 +1,11 @@
-"""Estadística lineal del nivel 1 (Fase 4A, tarea 3): OLS, Deming, bootstrap por grupos y bayesiano conjugado.
+"""Estadística del modelo predictivo: la lineal del nivel 1 (Fase 4A, tarea 3) y la de clasificación al final.
 
-Modelo y = a·x + b en todos: quien llama transforma x antes (por ejemplo ln Q). Métodos y por qué, en
-`docs/investigacion/MODELOS_SOSTENIMIENTO.md` §2.2: OLS con intervalo de predicción para predecir Y desde una X
-medida (Warton et al. 2006); Deming para la relación estructural, solo con la razón de varianzas de error
+Lineal: OLS, Deming, bootstrap por grupos y bayesiano conjugado. Clasificación (tareas 8 y 11): logit ordinal,
+logística MAP con cotas de signo y métricas de validación.
+
+En la lineal, el modelo es y = a·x + b en todos: quien llama transforma x antes (por ejemplo ln Q). Métodos y
+por qué, en `docs/investigacion/MODELOS_SOSTENIMIENTO.md` §2.2: OLS con intervalo de predicción para predecir
+Y desde una X medida (Warton et al. 2006); Deming para la relación estructural, solo con la razón de varianzas de error
 (Carroll et al. 2006); bootstrap que remuestrea labores y no filas (Efron y Tibshirani 1994); bayesiano que se
 encoge hacia la correlación global con pocos datos (Ching et al. 2020).
 """
@@ -14,6 +17,9 @@ from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.optimize import linprog, minimize
+from scipy.special import expit
+from scipy.stats import norm, rankdata
 from scipy.stats import t as student_t
 
 
@@ -265,3 +271,470 @@ def bayes_linear_fit(x, y, *, prior_mean: tuple[float, float], prior_sd: tuple[f
                           precision=((float(lam_n[0, 0]), float(lam_n[0, 1])),
                                      (float(lam_n[1, 0]), float(lam_n[1, 1]))),
                           alpha=a0 + xa.size / 2.0, beta=beta_n, n=int(xa.size))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Clasificación (Fase 4B, tarea 8, y 4C, tarea 11): logit ordinal, logística MAP y métricas. Métodos en
+# `docs/investigacion/MODELOS_SOSTENIMIENTO.md` §3.3 y §4; decisiones R7, R8 y R10 del plan de la Fase 4.
+# ---------------------------------------------------------------------------------------------------------------
+
+def _matrix(name: str, values, n_cols: int | None = None) -> np.ndarray:
+    try:
+        arr = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a 2-D array of numbers") from None
+    if arr.ndim != 2:
+        raise ValueError(f"{name} must be two-dimensional (n rows, p columns), got {arr.ndim} dimension(s)")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must contain only finite numbers (no NaN or inf)")
+    if n_cols is not None and arr.shape[1] != n_cols:
+        raise ValueError(f"{name} must have {n_cols} columns, got {arr.shape[1]}")
+    return arr
+
+
+def _n_classes(n_classes) -> int:
+    if isinstance(n_classes, bool) or not isinstance(n_classes, (int, np.integer)) or n_classes < 2:
+        raise ValueError("n_classes must be an integer >= 2")
+    return int(n_classes)
+
+
+def _classes(name: str, values, n_classes: int) -> np.ndarray:
+    arr = _vector(name, values, 1)
+    if np.any(arr != np.round(arr)) or arr.min() < 0 or arr.max() > n_classes - 1:
+        raise ValueError(f"{name} must contain integer classes between 0 and {n_classes - 1}")
+    return arr.astype(np.intp)
+
+
+def _binary(name: str, values) -> np.ndarray:
+    arr = _vector(name, values, 1)
+    if not np.all((arr == 0) | (arr == 1)):
+        raise ValueError(f"{name} must contain only 0 and 1")
+    return arr
+
+
+def _probability(name: str, values) -> np.ndarray:
+    arr = _vector(name, values, 1)
+    if np.any(arr < 0) or np.any(arr > 1):
+        raise ValueError(f"{name} must contain probabilities between 0 and 1")
+    return arr
+
+
+def _same_length(a: np.ndarray, b: np.ndarray, na: str, nb: str) -> None:
+    if a.size != b.size:
+        raise ValueError(f"{na} and {nb} must have the same length ({a.size} != {b.size})")
+
+
+def _log_sigmoid(z):
+    return -np.logaddexp(0.0, -z)  # log σ(z) sin desborde; +inf da 0 y −inf da −inf
+
+
+def _log_interval(a, b):
+    # log(σ(a) − σ(b)) con b < a, sin restar dos números casi iguales: σ(a) − σ(b) = σ(a)·σ(−b)·(1 − e^(b−a))
+    return _log_sigmoid(a) + _log_sigmoid(-b) + np.log1p(-np.exp(b - a))
+
+
+def _information_cov(h: np.ndarray) -> tuple[np.ndarray, str]:
+    """Inversa de la matriz de información `h` (hessiano de −log L o de −log posterior), o NaN con el motivo."""
+    eig = np.linalg.eigvalsh(h) if np.all(np.isfinite(h)) else np.array([np.nan])
+    if not np.all(np.isfinite(eig)) or eig[0] <= 1e-10 * max(eig[-1], 1e-300):
+        return np.full(h.shape, np.nan), ("the information matrix is singular at the optimum: the data may be "
+                                         "separated or the columns of X collinear (or one constant)")
+    return np.linalg.inv(h), ""
+
+
+@dataclass(frozen=True)
+class OrdinalLogitFit:
+    """Logit acumulado de odds proporcionales: P(y ≤ k | x) = σ(cuts[k] − x·coef), k = 0..K−2.
+
+    `cov` es la inversa del hessiano de −log L en el óptimo, en el orden (coef..., cuts...). Si `converged` es
+    False, `message` dice por qué (separación, colinealidad, iteraciones) y `cov` es NaN: no se usa.
+    """
+
+    coef: np.ndarray
+    cuts: np.ndarray
+    cov: np.ndarray
+    converged: bool
+    n: int
+    n_classes: int
+    loglik: float
+    message: str = ""
+
+    def predict_proba(self, X) -> np.ndarray:
+        """Probabilidad de cada clase, (n, K); cada fila suma 1."""
+        eta = _matrix("X", X, self.coef.size) @ self.coef
+        ext = np.concatenate([[-np.inf], self.cuts, [np.inf]])
+        return np.exp(_log_interval(ext[None, 1:] - eta[:, None], ext[None, :-1] - eta[:, None]))
+
+    def predict(self, X) -> np.ndarray:
+        """Clase más probable de cada fila."""
+        return np.argmax(self.predict_proba(X), axis=1)
+
+
+def _ordinal_loglik(beta, theta, X, y, K, *, hessian: bool = False):
+    """log L, su gradiente en (β, θ) y, si se pide, su hessiano en (β, θ)."""
+    ext = np.concatenate([[-np.inf], theta, [np.inf]])
+    eta = X @ beta
+    a, b = ext[y + 1] - eta, ext[y] - eta  # P(y_i) = σ(a) − σ(b)
+    logp = _log_interval(a, b)
+    with np.errstate(invalid="ignore"):  # a o b infinitos: log f = −inf y el cociente es 0, no NaN
+        ga = np.nan_to_num(np.exp(_log_sigmoid(a) + _log_sigmoid(-a) - logp))  # f(a)/P
+        gb = np.nan_to_num(np.exp(_log_sigmoid(b) + _log_sigmoid(-b) - logp))  # f(b)/P
+    up, low = y < K - 1, y > 0  # filas con a finito (corte y) y con b finito (corte y − 1)
+    g_theta = (np.bincount(y[up], weights=ga[up], minlength=K - 1)
+               - np.bincount(y[low] - 1, weights=gb[low], minlength=K - 1))
+    grad = np.concatenate([-X.T @ (ga - gb), g_theta])
+    if not hessian:
+        return float(logp.sum()), grad, None
+    # ℓ = log(F(a) − F(b)) con F logística: f' = f·(1 − 2F)
+    laa = ga * (1.0 - 2.0 * expit(a)) - ga * ga
+    lbb = -gb * (1.0 - 2.0 * expit(b)) - gb * gb
+    lab = ga * gb
+    eye = np.eye(K - 1)
+    da = np.column_stack([-X, np.where(up[:, None], eye[np.minimum(y, K - 2)], 0.0)])
+    db = np.column_stack([-X, np.where(low[:, None], eye[np.maximum(y - 1, 0)], 0.0)])
+    cross = da.T @ (lab[:, None] * db)
+    hess = da.T @ (laa[:, None] * da) + db.T @ (lbb[:, None] * db) + cross + cross.T
+    return float(logp.sum()), grad, hess
+
+
+def _ordinal_separated(X, y, K) -> bool:
+    """¿Hay separación (completa o cuasi completa)? Es decir, ¿existe una dirección d = (dβ, dθ), con dθ no
+    decreciente, en la que log L nunca baja y sube en alguna fila? Entonces el MLE no existe (Albert y Anderson
+    1984, extendido a los cortes). Programa lineal: max Σ términos con cada término ≥ 0 y |d| ≤ 1."""
+    n, p = X.shape
+    eye = np.eye(K - 1)
+    up, low = y < K - 1, y > 0
+    # a_i = θ_y − x·β no debe bajar y b_i = θ_{y−1} − x·β no debe subir: filas de A·d ≤ 0
+    rows = [np.column_stack([X[up], -eye[y[up]]]), np.column_stack([-X[low], eye[y[low] - 1]])]
+    order = np.zeros((K - 2, p + K - 1))
+    for k in range(1, K - 1):
+        order[k - 1, p + k - 1], order[k - 1, p + k] = 1.0, -1.0  # dθ_{k−1} − dθ_k ≤ 0
+    A = np.vstack(rows)
+    res = linprog(A.sum(axis=0), A_ub=np.vstack([A, order]), b_ub=np.zeros(A.shape[0] + K - 2),
+                  bounds=[(-1.0, 1.0)] * (p + K - 1), method="highs")
+    return bool(res.status == 0 and -res.fun > 1e-7 * (1.0 + float(np.abs(X).max(initial=0.0))) * n)
+
+
+def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
+    """Logit ordinal (odds proporcionales) por máxima verosimilitud (Bürkner y Vuorre 2019).
+
+    `X` es (n, p) sin columna de unos; `y` son clases enteras 0..n_classes−1 y cada una tiene que aparecer al menos
+    una vez. Los cortes se parametrizan como θ_0 y θ_k = θ_{k−1} + exp(δ_k), así quedan crecientes; el óptimo se
+    busca con región de confianza y gradiente y hessiano analíticos. Sin penalización: con separación el MLE no
+    existe y el resultado sale con `converged=False` y el motivo.
+    """
+    K = _n_classes(n_classes)
+    Xa = _matrix("X", X)
+    ya = _classes("y", y, K)
+    n, p = Xa.shape
+    if ya.size != n:
+        raise ValueError(f"X and y must have the same number of rows ({n} != {ya.size})")
+    counts = np.bincount(ya, minlength=K)
+    missing = [k for k in range(K) if counts[k] == 0]
+    if missing:
+        raise ValueError(f"class(es) {missing} have no observations in the training data: the cut points "
+                         "around them cannot be estimated (merge classes or lower n_classes)")
+
+    def theta_of(u):
+        return u[p] + np.concatenate([[0.0], np.cumsum(np.exp(u[p + 1:]))])
+
+    def jacobian(u):  # ∂(β, θ)/∂u
+        J = np.eye(p + K - 1)
+        for m in range(1, K - 1):
+            J[p + m:, p + m] = np.exp(u[p + m])
+        return J
+
+    def objective(u):
+        ll, g, _ = _ordinal_loglik(u[:p], theta_of(u), Xa, ya, K)
+        return -ll, jacobian(u).T @ -g
+
+    def hess(u):
+        _, g, h = _ordinal_loglik(u[:p], theta_of(u), Xa, ya, K, hessian=True)
+        J = jacobian(u)
+        hu = J.T @ -h @ J
+        # término de segundo orden de θ(u): ∂²θ_k/∂δ_m² = exp(δ_m) para m ≤ k
+        tail = np.cumsum(-g[p:][::-1])[::-1]  # Σ_{k ≥ m} ∂(−ℓ)/∂θ_k
+        for m in range(1, K - 1):
+            hu[p + m, p + m] += np.exp(u[p + m]) * tail[m]
+        return hu
+
+    cum = np.cumsum(counts)[:-1] / n
+    start = np.log(cum / (1.0 - cum))
+    u0 = np.concatenate([np.zeros(p), start[:1], np.log(np.diff(start))])
+    with np.errstate(over="ignore"):  # con separación exp(δ) puede desbordar: se detecta abajo
+        res = minimize(objective, u0, jac=True, hess=hess, method="trust-exact",
+                       options={"gtol": 1e-9, "maxiter": 500})
+        beta, theta = res.x[:p].copy(), theta_of(res.x)
+    cov = np.full((p + K - 1, p + K - 1), np.nan)
+    ll, h = -math.inf, None
+    if np.all(np.isfinite(beta)) and np.all(np.isfinite(theta)):
+        ll, _, h = _ordinal_loglik(beta, theta, Xa, ya, K, hessian=True)
+    if _ordinal_separated(Xa, ya, K):
+        converged, message = False, ("the classes are separated by X (complete or quasi-complete separation): the "
+                                     "maximum likelihood estimate does not exist; merge classes, drop columns or "
+                                     "use a penalized model")
+    elif not math.isfinite(ll):
+        converged, message = False, f"the optimizer reached non-finite values: {res.message}"
+    # trust-exact a veces termina con «bad approximation» ya en el óptimo (precisión de máquina): se juzga por el
+    # gradiente y no por res.success
+    elif float(np.max(np.abs(res.jac), initial=0.0)) > 1e-6 * max(1.0, math.sqrt(n)):
+        converged, message = False, f"optimizer did not converge: {res.message}"
+    else:
+        cov, message = _information_cov(-h)
+        converged = not message
+    return OrdinalLogitFit(coef=beta, cuts=theta, cov=cov, converged=converged, n=n, n_classes=K, loglik=ll,
+                           message=message)
+
+
+@dataclass(frozen=True)
+class LogisticMapFit:
+    """Logística bayesiana por MAP con *prior* Cauchy (Gelman et al. 2008) y covarianza de Laplace.
+
+    `coef`, `intercept` y `cov` están en la escala ORIGINAL de X; `cov` va en el orden (coef..., intercept).
+    `x_mean` y `x_scale` son la estandarización interna (z = (x − media)/escala, escala = 2·desviación, ddof 0).
+    `active_bounds` son las columnas cuya cota de signo quedó activa (su coef es 0). La covarianza de Laplace no
+    trunca en la cota, así que ahí el intervalo es más ancho que el posterior real (conservador).
+    """
+
+    coef: np.ndarray
+    intercept: float
+    cov: np.ndarray
+    active_bounds: tuple[int, ...]
+    converged: bool
+    n: int
+    loglik: float  # log-verosimilitud (sin el prior) en el MAP
+    x_mean: np.ndarray
+    x_scale: np.ndarray
+    message: str = ""
+
+    def _eta(self, X):
+        Xa = _matrix("X", X, self.coef.size)
+        return Xa, Xa @ self.coef + self.intercept
+
+    def predict_proba(self, X) -> np.ndarray:
+        """P(y = 1) de cada fila, (n,)."""
+        return expit(self._eta(X)[1])
+
+    def predict_interval(self, X, level: float = 0.9):
+        """(central, inferior, superior) de P(y = 1): método delta en la escala logit y luego σ."""
+        lv = _level(level)
+        Xa, eta = self._eta(X)
+        Xt = np.column_stack([Xa, np.ones(Xa.shape[0])])
+        half = norm.ppf(0.5 + lv / 2) * np.sqrt(np.einsum("ij,jk,ik->i", Xt, self.cov, Xt))
+        return expit(eta), expit(eta - half), expit(eta + half)
+
+
+def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float = 10.0,
+                     signs: Sequence[int] | None = None) -> LogisticMapFit:
+    """Logística MAP: cada columna de X se estandariza a media 0 y desviación 0.5; Cauchy(0, prior_scale) en los
+    coeficientes estandarizados y Cauchy(0, intercept_scale) en el intercepto (Gelman et al. 2008).
+
+    `signs[j]` = +1 impone β_j ≥ 0, −1 impone β_j ≤ 0 y 0 lo deja libre (cotas de L-BFGS-B; la escala positiva
+    conserva el signo). Con separación completa el MAP es finito porque el prior es propio.
+    """
+    Xa = _matrix("X", X)
+    n, p = Xa.shape
+    ya = _binary("y", y)
+    if ya.size != n:
+        raise ValueError(f"X and y must have the same number of rows ({n} != {ya.size})")
+    if n < 2:
+        raise ValueError("logistic_map_fit needs at least 2 rows")
+    s, s0 = _positive("prior_scale", prior_scale), _positive("intercept_scale", intercept_scale)
+    sg = np.zeros(p, dtype=int)
+    if signs is not None:
+        try:
+            sa = np.asarray(signs, dtype=float)
+        except (TypeError, ValueError):
+            raise ValueError("signs must be a sequence of +1, -1 or 0") from None
+        if sa.ndim != 1 or sa.size != p or not np.all(np.isin(sa, (-1, 0, 1))):
+            raise ValueError(f"signs must be a sequence of {p} values, each +1, -1 or 0")
+        sg = sa.astype(int)
+    mean, sd = Xa.mean(axis=0), Xa.std(axis=0)
+    for j in range(p):
+        if _constant(sd[j] ** 2 * n, mean[j], n):
+            raise ValueError(f"column {j} of X is constant: it cannot be standardized")
+    scale = 2.0 * sd
+    Z = np.column_stack([(Xa - mean) / scale, np.ones(n)])
+    scales2 = np.concatenate([np.full(p, s), [s0]]) ** 2
+
+    def objective(w):  # −log posterior (sin constantes) y su gradiente
+        eta = Z @ w
+        value = float(np.sum(np.logaddexp(0.0, eta) - ya * eta) + np.sum(np.log1p(w * w / scales2)))
+        return value, Z.T @ (expit(eta) - ya) + 2.0 * w / (scales2 + w * w)
+
+    def neg_hessian(w):
+        pr = expit(Z @ w)
+        return Z.T @ ((pr * (1.0 - pr))[:, None] * Z) + np.diag(2.0 * (scales2 - w * w) / (scales2 + w * w) ** 2)
+
+    bounds = [(0.0, None) if g > 0 else (None, 0.0) if g < 0 else (None, None) for g in sg] + [(None, None)]
+    res = minimize(objective, np.zeros(p + 1), jac=True, method="L-BFGS-B", bounds=bounds,
+                   options={"maxiter": 5000, "ftol": 1e-15, "gtol": 1e-10})
+    w = res.x
+    grad = objective(w)[1]
+    signs_all = np.concatenate([sg, [0]])
+    # en una cota solo cuenta el gradiente que empuja hacia adentro; L-BFGS-B a veces termina «ABNORMAL» ya en el
+    # óptimo (precisión de máquina), por eso se juzga por el gradiente proyectado y no por res.success
+    at_bound = (signs_all != 0) & (w == 0.0)
+    pg = np.where(at_bound, np.where(signs_all > 0, np.minimum(grad, 0.0), np.maximum(grad, 0.0)), grad)
+    converged = bool(np.all(np.isfinite(w))) and float(np.max(np.abs(pg))) <= 1e-6 * max(1.0, math.sqrt(n))
+    message = "" if converged else f"optimizer did not converge: {res.message}"
+    cov_w = np.full((p + 1, p + 1), np.nan)
+    if converged:
+        cov_w, message = _information_cov(neg_hessian(w))
+        converged = not message
+    # escala original: β = γ/escala y b = α − Σ γ·media/escala; la covarianza se transforma con ese jacobiano
+    A = np.eye(p + 1)
+    A[:p, :p] = np.diag(1.0 / scale)
+    A[p, :p] = -mean / scale
+    orig = A @ w
+    eta = Z @ w
+    return LogisticMapFit(coef=orig[:p], intercept=float(orig[p]), cov=A @ cov_w @ A.T,
+                          active_bounds=tuple(int(j) for j in np.nonzero(at_bound[:p])[0]), converged=converged,
+                          n=n, loglik=-float(np.sum(np.logaddexp(0.0, eta) - ya * eta)), x_mean=mean,
+                          x_scale=scale, message=message)
+
+
+# ---------- métricas de clasificación (R7) ----------
+
+def _labels_pair(y, yhat, n_classes):
+    K = _n_classes(n_classes)
+    ya, yh = _classes("y", y, K), _classes("yhat", yhat, K)
+    _same_length(ya, yh, "y", "yhat")
+    return ya, yh, K
+
+
+def _confusion(ya, yh, K) -> np.ndarray:
+    return np.bincount(ya * K + yh, minlength=K * K).reshape(K, K)  # filas = verdadera, columnas = predicha
+
+
+def recall_per_class(y, yhat, n_classes: int) -> np.ndarray:
+    """Sensibilidad de cada clase 0..K−1. Una clase ausente en `y` da NaN (0/0): es la ÚNICA métrica que devuelve
+    NaN, a propósito, para distinguir «no hubo casos» de «no acertó ninguno»."""
+    C = _confusion(*_labels_pair(y, yhat, n_classes))
+    support = C.sum(axis=1)
+    out = np.full(C.shape[0], np.nan)
+    out[support > 0] = np.diag(C)[support > 0] / support[support > 0]
+    return out
+
+
+def balanced_accuracy(y, yhat, n_classes: int) -> float:
+    """Exactitud balanceada: promedio de las sensibilidades de las clases presentes en `y`."""
+    return float(np.nanmean(recall_per_class(y, yhat, n_classes)))
+
+
+def f1_macro(y, yhat, n_classes: int) -> float:
+    """F1 macro sobre las clases presentes en `y` o en `yhat` (como scikit-learn sin `labels`); F1 = 2TP/(2TP+FP+FN)."""
+    C = _confusion(*_labels_pair(y, yhat, n_classes))
+    denom = C.sum(axis=0) + C.sum(axis=1)  # 2TP + FP + FN
+    seen = denom > 0
+    return float(np.mean(2.0 * np.diag(C)[seen] / denom[seen]))
+
+
+def quadratic_weighted_kappa(y, yhat, n_classes: int) -> float:
+    """Kappa de Cohen con pesos (i − j)² sobre la escala completa 0..K−1 (una clase ausente igual cuenta su
+    distancia). Si el desacuerdo esperado es 0 (y e yhat constantes en la misma clase), kappa no está definido y
+    lanza ValueError."""
+    ya, yh, K = _labels_pair(y, yhat, n_classes)
+    C = _confusion(ya, yh, K).astype(float)
+    i = np.arange(K)
+    W = (i[:, None] - i[None, :]) ** 2.0
+    den = float((W * np.outer(C.sum(axis=1), C.sum(axis=0))).sum()) / C.sum()
+    if den == 0:
+        raise ValueError("quadratic weighted kappa is undefined: y and yhat are constant in the same class")
+    return 1.0 - float((W * C).sum()) / den
+
+
+def _y_p(y, p):
+    ya, pa = _binary("y", y), _probability("p", p)
+    _same_length(ya, pa, "y", "p")
+    return ya, pa
+
+
+def _both_classes(ya: np.ndarray, what: str) -> None:
+    if ya.min() == ya.max():
+        raise ValueError(f"{what} needs both classes (0 and 1) in y")
+
+
+def brier(y, p) -> float:
+    """Error de Brier: media de (p − y)²."""
+    ya, pa = _y_p(y, p)
+    return float(np.mean((pa - ya) ** 2))
+
+
+def _logit_mle(Z: np.ndarray, y: np.ndarray, offset: np.ndarray) -> np.ndarray:
+    """MLE de la logística y ~ Z·w + offset, sin prior."""
+    def objective(w):
+        eta = Z @ w + offset
+        return float(np.sum(np.logaddexp(0.0, eta) - y * eta)), Z.T @ (expit(eta) - y)
+
+    def hess(w):
+        pr = expit(Z @ w + offset)
+        return Z.T @ ((pr * (1.0 - pr))[:, None] * Z)
+
+    res = minimize(objective, np.zeros(Z.shape[1]), jac=True, hess=hess, method="trust-exact",
+                   options={"gtol": 1e-10, "maxiter": 200})
+    # como en el ordinal: se juzga por el gradiente; quien llama ya descartó la separación
+    if not np.all(np.isfinite(res.x)) or np.max(np.abs(res.jac)) > 1e-6 * max(1.0, math.sqrt(y.size)):
+        raise ValueError(f"the calibration regression did not converge: {res.message}")
+    return res.x
+
+
+def calibration_intercept_slope(y, p) -> tuple[float, float]:
+    """(intercepto, pendiente) de calibración (Van Calster et al. 2019).
+
+    Pendiente: b de la logística sin *prior* y ~ a + b·logit(p), de 2 parámetros (ideal 1). Intercepto: a de
+    y ~ a + offset(logit(p)), con la pendiente fija en 1 (calibración en el total; ideal 0). Exige `p`
+    estrictamente entre 0 y 1 (logit finito) e `y` con las dos clases.
+    """
+    ya, pa = _y_p(y, p)
+    if np.any(pa <= 0) or np.any(pa >= 1):
+        raise ValueError("p must be strictly between 0 and 1 for the calibration regression (logit(p) finite)")
+    _both_classes(ya, "calibration_intercept_slope")
+    lp = np.log(pa) - np.log1p(-pa)
+    pos, neg = lp[ya == 1], lp[ya == 0]
+    if neg.max() <= pos.min() or pos.max() <= neg.min():
+        # con una sola variable, separación (aun cuasi completa) = los rangos de p de las dos clases no se cruzan
+        raise ValueError("the calibration slope is undefined: p separates the two classes (the slope diverges)")
+    ones = np.ones((ya.size, 1))
+    intercept = _logit_mle(ones, ya, lp)[0]
+    slope = _logit_mle(np.column_stack([ones, lp]), ya, np.zeros_like(lp))[1]
+    return float(intercept), float(slope)
+
+
+def calibration_curve(y, p, n_bins: int = 10) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Curva de calibración por cuantiles de p (deciles con n_bins = 10): (p media, y media, n) de cada bin no
+    vacío. Bordes como scikit-learn `calibration_curve(strategy="quantile")`: con empates, los bins repetidos
+    quedan vacíos y se omiten."""
+    ya, pa = _y_p(y, p)
+    if isinstance(n_bins, bool) or not isinstance(n_bins, (int, np.integer)) or n_bins < 1:
+        raise ValueError("n_bins must be a positive integer")
+    nb = int(n_bins)
+    # percentile(q·100) y no quantile(q): con empates exactos el redondeo cambia el bin y así coincide con sklearn
+    ids = np.searchsorted(np.percentile(pa, np.linspace(0.0, 1.0, nb + 1) * 100)[1:-1], pa)
+    count = np.bincount(ids, minlength=nb)
+    keep = count > 0
+    return (np.bincount(ids, weights=pa, minlength=nb)[keep] / count[keep],
+            np.bincount(ids, weights=ya, minlength=nb)[keep] / count[keep], count[keep])
+
+
+def roc_auc(y, p) -> float:
+    """Área bajo la curva ROC por rangos (Mann–Whitney), con los empates en el rango promedio."""
+    ya, pa = _y_p(y, p)
+    _both_classes(ya, "roc_auc")
+    pos = ya == 1
+    n1, n0 = int(pos.sum()), int((~pos).sum())
+    return float((rankdata(pa)[pos].sum() - n1 * (n1 + 1) / 2.0) / (n1 * n0))
+
+
+def average_precision(y, p) -> float:
+    """Precisión promedio (definición de scikit-learn): Σ (R_k − R_{k−1})·P_k sobre los umbrales distintos de p,
+    de mayor a menor, sin interpolar. Necesita al menos un positivo."""
+    ya, pa = _y_p(y, p)
+    if ya.sum() == 0:
+        raise ValueError("average_precision needs at least one positive (y = 1)")
+    order = np.argsort(-pa, kind="mergesort")
+    ps, ys = pa[order], ya[order]
+    last = np.r_[np.nonzero(np.diff(ps))[0], ps.size - 1]  # última fila de cada bloque de empates
+    tp = np.cumsum(ys)[last]
+    recall = tp / tp[-1]
+    return float(np.sum(np.diff(np.r_[0.0, recall]) * tp / (last + 1.0)))

@@ -14,6 +14,9 @@ from .correlations import (CORRELATION_RESULT_COLUMNS, KINDS, NO_DOMAIN, STATUSE
                            SiteCorrelationResult, fit_site_correlation, save_site_correlations)
 from .stats import (BayesLinearFit, BootstrapResult, DemingFit, OlsFit, bayes_linear_fit,  # noqa: E402
                     deming_fit, group_bootstrap, ols_fit)
+from .stats import (LogisticMapFit, OrdinalLogitFit, average_precision, balanced_accuracy, brier,  # noqa: E402
+                    calibration_curve, calibration_intercept_slope, f1_macro, logistic_map_fit, ordinal_logit_fit,
+                    quadratic_weighted_kappa, recall_per_class, roc_auc)
 # reexportada: vive en history porque no necesita numpy
 from ..history import save_history_xlsx  # noqa: E402
 from .synthetic import SyntheticTruth, synthetic_history  # noqa: E402
@@ -21,4 +24,7 @@ from .synthetic import SyntheticTruth, synthetic_history  # noqa: E402
 __all__ = ["CORRELATION_RESULT_COLUMNS", "KINDS", "NO_DOMAIN", "STATUSES", "SiteCorrelationFit",
            "SiteCorrelationResult", "fit_site_correlation", "save_site_correlations",
            "BayesLinearFit", "BootstrapResult", "DemingFit", "OlsFit", "bayes_linear_fit", "deming_fit",
-           "group_bootstrap", "ols_fit", "SyntheticTruth", "save_history_xlsx", "synthetic_history"]
+           "group_bootstrap", "ols_fit", "LogisticMapFit", "OrdinalLogitFit", "average_precision",
+           "balanced_accuracy", "brier", "calibration_curve", "calibration_intercept_slope", "f1_macro",
+           "logistic_map_fit", "ordinal_logit_fit", "quadratic_weighted_kappa", "recall_per_class", "roc_auc",
+           "SyntheticTruth", "save_history_xlsx", "synthetic_history"]

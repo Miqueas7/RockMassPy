@@ -1,0 +1,404 @@
+"""Clasificación del modelo predictivo (Fase 4B, tarea 8, y 4C, tarea 11): logit ordinal, logística MAP y métricas.
+
+Solo datos sintéticos. statsmodels y scikit-learn entran como oráculos (R1), nunca en tiempo de ejecución.
+"""
+
+import warnings
+
+import pytest
+from hypothesis import assume, given, settings, strategies as st
+
+np = pytest.importorskip("numpy")
+pytest.importorskip("scipy")
+from scipy.special import expit  # noqa: E402
+
+from rockmasspy.predictive import (average_precision, balanced_accuracy, brier, calibration_curve,  # noqa: E402
+                                   calibration_intercept_slope, f1_macro, logistic_map_fit, ordinal_logit_fit,
+                                   quadratic_weighted_kappa, recall_per_class, roc_auc)
+
+
+def _ordinal_data(n=400, beta=(1.0, -0.7), cuts=(-1.0, 0.3, 1.5), seed=3):
+    rng = np.random.default_rng(seed)
+    X = rng.normal(size=(n, len(beta)))
+    return X, np.digitize(X @ np.asarray(beta) + rng.logistic(size=n), cuts)  # latente logístico
+
+
+def _binary_data(n=300, beta=(1.2, -0.8), b=0.5, seed=4):
+    rng = np.random.default_rng(seed)
+    X = rng.normal(size=(n, len(beta))) * [1.0, 3.0][:len(beta)] + [2.0, -1.0][:len(beta)]
+    return X, (rng.random(n) < expit(b + X @ np.asarray(beta))).astype(float)
+
+
+# ---------- logit ordinal ----------
+
+def test_ordinal_contra_statsmodels():
+    om = pytest.importorskip("statsmodels.miscmodels.ordinal_model")
+    X, y = _ordinal_data()
+    fit = ordinal_logit_fit(X, y, n_classes=4)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = om.OrderedModel(y, X, distr="logit").fit(method="bfgs", disp=False, maxiter=5000, gtol=1e-10)
+    assert fit.converged and fit.message == ""
+    assert (fit.n, fit.n_classes) == (400, 4)
+    p = X.shape[1]
+    # statsmodels: umbral 0 y luego log de los incrementos
+    ref_cuts = ref.params[p] + np.r_[0.0, np.cumsum(np.exp(ref.params[p + 1:]))]
+    np.testing.assert_allclose(fit.coef, ref.params[:p], rtol=1e-5)
+    np.testing.assert_allclose(fit.cuts, ref_cuts, rtol=1e-5)
+    assert fit.loglik == pytest.approx(ref.llf, rel=1e-9)
+    np.testing.assert_allclose(fit.predict_proba(X), ref.predict(X), atol=1e-6)
+    # error estándar: la covarianza se lleva a la escala de statsmodels con el jacobiano de (θ0, log Δθ)
+    J = np.eye(p + 3)
+    for k in range(1, 3):
+        gap = fit.cuts[k] - fit.cuts[k - 1]
+        J[p + k, p + k], J[p + k, p + k - 1] = 1.0 / gap, -1.0 / gap
+    np.testing.assert_allclose(np.sqrt(np.diag(J @ fit.cov @ J.T)), ref.bse, rtol=1e-3)
+
+
+def test_ordinal_dos_clases_es_la_logistica():
+    sm = pytest.importorskip("statsmodels.api")
+    X, y = _binary_data()
+    fit = ordinal_logit_fit(X, y, n_classes=2)
+    ref = sm.Logit(y, sm.add_constant(X)).fit(disp=0)
+    # P(y ≤ 0) = σ(θ − x·β) ⇒ logit P(y = 1) = x·β − θ
+    np.testing.assert_allclose(fit.coef, ref.params[1:], rtol=1e-6)
+    assert fit.cuts[0] == pytest.approx(-ref.params[0], rel=1e-6)
+    order = [1, 2, 0]
+    J = np.diag([1.0, 1.0, -1.0])
+    np.testing.assert_allclose(fit.cov, J @ ref.cov_params()[np.ix_(order, order)] @ J, rtol=1e-5)
+
+
+@pytest.mark.parametrize("seed", [11, 12, 13])
+def test_ordinal_recupera_los_parametros(seed):
+    beta, cuts = np.array([0.8, -1.5, 0.3]), np.array([-2.0, -0.5, 0.4, 2.2])
+    X, y = _ordinal_data(n=3000, beta=beta, cuts=cuts, seed=seed)
+    fit = ordinal_logit_fit(X, y, n_classes=5)
+    assert fit.converged
+    se = np.sqrt(np.diag(fit.cov))
+    assert np.all(np.abs(np.r_[fit.coef, fit.cuts] - np.r_[beta, cuts]) < 4 * se)
+
+
+def test_ordinal_probabilidades_y_prediccion():
+    X, y = _ordinal_data()
+    fit = ordinal_logit_fit(X, y, n_classes=4)
+    Xe = np.array([[0.0, 0.0], [80.0, -80.0], [-80.0, 80.0], [1e4, 0.0]])  # extremos: sin NaN ni desborde
+    P = fit.predict_proba(Xe)
+    assert P.shape == (4, 4) and np.all(np.isfinite(P)) and np.all(P >= 0)
+    np.testing.assert_allclose(P.sum(axis=1), 1.0, rtol=1e-12)
+    np.testing.assert_array_equal(fit.predict(Xe), np.argmax(P, axis=1))
+    assert fit.predict(Xe)[1] == 3 and fit.predict(Xe)[2] == 0
+    assert np.all(np.diff(fit.cuts) > 0)
+
+
+def test_ordinal_clase_ausente_en_prueba_se_permite():
+    X, y = _ordinal_data()
+    fit = ordinal_logit_fit(X, y, n_classes=4)
+    Xt = X[y < 3]  # la prueba no trae la clase 3
+    assert fit.predict_proba(Xt).shape == (Xt.shape[0], 4)
+
+
+def test_ordinal_clase_sin_observaciones_en_entrenamiento():
+    X, y = _ordinal_data()
+    keep = y != 2
+    with pytest.raises(ValueError, match=r"class\(es\) \[2\] have no observations"):
+        ordinal_logit_fit(X[keep], y[keep], n_classes=4)
+
+
+@pytest.mark.parametrize("y", [[0] * 20 + [1] * 20, [0] * 20 + [1] * 10 + [2] * 10])
+def test_ordinal_separacion_no_converge(y):
+    rng = np.random.default_rng(5)
+    X = np.r_[rng.normal(-3, 0.3, (20, 1)), rng.normal(3, 0.3, (20, 1))]
+    y = np.asarray(y)
+    if y.max() == 2:  # 1 y 2 también separados entre sí
+        X[30:] += 10.0
+    fit = ordinal_logit_fit(X, y, n_classes=int(y.max()) + 1)
+    assert not fit.converged
+    assert "separated" in fit.message
+    assert np.all(np.isnan(fit.cov))
+    assert np.all(np.isfinite(fit.coef)) and np.all(np.isfinite(fit.cuts))
+
+
+def test_ordinal_separacion_de_un_solo_corte_no_impide_el_mle():
+    # 0 contra {1, 2} separados, pero 1 y 2 se mezclan: β es común a los cortes y el MLE existe
+    rng = np.random.default_rng(5)
+    X = np.r_[rng.normal(-3, 0.3, (20, 1)), rng.normal(3, 0.3, (20, 1))]
+    y = np.r_[np.zeros(20, int), rng.permutation(np.r_[np.ones(10, int), 2 * np.ones(10, int)])]
+    fit = ordinal_logit_fit(X, y, n_classes=3)
+    assert fit.converged and np.all(np.isfinite(fit.cov))
+
+
+def test_ordinal_columna_constante_no_converge_con_motivo():
+    X, y = _ordinal_data()
+    fit = ordinal_logit_fit(np.column_stack([X, np.ones(len(y))]), y, n_classes=4)
+    assert not fit.converged and "singular" in fit.message
+
+
+@pytest.mark.parametrize("kwargs, msg", [
+    (dict(X=[1.0, 2.0], y=[0, 1], n_classes=2), "two-dimensional"),
+    (dict(X=[[1.0], [np.nan]], y=[0, 1], n_classes=2), "finite"),
+    (dict(X=[[1.0], [2.0]], y=[0, 2], n_classes=2), "integer classes between 0 and 1"),
+    (dict(X=[[1.0], [2.0]], y=[0, 0.5], n_classes=2), "integer classes"),
+    (dict(X=[[1.0], [2.0]], y=[0, 1, 1], n_classes=2), "same number of rows"),
+    (dict(X=[[1.0], [2.0]], y=[0, 1], n_classes=1), "n_classes"),
+    (dict(X=[[1.0], [2.0]], y=[0, 1], n_classes=True), "n_classes"),
+])
+def test_ordinal_errores(kwargs, msg):
+    X = kwargs.pop("X")
+    y = kwargs.pop("y")
+    with pytest.raises(ValueError, match=msg):
+        ordinal_logit_fit(X, y, **kwargs)
+
+
+def test_ordinal_predict_columnas_equivocadas():
+    X, y = _ordinal_data()
+    fit = ordinal_logit_fit(X, y, n_classes=4)
+    with pytest.raises(ValueError, match="2 columns"):
+        fit.predict_proba(np.zeros((3, 3)))
+
+
+# ---------- logística MAP ----------
+
+def _neg_log_post(X, y, coef, intercept, prior_scale=2.5, intercept_scale=10.0):
+    """−log posterior escrito aparte, en la escala original (oráculo independiente de la función)."""
+    mean, scale = X.mean(axis=0), 2.0 * X.std(axis=0)
+    gamma, alpha = coef * scale, intercept + coef @ mean
+    eta = X @ coef + intercept
+    return (np.sum(np.logaddexp(0.0, eta) - y * eta) + np.sum(np.log1p((gamma / prior_scale) ** 2))
+            + np.log1p((alpha / intercept_scale) ** 2))
+
+
+def test_map_con_prior_enorme_tiende_al_mle():
+    sm = pytest.importorskip("statsmodels.api")
+    X, y = _binary_data()
+    fit = logistic_map_fit(X, y, prior_scale=1e6, intercept_scale=1e6)
+    ref = sm.Logit(y, sm.add_constant(X)).fit(disp=0)
+    assert fit.converged and fit.active_bounds == ()
+    np.testing.assert_allclose(fit.coef, ref.params[1:], rtol=1e-5)
+    assert fit.intercept == pytest.approx(ref.params[0], rel=1e-5)
+    assert fit.loglik == pytest.approx(ref.llf, rel=1e-9)
+    order = [1, 2, 0]  # (coef..., intercept)
+    np.testing.assert_allclose(fit.cov, ref.cov_params()[np.ix_(order, order)], rtol=1e-4)
+
+
+def test_map_gradiente_nulo_y_hessiano_por_diferencias_finitas():
+    X, y = _binary_data(n=120)
+    fit = logistic_map_fit(X, y)
+    w0 = np.r_[fit.coef, fit.intercept]
+
+    def f(w):
+        return _neg_log_post(X, y, w[:-1], w[-1])
+
+    h = 1e-4
+    E = np.eye(w0.size) * h
+    grad = np.array([(f(w0 + e) - f(w0 - e)) / (2 * h) for e in E])
+    assert np.max(np.abs(grad)) < 1e-5
+    H = np.array([[(f(w0 + a + b) - f(w0 + a - b) - f(w0 - a + b) + f(w0 - a - b)) / (4 * h * h) for b in E]
+                  for a in E])
+    np.testing.assert_allclose(np.linalg.inv(fit.cov), H, rtol=1e-4, atol=1e-4)
+
+
+def test_map_separacion_completa_es_finito():
+    x = np.r_[np.linspace(-3, -1, 15), np.linspace(1, 3, 15)]
+    y = np.r_[np.zeros(15), np.ones(15)]
+    fit = logistic_map_fit(x[:, None], y)
+    assert fit.converged
+    assert np.all(np.isfinite(fit.coef)) and np.isfinite(fit.intercept) and np.all(np.isfinite(fit.cov))
+    assert 0 < fit.coef[0] < 20
+
+
+def test_map_signo_contrario_a_los_datos_deja_la_cota_activa():
+    X, y = _binary_data()  # coef verdaderos +1.2 y −0.8
+    free = logistic_map_fit(X, y)
+    fit = logistic_map_fit(X, y, signs=[-1, 0])
+    assert fit.active_bounds == (0,)
+    assert fit.coef[0] == 0.0 and fit.converged
+    assert fit.coef[1] < 0
+    # signos coherentes con los datos: ninguna cota activa y el mismo MAP que sin cotas
+    ok = logistic_map_fit(X, y, signs=[1, -1])
+    assert ok.active_bounds == ()
+    np.testing.assert_allclose(ok.coef, free.coef, rtol=1e-6)
+
+
+def test_map_escala_original_igual_a_estandarizar_a_mano():
+    X, y = _binary_data()
+    fit = logistic_map_fit(X, y)
+    np.testing.assert_allclose(fit.x_mean, X.mean(axis=0))
+    np.testing.assert_allclose(fit.x_scale, 2.0 * X.std(axis=0))
+    Z = (X - X.mean(axis=0)) / (2.0 * X.std(axis=0))  # ya en media 0 y desviación 0.5
+    fz = logistic_map_fit(Z, y)
+    np.testing.assert_allclose(fit.predict_proba(X), fz.predict_proba(Z), rtol=1e-7)
+    np.testing.assert_allclose(fz.coef, fit.coef * fit.x_scale, rtol=1e-6)
+    for a, b in zip(fit.predict_interval(X), fz.predict_interval(Z)):
+        np.testing.assert_allclose(a, b, rtol=1e-6)
+
+
+def test_map_intervalo_delta_cobertura():
+    rng = np.random.default_rng(21)
+    beta, b, x0 = np.array([1.0, -0.5]), -0.3, np.array([[0.5, 1.0]])
+    truth = expit(b + x0 @ beta)[0]
+    hits = 0
+    for _ in range(200):
+        X = rng.normal(size=(250, 2))
+        y = (rng.random(250) < expit(b + X @ beta)).astype(float)
+        c, lo, hi = logistic_map_fit(X, y).predict_interval(x0, level=0.9)
+        assert lo[0] <= c[0] <= hi[0]
+        hits += lo[0] <= truth <= hi[0]
+    assert 0.83 <= hits / 200 <= 0.97
+
+
+@pytest.mark.parametrize("kwargs, msg", [
+    (dict(y=[0, 1, 2, 1]), "only 0 and 1"),
+    (dict(y=[0, 1, 1]), "same number of rows"),
+    (dict(X=[[1.0], [1.0], [1.0], [1.0]]), "column 0 of X is constant"),
+    (dict(signs=[2]), "each \\+1, -1 or 0"),
+    (dict(signs=[1, 0]), "sequence of 1 values"),
+    (dict(signs="a"), "signs"),
+    (dict(prior_scale=0), "prior_scale"),
+    (dict(intercept_scale=-1.0), "intercept_scale"),
+])
+def test_map_errores(kwargs, msg):
+    args = dict(X=[[1.0], [2.0], [3.0], [4.0]], y=[0, 1, 0, 1]) | kwargs
+    with pytest.raises(ValueError, match=msg):
+        logistic_map_fit(args.pop("X"), args.pop("y"), **args)
+
+
+def test_map_predict_errores():
+    X, y = _binary_data()
+    fit = logistic_map_fit(X, y)
+    with pytest.raises(ValueError, match="level"):
+        fit.predict_interval(X, level=1.0)
+    with pytest.raises(ValueError, match="2 columns"):
+        fit.predict_proba(X[:, :1])
+
+
+# ---------- métricas contra scikit-learn ----------
+
+@st.composite
+def _labels(draw):
+    k = draw(st.integers(2, 5))
+    n = draw(st.integers(1, 40))
+    cls = st.integers(0, k - 1)
+    return k, draw(st.lists(cls, min_size=n, max_size=n)), draw(st.lists(cls, min_size=n, max_size=n))
+
+
+@settings(max_examples=150, deadline=None)
+@given(_labels())
+def test_metricas_ordinales_contra_sklearn(data):
+    skm = pytest.importorskip("sklearn.metrics")
+    k, y, yhat = data
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert balanced_accuracy(y, yhat, k) == pytest.approx(skm.balanced_accuracy_score(y, yhat), abs=1e-12)
+        assert f1_macro(y, yhat, k) == pytest.approx(skm.f1_score(y, yhat, average="macro", zero_division=0),
+                                                     abs=1e-12)
+        ref_rec = skm.recall_score(y, yhat, average=None, labels=list(range(k)), zero_division=np.nan)
+        ref_kappa = skm.cohen_kappa_score(y, yhat, weights="quadratic", labels=list(range(k)))
+    np.testing.assert_allclose(recall_per_class(y, yhat, k), ref_rec, atol=1e-12, equal_nan=True)
+    assert np.isnan(recall_per_class(y, yhat, k)[sorted(set(range(k)) - set(y))]).all()
+    if np.isnan(ref_kappa):
+        with pytest.raises(ValueError, match="undefined"):
+            quadratic_weighted_kappa(y, yhat, k)
+    else:
+        assert quadratic_weighted_kappa(y, yhat, k) == pytest.approx(ref_kappa, abs=1e-12)
+
+
+def test_kappa_usa_la_escala_completa():
+    # la clase 1 no aparece: la distancia entre 0 y 2 vale 4, no 1
+    y, yhat = [0, 0, 2, 2], [0, 2, 2, 2]
+    i = np.arange(3)
+    W = (i[:, None] - i[None, :]) ** 2
+    C = np.array([[1, 0, 1], [0, 0, 0], [0, 0, 2]])
+    E = np.outer(C.sum(1), C.sum(0)) / 4
+    assert quadratic_weighted_kappa(y, yhat, 3) == pytest.approx(1 - (W * C).sum() / (W * E).sum())
+
+
+_probs = st.sampled_from([0.0, 0.05, 0.1, 0.25, 0.5, 0.5, 0.75, 0.9, 1.0])  # muchos empates a propósito
+
+
+@st.composite
+def _scores(draw):
+    n = draw(st.integers(0, 40))
+    y = draw(st.lists(st.integers(0, 1), min_size=n, max_size=n)) + [0, 1]
+    p = draw(st.lists(st.one_of(_probs, st.floats(0, 1)), min_size=n + 2, max_size=n + 2))
+    return np.array(y, dtype=float), np.array(p)
+
+
+@settings(max_examples=150, deadline=None)
+@given(_scores())
+def test_metricas_de_probabilidad_contra_sklearn(data):
+    skm = pytest.importorskip("sklearn.metrics")
+    y, p = data
+    assert brier(y, p) == pytest.approx(skm.brier_score_loss(y, p), abs=1e-12)
+    assert roc_auc(y, p) == pytest.approx(skm.roc_auc_score(y, p), abs=1e-12)
+    assert average_precision(y, p) == pytest.approx(skm.average_precision_score(y, p), abs=1e-12)
+
+
+@settings(max_examples=100, deadline=None)
+@given(_scores(), st.integers(1, 12))
+def test_curva_de_calibracion_contra_sklearn(data, n_bins):
+    skc = pytest.importorskip("sklearn.calibration")
+    y, p = data
+    p_mean, y_mean, count = calibration_curve(y, p, n_bins=n_bins)
+    ref_true, ref_pred = skc.calibration_curve(y, p, n_bins=n_bins, strategy="quantile")
+    np.testing.assert_allclose(p_mean, ref_pred, atol=1e-12)
+    np.testing.assert_allclose(y_mean, ref_true, atol=1e-12)
+    assert count.sum() == y.size and np.all(count > 0)
+
+
+def test_curva_de_calibracion_deciles():
+    rng = np.random.default_rng(8)
+    p = rng.random(1000)
+    _, _, count = calibration_curve((rng.random(1000) < p).astype(float), p)
+    assert count.size == 10 and np.all(count == 100)
+
+
+def test_calibracion_contra_statsmodels():
+    sm = pytest.importorskip("statsmodels.api")
+    rng = np.random.default_rng(9)
+    p = rng.uniform(0.02, 0.98, 500)
+    y = (rng.random(500) < expit(0.4 + 0.6 * np.log(p / (1 - p)))).astype(float)  # mal calibrado a propósito
+    lp = np.log(p / (1 - p))
+    a, b = calibration_intercept_slope(y, p)
+    slope = sm.Logit(y, sm.add_constant(lp)).fit(disp=0).params[1]
+    citl = sm.GLM(y, np.ones((500, 1)), family=sm.families.Binomial(), offset=lp).fit().params[0]
+    assert b == pytest.approx(slope, rel=1e-6)
+    assert a == pytest.approx(citl, rel=1e-6)
+
+
+def test_calibracion_perfecta():
+    rng = np.random.default_rng(10)
+    p = rng.uniform(0.05, 0.95, 20000)
+    a, b = calibration_intercept_slope((rng.random(p.size) < p).astype(float), p)
+    assert abs(a) < 0.05 and abs(b - 1) < 0.07
+
+
+@pytest.mark.parametrize("fn, y, p, msg", [
+    (calibration_intercept_slope, [0, 1, 1], [0.2, 0.0, 0.7], "strictly between 0 and 1"),
+    (calibration_intercept_slope, [1, 1, 1], [0.2, 0.3, 0.7], "both classes"),
+    (calibration_intercept_slope, [0, 0, 1], [0.2, 0.3, 0.3], "separates"),
+    (roc_auc, [0, 0], [0.2, 0.3], "both classes"),
+    (average_precision, [0, 0], [0.2, 0.3], "at least one positive"),
+    (brier, [0, 1], [0.2], "same length"),
+    (brier, [0, 2], [0.2, 0.3], "only 0 and 1"),
+    (brier, [0, 1], [0.2, 1.3], "between 0 and 1"),
+    (brier, [0, 1], [0.2, np.nan], "finite"),
+    (brier, [], [], "at least 1"),
+])
+def test_metricas_de_probabilidad_errores(fn, y, p, msg):
+    with pytest.raises(ValueError, match=msg):
+        fn(y, p)
+
+
+@pytest.mark.parametrize("fn", [balanced_accuracy, f1_macro, quadratic_weighted_kappa, recall_per_class])
+def test_metricas_ordinales_errores(fn):
+    with pytest.raises(ValueError, match="same length"):
+        fn([0, 1], [0], 2)
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        fn([0, 3], [0, 1], 3)
+    with pytest.raises(ValueError, match="n_classes"):
+        fn([0, 1], [0, 1], 1)
+
+
+def test_calibracion_n_bins_invalido():
+    with pytest.raises(ValueError, match="n_bins"):
+        calibration_curve([0, 1], [0.2, 0.4], n_bins=0)
