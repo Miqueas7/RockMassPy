@@ -8,7 +8,7 @@ Uso (con el paquete importable):
     python simulacion_minimos.py --quick   # corrida corta de prueba
 
 Para medir cada celda, el script baja los mínimos de la librería a 1 SOLO dentro de este proceso
-(`correlations.MIN_*` y `performance.MIN_EVENTS_PER_PARAMETER_LEVEL3`): así se ve qué hace la regla de validación
+(`correlations.MIN_*` y `history.MIN_EVENTS_PER_PARAMETER_LEVEL3`): así se ve qué hace la regla de validación
 con 5, 10 o 20 eventos por parámetro aunque el mínimo vigente sea 10. La librería no se modifica.
 """
 
@@ -22,16 +22,15 @@ import time
 from collections import Counter, defaultdict
 
 import numpy as np
-from scipy.special import expit
 
+from rockmasspy import history as _hist
 from rockmasspy.history import History, level3_parameters, level3_rows
-from rockmasspy.predictive import (SyntheticTruth, audit_practice, brier, dummy_proba_fit_predict, fit_performance,
-                                   fit_site_correlation, logistic_map_fit, recommend, synthetic_history, tramo_groups,
-                                   validate)
+from rockmasspy.predictive import (SyntheticTruth, audit_practice, fit_performance, fit_site_correlation, recommend,
+                                   synthetic_history, tramo_groups, validate)
 from rockmasspy.predictive import correlations as _corr
-from rockmasspy.predictive import performance as _perf
-from rockmasspy.predictive.performance import _labor_types, _row, _signs
-from rockmasspy.q_support import read_q_chart
+from rockmasspy.predictive.performance import _labor_types, _row, _signs, poisson_deviance
+from rockmasspy.predictive.stats import exponential_hazard_map_fit
+from rockmasspy.predictive.validation import ngi_category
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -184,22 +183,26 @@ _GH_X, _GH_W = np.polynomial.hermite_e.hermegauss(40)
 _GH_W = _GH_W / _GH_W.sum()
 
 
-def p_marginal(eta, sd):
-    """P(falla) verdadera de un tramo de una labor y zona NUEVAS: E[σ(η + b)], b ~ N(0, sd²) (Gauss-Hermite)."""
-    eta = np.asarray(eta, float)
-    return expit(eta[..., None] + sd * _GH_X) @ _GH_W
+def p_within(log_rate, days):
+    """P(falla dentro de `days`) con tasa constante: 1 − exp(−λ·days)."""
+    return -np.expm1(-np.exp(log_rate) * days)
 
 
-assert abs(p_marginal(0.3, 0.0) - expit(0.3)) < 1e-12 and abs(p_marginal(0.0, 2.0) - 0.5) < 1e-12
+def p_marginal(log_rate, sd, days):
+    """P(falla) de un tramo de una labor y zona cualquiera: E[1 − exp(−e^(η+b)·days)], b ~ N(0, sd²) (Gauss-Hermite).
+    Es lo que estima un modelo sin efectos aleatorios."""
+    eta = np.asarray(log_rate, float)
+    return p_within(eta[..., None] + sd * _GH_X, days) @ _GH_W
+
+
+assert abs(p_marginal(-6.0, 0.0, 365.0) - p_within(-6.0, 365.0)) < 1e-12
 
 
 def _level3_ready(events):
     def ready(sel):
         fails = sum(t.id_tramo in ready.failed for t in sel)
-        n_types = len({t.tipo_labor for t in sel})
-        params = 5 + (n_types - 1 if n_types >= 2 else 0)  # = level3_parameters: base 4 + profundidad + tipos − 1
         zones = len({t.zona_nivel for t in sel})
-        return min(fails, len(sel) - fails) >= events * params and zones >= 3
+        return min(fails, len(sel) - fails) >= events * level3_parameters([(None, t) for t in sel]) and zones >= 3
     return ready
 
 
@@ -221,18 +224,32 @@ def _describe(out, esc, cell, hs):
     out.mean(3, esc, cell, "prevalencia_observada", [len(_failed_ids(h)) / len(h.tramos) for h in hs])
 
 
+def _why(reason):
+    """Motivo de no elegir, en categorías cortas (los textos de `recommend` no llevan valores)."""
+    if reason is None:
+        return "elige"
+    for key, tag in (("no choice", "no_site"), ("support effect", "beta_rank_no_identificado"),
+                     ("ignores rock", "cota_calidad_o_luz"), ("extrapolation", "extrapola"),
+                     ("threshold", "ninguno_cumple_umbral")):
+        if key in reason:
+            return tag
+    return "otro"
+
+
+WHY = ("elige", "beta_rank_no_identificado", "cota_calidad_o_luz", "extrapola", "ninguno_cumple_umbral", "otro")
+
+
 def level3_effect(out: Out, reps: int, n_boot: int, seed: int, beta0: dict):
     for pi in PREVALENCES:
         tr = SyntheticTruth(fail_beta0=beta0[(pi, True)])
         sd_b = math.hypot(tr.sd_zone_failure, tr.sd_labor_failure)
-        att = 1 / math.sqrt(1 + (16 * math.sqrt(3) / (15 * math.pi)) ** 2 * sd_b ** 2)  # Zeger et al. (1988)
-        true_coef = {"ln_q": tr.fail_beta_lnq * att, "ln_de": tr.fail_beta_lnde * att,
-                     "support_rank": tr.fail_beta_rank * att, "ln_exposure": tr.fail_beta_lnexp * att}
+        # coeficientes condicionales del generador; con fragilidad y censura el ajuste marginal se atenúa un poco
+        true_coef = {"ln_q": tr.fail_beta_lnq, "ln_de": tr.fail_beta_lnde, "support_rank": tr.fail_beta_rank}
         for ev in EVENTS:
             cell = f"prevalencia={pi:.2f};eventos_por_parametro={ev}"
-            hs, site, conv = [], 0, 0
+            hs, site = [], 0
             cov_coef = Counter()
-            pc_num, pc_den, light_num, light_den, free_num, free_den, choice = [], [], [], [], [], [], []
+            acc = defaultdict(list)  # métrica → una cuenta por réplica
             for r in range(reps):
                 s = _seed(seed, 3, int(pi * 100), ev, r)
                 h = _cell_history(tr, ev, s)
@@ -240,86 +257,120 @@ def level3_effect(out: Out, reps: int, n_boot: int, seed: int, beta0: dict):
                     continue
                 hs.append(h)
                 m = fit_performance(h, n_boot=n_boot, seed=r)
-                site += m.calibration == "site"
+                is_site = m.calibration == "site"
+                site += is_site
                 for name, (lo, hi) in zip(m.features, m.coef_ci):
                     tc = true_coef.get(name, 0.0)
                     cov_coef[name if name in true_coef else "nulos"] += lo <= tc <= hi
                     cov_coef["n_nulos"] += name not in true_coef
+                # tramos nuevos: covariables de un histórico aparte y efectos de zona y labor propios, sorteados aquí
                 test_h, _ = synthetic_history(n_zones=2, labors_per_zone=10, truth=tr, seed=_seed(s, 99))
-                test = [test_h.tramos[i] for i in np.random.default_rng(s).choice(len(test_h.tramos), N_TEST,
-                                                                                  replace=False)]
+                rng = np.random.default_rng(_seed(s, 98))
+                eff = {z: rng.normal(0, tr.sd_zone_failure) for z in sorted({t.zona_nivel for t in test_h.tramos})}
+                eff |= {lab: rng.normal(0, tr.sd_labor_failure)
+                        for lab in sorted({t.labor_codigo for t in test_h.tramos})}
+                test = [test_h.tramos[i] for i in rng.choice(len(test_h.tramos), N_TEST, replace=False)]
                 recs = recommend(m, test, threshold=THRESHOLD, exposure_days=EXPOSURE)
-                pcov = pden = ln = ld = fn = fd = 0
+                c = Counter()
                 for t, rec in zip(test, recs):
                     base = (tr.fail_beta0 + tr.fail_beta_lnq * math.log(t.q_valor)
-                            + tr.fail_beta_lnde * math.log(t.luz_m / t.esr) + tr.fail_beta_lnexp * math.log(EXPOSURE))
-                    p_true = {o.code: float(p_marginal(base + tr.fail_beta_rank * o.order, sd_b)) for o in rec.options}
+                            + tr.fail_beta_lnde * math.log(t.luz_m / t.esr))
+                    b = eff[t.zona_nivel] + eff[t.labor_codigo]
+                    p_cond = {o.code: float(p_within(base + b + tr.fail_beta_rank * o.order, EXPOSURE))
+                              for o in rec.options}
+                    p_marg = {o.code: float(p_marginal(base + tr.fail_beta_rank * o.order, sd_b, EXPOSURE))
+                              for o in rec.options}
                     for o in rec.options:
-                        pcov += o.p_low <= p_true[o.code] <= o.p_high
-                        pden += 1
+                        c["cob_marg"] += o.p_low <= p_marg[o.code] <= o.p_high
+                        c["cob_cond"] += o.p_low <= p_cond[o.code] <= o.p_high
+                        c["pares"] += 1
+                    if is_site:
+                        c["site_tramos"] += 1
+                        c["why_" + _why(rec.reason)] += 1
                     if rec.chosen is not None:
-                        ld += 1
-                        ln += p_true[rec.chosen] > THRESHOLD
-                    # sin la compuerta de calibración: lo que pasaría si se eligiera igual
-                    if rec.options and "support_rank" not in m.active_bounds:
-                        free = next((o.code for o in rec.options if o.meets_threshold), None)
-                        if free is not None:
-                            fd += 1
-                            fn += p_true[free] > THRESHOLD
-                pc_num.append(pcov), pc_den.append(pden), light_num.append(ln), light_den.append(ld)
-                free_num.append(fn), free_den.append(fd), choice.append(ld)
+                        c["elige"] += 1
+                        c["liviana"] += p_cond[rec.chosen] > THRESHOLD
+                        c["liviana_marg"] += p_marg[rec.chosen] > THRESHOLD
+                    # sin ninguna compuerta (calibración, β_rank, cotas, extrapolación, historia): el más liviano
+                    # cuyo límite superior queda bajo el umbral
+                    free = next((o.code for o in rec.options if o.meets_threshold), None)
+                    if free is not None:
+                        c["libre"] += 1
+                        c["libre_liviana"] += p_cond[free] > THRESHOLD
+                for k in ("cob_marg", "cob_cond", "pares", "site_tramos", "elige", "liviana", "liviana_marg",
+                          "libre", "libre_liviana", *("why_" + w for w in WHY)):
+                    acc[k].append(c[k])
+                acc["test"].append(len(test))
             n = len(hs)
             _describe(out, "efecto", cell, hs)
             out.prop(3, "efecto", cell, "tasa_site", site, n)
             for name in true_coef:
                 out.prop(3, "efecto", cell, f"cobertura_ic95_coef_{name}", cov_coef[name], n)
             out.prop(3, "efecto", cell, "cobertura_ic95_coef_nulos", cov_coef["nulos"], cov_coef["n_nulos"])
-            out.ratio(3, "efecto", cell, "cobertura_ic90_p_falla", pc_num, pc_den)
-            out.ratio(3, "efecto", cell, "tasa_eleccion", choice, [N_TEST] * n)
-            out.ratio(3, "efecto", cell, "tasa_demasiado_liviana", light_num, light_den)
-            out.ratio(3, "efecto", cell, "tasa_demasiado_liviana_sin_compuerta", free_num, free_den)
-            print(f"[nivel 3 efecto] {cell}: n={n}, site {site}/{n}, cob P {sum(pc_num) / max(1, sum(pc_den)):.3f}, "
-                  f"liviana {sum(light_num)}/{sum(light_den)}, sin compuerta {sum(free_num)}/{sum(free_den)}",
-                  flush=True)
+            out.ratio(3, "efecto", cell, "cobertura_ic90_p_falla_marginal", acc["cob_marg"], acc["pares"])
+            out.ratio(3, "efecto", cell, "cobertura_ic90_p_falla_condicional", acc["cob_cond"], acc["pares"])
+            out.ratio(3, "efecto", cell, "tasa_eleccion", acc["elige"], acc["test"])
+            out.ratio(3, "efecto", cell, "tasa_no_elige", [a - b for a, b in zip(acc["test"], acc["elige"])],
+                      acc["test"])
+            for w in WHY[1:]:  # motivos de no elegir, solo en los modelos "site"
+                out.ratio(3, "efecto", cell, f"site_no_elige_{w}", acc["why_" + w], acc["site_tramos"])
+            out.ratio(3, "efecto", cell, "tasa_demasiado_liviana", acc["liviana"], acc["elige"])
+            out.ratio(3, "efecto", cell, "tasa_demasiado_liviana_p_marginal", acc["liviana_marg"], acc["elige"])
+            out.ratio(3, "efecto", cell, "tasa_demasiado_liviana_sin_compuertas", acc["libre_liviana"], acc["libre"])
+            print(f"[nivel 3 efecto] {cell}: n={n}, site {site}/{n}, elige {sum(acc['elige'])}/{sum(acc['test'])}, "
+                  f"liviana {sum(acc['liviana'])}/{sum(acc['elige'])}, sin compuertas "
+                  f"{sum(acc['libre_liviana'])}/{sum(acc['libre'])}, cob P marginal "
+                  f"{sum(acc['cob_marg']) / max(1, sum(acc['pares'])):.3f}", flush=True)
 
 
-def boundary_recommends(h: History, n_boot: int, seed: int) -> bool:
+def boundary_recommends(h: History, n_boot: int, seed: int) -> tuple[bool, bool]:
     """Regla de `fit_performance` con un modelo del sitio que TAMBIÉN tiene la categoría NGI: anida a la línea base
-    (categoría + ln exposición), así que en el nulo de frontera la regla se mide en su tamaño real."""
+    (la categoría sola), así que en el nulo de frontera la regla se mide en su tamaño real. Devuelve (la validación
+    recomienda y el ajuste final convergió; lo anterior y además β_rank identificado y sin cotas en calidad o luz)."""
     rows = level3_rows(h)
     order = {s.codigo_tipo: s.orden for s in h.support_types}
     ts = [t for _, t in rows]
     y = np.array([o.failed for o, _ in rows], dtype=float)
+    days = np.array([o.exposure_days for o, _ in rows], dtype=float)
     lnq = np.array([math.log(t.q_valor) for t in ts])
     lnde = np.array([math.log(t.luz_m / t.esr) for t in ts])
     rank = np.array([order[t.sost_instalado] for t in ts], dtype=float)
-    lnexp = np.array([math.log(o.exposure_days) for o, _ in rows])
     depth = np.array([t.profundidad_m for t in ts], dtype=float)
     use_depth = bool(np.ptp(depth) > 0)
     tipos = [t.tipo_labor for t in ts]
-    cat = np.array([read_q_chart(t.q_valor, t.luz_m / t.esr).category for t in ts], dtype=float)
+    cat = np.array([ngi_category(t) for t in ts], dtype=float)
 
     def design(idx, lt):
-        return np.array([_row(lnq[i], lnde[i], rank[i], lnexp[i], depth[i], tipos[i], use_depth, lt) + [cat[i]]
+        return np.array([_row(lnq[i], lnde[i], rank[i], depth[i], tipos[i], use_depth, lt) + [cat[i]]
                          for i in idx], dtype=float)
+
+    def fit(idx, lt):  # la categoría queda libre, como en la línea base
+        idx = np.asarray(idx)
+        return exponential_hazard_map_fit(design(idx, lt), y[idx], days[idx], signs=_signs(use_depth, lt) + (0,))
 
     def site_fp(train, test):
         lt = _labor_types([tipos[i] for i in train])
-        f = logistic_map_fit(design(train, lt), y[train], signs=_signs(use_depth, lt) + (0,))  # categoría libre
-        return f.predict_proba(design(test, lt))
+        return fit(train, lt).prob_within(design(test, lt), days[test])
 
-    X0 = np.column_stack([cat, lnexp])
+    X0 = cat[:, None]
 
     def baseline_fp(train, test):
-        return logistic_map_fit(X0[train], y[train]).predict_proba(X0[test])
+        return exponential_hazard_map_fit(X0[train], y[train], days[train]).prob_within(X0[test], days[test])
+
+    def dummy_fp(train, test):  # tasa constante de train, como en performance.py
+        if y[train].sum() == 0:
+            raise ValueError("no events in train")
+        return -np.expm1(-y[train].sum() / days[train].sum() * days[test])
 
     labors, zones, years = tramo_groups(ts)
-    report = validate(y, {"site": site_fp, "baseline_ngi": baseline_fp, "dummy": dummy_proba_fit_predict(y)},
-                      kind="proba", labors=labors, zones=zones, years=years, metric=brier, higher_is_better=False,
+    report = validate(y, {"site": site_fp, "baseline_ngi": baseline_fp, "dummy": dummy_fp}, kind="proba",
+                      labors=labors, zones=zones, years=years, metric=poisson_deviance, higher_is_better=False,
                       reference=("dummy", "baseline_ngi"), k=5, n_boot=n_boot, seed=seed)
-    lt = _labor_types(tipos)
-    final = logistic_map_fit(design(range(y.size), lt), y, signs=_signs(use_depth, lt) + (0,))
-    return bool(report.recommend and final.converged)
+    final = fit(np.arange(y.size), _labor_types(tipos))
+    rec = bool(report.recommend and final.converged)
+    sd = np.sqrt(np.diag(final.cov)[:-1])
+    identified = final.coef[2] + 1.959963984540054 * sd[2] < 0 and not {0, 1, 2} & set(final.active_bounds)
+    return rec, bool(rec and identified)
 
 
 def level3_null(out: Out, reps: int, n_boot: int, seed: int, beta0: dict):
@@ -327,20 +378,22 @@ def level3_null(out: Out, reps: int, n_boot: int, seed: int, beta0: dict):
         tr = SyntheticTruth(site_effect=False, fail_category_beta0=beta0[(pi, False)])
         for ev in EVENTS:
             cell = f"prevalencia={pi:.2f};eventos_por_parametro={ev}"
-            hs, false_rec, misspec = [], 0, 0
+            hs, false_rec, false_choice, misspec = [], 0, 0, 0
             for r in range(reps):
                 h = _cell_history(tr, ev, _seed(seed, 4, int(pi * 100), ev, r))
                 if h is None:
                     continue
                 hs.append(h)
-                false_rec += boundary_recommends(h, n_boot, r)
+                a, b = boundary_recommends(h, n_boot, r)
+                false_rec, false_choice = false_rec + a, false_choice + b
                 misspec += fit_performance(h, n_boot=n_boot, seed=r).calibration == "site"
             n = len(hs)
             _describe(out, "nulo_frontera", cell, hs)
             out.prop(3, "nulo_frontera", cell, "tasa_recomendacion_falsa", false_rec, n)
+            out.prop(3, "nulo_frontera", cell, "tasa_recomendacion_falsa_con_beta_rank", false_choice, n)
             out.prop(3, "nulo_mal_especificado", cell, "tasa_site", misspec, n)
-            print(f"[nivel 3 nulo] {cell}: n={n}, frontera {false_rec}/{n}, mal especificado {misspec}/{n}",
-                  flush=True)
+            print(f"[nivel 3 nulo] {cell}: n={n}, frontera {false_rec}/{n} (con β_rank {false_choice}/{n}), "
+                  f"mal especificado {misspec}/{n}", flush=True)
 
 
 # ---------- nivel 2 ----------
@@ -413,7 +466,7 @@ def main(argv=None):
         a.reps, a.reps_l1, a.n_boot = 3, 5, 100
     # solo dentro de este proceso: cada celda se mide con la regla de validación, sin el corte del mínimo vigente
     _corr.MIN_PAIRS_LEVEL1 = _corr.MIN_LABORS_LEVEL1 = 1
-    _perf.MIN_EVENTS_PER_PARAMETER_LEVEL3 = 1
+    _hist.MIN_EVENTS_PER_PARAMETER_LEVEL3 = 1  # lo lee history._readiness, que usa fit_performance
     levels = {int(x) for x in a.levels.split(",")}
     out, t0 = Out(), time.time()
     if 1 in levels:
