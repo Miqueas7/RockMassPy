@@ -597,6 +597,110 @@ def _mrmr(a) -> int:
     return 2 if warnings else 0
 
 
+FINDING_RESULT_COLUMNS = ("hallazgo", "hoja", "fila", "id_tramo", "mensaje")
+CORRELATION_RESULT_COLUMNS = ("par", "etiqueta", "dominio", "n", "labores", "estado", "metodo", "a", "b",
+                              "a_ic95_inf", "a_ic95_sup", "b_ic95_inf", "b_ic95_sup", "x_min", "x_max", "desde",
+                              "hacia", "prior", "avisos")
+
+
+def _fit_correlations(history, group_by, deming_ratio) -> list:
+    """Los tres pares; uno que no se puede ajustar queda como (tipo, razón) y no detiene a los otros."""
+    from .predictive import KINDS, fit_site_correlation  # sin numpy/scipy: ImportError con el texto del extra [ml]
+
+    out = []
+    for kind in KINDS:
+        try:
+            out.append(fit_site_correlation(history, kind, group_by=group_by, deming_ratio=deming_ratio))
+        except ValueError as e:  # sin pares, ediciones mezcladas…: el mensaje trae conteos y filas, nunca ids
+            out.append((kind, str(e)))
+    return out
+
+
+def _save_history_outputs(folder, audit, fits) -> list:
+    """history_findings.csv y, con correlaciones, site_correlations.csv y .json. Son archivos de resultados: el
+    id_tramo, la fila y el dominio (la litología) sí van aquí."""
+    from .batch import write_table
+    from .report import site_custom, site_fits
+
+    out = Path(folder)
+    out.mkdir(parents=True, exist_ok=True)
+    paths = [write_table(out / "history_findings.csv", FINDING_RESULT_COLUMNS,
+                         [(f.kind, f.sheet, f.fila, f.id_tramo, f.message) for f in audit.findings])]
+    if fits is None:
+        return paths
+    rows, corrs = [], []
+    for r in fits:
+        if isinstance(r, tuple):
+            rows.append((r[0], None, None, None, None, "not_fitted", None, None, None, None, None, None, None, None,
+                         None, None, None, None, r[1]))
+            continue
+        for f in site_fits(r):
+            a_ci, b_ci = (f.a_ci, f.b_ci) if f.method == "OLS" else (None, None)
+            rows.append((r.kind, f.label, f.domain, f.n, f.n_labors, f.status, f.method, f.a, f.b,
+                         *(a_ci or (None, None)), *(b_ci or (None, None)), f.x_min, f.x_max, f.x_from, f.y_to,
+                         r.prior_correlation, "; ".join((*r.warnings, *f.warnings))))
+            c = site_custom(f)
+            if c is not None:  # el formato de `correlations` de las tablas por labor (table_io)
+                corrs.append({"name": c.name, "from": c.from_, "to": c.to, "form": c.form.name, "a": c.a, "b": c.b,
+                              "valid_min": c.valid_min, "valid_max": c.valid_max, "source": c.source})
+    paths.append(write_table(out / "site_correlations.csv", CORRELATION_RESULT_COLUMNS, rows))
+    js = out / "site_correlations.json"
+    js.write_text(json.dumps({"correlations": corrs}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return [*paths, js]
+
+
+def _history(a) -> int:
+    from collections import Counter
+
+    from . import report as rp
+    from .history import HistoryTramo, audit_history, load_history
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    group_by = None if a.group_by.lower() == "none" else a.group_by
+    if group_by is not None and (group_by == "fila" or group_by not in HistoryTramo.__dataclass_fields__):
+        raise ValueError("--group-by must be none or a column of sheet Tramos")  # sin repetir el valor
+    if not a.correlations and a.deming_ratio is not None:
+        raise ValueError("--deming-ratio needs --correlations")
+    if a.deming_ratio is not None and not a.deming_ratio > 0:
+        raise ValueError("--deming-ratio must be greater than 0")
+    history = load_history(a.history)
+    audit = audit_history(history)
+    fits = _fit_correlations(history, group_by, a.deming_ratio) if a.correlations else None  # antes del 1.er print
+    print(f"tramos: {audit.tramos}\nsupport types: {audit.support_types}\ninspections: {audit.inspections}")
+    print(f"findings: {len(audit.findings)}")
+    for k, n in sorted(Counter(f.kind for f in audit.findings).items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"finding: {k} ({n})")
+    for r in audit.readiness:
+        have = ", ".join(f"{k} {r.counts.get(k, 0)} of {m}" for k, m in r.minimums.items())
+        print(f"level {r.level} {r.item}: {'ready' if r.ready else 'not ready'} ({have})")
+    not_site = False
+    warns = Counter()
+    for r in fits or ():
+        if isinstance(r, tuple):
+            print(f"correlation {r[0]}: not fitted ({r[1]})")
+            not_site = True
+            continue
+        print(f"prior {r.kind}: {r.prior_correlation} [{r.prior_verification}]")
+        for f in rp.site_fits(r):  # la etiqueta (D1, D2…), nunca el dominio: puede ser la litología
+            print(f"correlation {r.kind} {f.label}: n {f.n}, labors {f.n_labors}, {f.status}, a {f.a:.4g}, "
+                  f"b {f.b:.4g}")
+            not_site |= f.status != "site"
+            warns.update({*r.warnings, *f.warnings})
+    for w, n in sorted(warns.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"warning: {w} ({n} fit{'' if n == 1 else 's'})")
+    if a.output:
+        for p in _save_history_outputs(a.output, audit, fits):
+            print(f"results: {p}")
+    if a.report:
+        rep = rp.build_history_report(audit, fits or (), history=history, lang=a.lang)
+        out = rp.write_docx(rep, a.report) if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if audit.findings or not_site else 0
+
+
 class _Parser(argparse.ArgumentParser):
     """Los errores de uso salen con 1 (2 queda para «terminó pero hay avisos»)."""
 
@@ -746,6 +850,18 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--profile", metavar="PE-DS024-2016", help="regulatory profile for art. 264 (pseudo-static "
                    "analysis of the overall slope)")
     c.set_defaults(fn=_le)
+    c = sub.add_parser("history", help="audit the mine's geomechanical history and fit site correlations (level 1)")
+    c.add_argument("history", metavar="HISTORICO.xlsx|CARPETA", help="the history template (.xlsx) or a folder of "
+                   "Tramos.csv, Tipos_sostenimiento.csv and Desempeno.csv")
+    c.add_argument("--correlations", action="store_true", help="fit RMR-Q, GSI-RMR and GSI-Q' (needs the ml extra)")
+    c.add_argument("--group-by", default="litologia", metavar="COL", help="domain column (default litologia; "
+                   "none = whole mine only)")
+    c.add_argument("--deming-ratio", type=float, metavar="R", help="error-variance ratio for the Deming line")
+    c.add_argument("-o", "--output", metavar="DIR", help="folder for history_findings.csv, site_correlations.csv "
+                   "and site_correlations.json")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_history)
     return p
 
 

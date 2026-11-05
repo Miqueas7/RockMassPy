@@ -472,6 +472,134 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
                             "en": "conservative: upper end of the range for a minimum and lower end for a maximum"},
     "policy_upper": {"es": "extremo alto de cada rango", "en": "upper end of each range"},
     "policy_lower": {"es": "extremo bajo de cada rango", "en": "lower end of each range"},
+    # --- histórico de la mina (Fase 4A: datos, auditoría, preparación y nivel 1) ---
+    "hist_title": {"es": "Histórico geomecánico y correlaciones del sitio",
+                   "en": "Geomechanical history and site correlations"},
+    "hist_subtitle": {"es": "Auditoría de ingesta y nivel 1", "en": "Ingestion audit and level 1"},
+    "hs_1": {"es": "Datos", "en": "Data"},
+    "hs_2": {"es": "Auditoría de ingesta", "en": "Ingestion audit"},
+    "hs_3": {"es": "Preparación por nivel", "en": "Readiness by level"},
+    "hs_4": {"es": "Nivel 1: correlaciones propias del sitio", "en": "Level 1: site correlations"},
+    "hs_5": {"es": "Limitaciones", "en": "Limitations"},
+    "hist_scope": {
+        "es": "Este informe resume el histórico geomecánico de la mina con conteos: lo que trae cada hoja, lo que la "
+              "auditoría encontró, qué nivel del modelo predictivo tiene datos suficientes y las correlaciones propias "
+              "del sitio. No nombra el archivo de entrada; los dominios van con códigos (D1, D2…).",
+        "en": "This report summarizes the mine's geomechanical history with counts: what each sheet holds, what the "
+              "audit found, which level of the predictive model has enough data and the site's own correlations. It "
+              "does not name the input file; domains go by codes (D1, D2…).",
+    },
+    "cap_hist_data": {"es": "Contenido del histórico", "en": "History contents"},
+    "h_item": {"es": "Concepto", "en": "Item"},
+    "hd_tramos": {"es": "Tramos (hoja Tramos)", "en": "Tramos (sheet Tramos)"},
+    "hd_types": {"es": "Tipos de sostenimiento (hoja Tipos_sostenimiento)",
+                 "en": "Support types (sheet Tipos_sostenimiento)"},
+    "hd_inspections": {"es": "Inspecciones (hoja Desempeno)", "en": "Inspections (sheet Desempeno)"},
+    "hd_with_insp": {"es": "Tramos con inspección", "en": "Tramos with inspections"},
+    "hd_without_insp": {"es": "Tramos sin inspección (no entran al nivel 3)",
+                        "en": "Tramos without inspections (left out of level 3)"},
+    "hd_years_eval": {"es": "Años con evaluación (años distintos)", "en": "Years with evaluations (distinct years)"},
+    "hd_years_insp": {"es": "Años con inspección (años distintos)", "en": "Years with inspections (distinct years)"},
+    "cap_hist_kinds": {"es": "Hallazgos por tipo", "en": "Findings by kind"},
+    "h_kind": {"es": "Tipo", "en": "Kind"},
+    "h_findings": {"es": "Hallazgos", "en": "Findings"},
+    "cap_hist_findings": {"es": "Hallazgos de la auditoría", "en": "Audit findings"},
+    "h_sheet": {"es": "Hoja", "en": "Sheet"},
+    "h_row": {"es": "Fila", "en": "Row"},
+    "h_message": {"es": "Mensaje", "en": "Message"},
+    "hist_no_findings": {"es": "La auditoría no encontró hallazgos.", "en": "The audit found nothing."},
+    "hist_audit_text": {
+        "es": "La auditoría recalcula Q y el RMR89 básico desde sus componentes, busca registros no independientes "
+              "(progresivas que se solapan, componentes repetidos en tramos seguidos) y revisa la coherencia entre "
+              "hojas. Avisa, nunca bloquea.",
+        "en": "The audit recomputes Q and the basic RMR89 from their components, looks for records that are not "
+              "independent (overlapping chainages, repeated components in consecutive tramos) and checks the "
+              "coherence between sheets. It warns, it never blocks.",
+    },
+    "hist_readiness_text": {
+        "es": "Cada nivel se compara con su mínimo: nivel 1, 30 pares de 5 labores por tipo de par; nivel 2, 10 "
+              "tramos de 5 labores por tipo instalado; nivel 3, 10 eventos de la clase menor por parámetro y 3 zonas. "
+              "Estos mínimos son una decisión de diseño (heurísticas del spec), no valores publicados; la simulación "
+              "de la fase 4C los confirmará o los cambiará. Solo cuentan las filas completas.",
+        "en": "Each level is compared with its minimum: level 1, 30 pairs from 5 excavations per pair kind; level 2, 10 "
+              "tramos from 5 excavations per installed type; level 3, 10 minority-class events per parameter and 3 zones. "
+              "These minimums are a design decision (heuristics of the spec), not published values; the simulation "
+              "of phase 4C will confirm or change them. Only complete rows count.",
+    },
+    "cap_hist_readiness": {"es": "Preparación por nivel", "en": "Readiness by level"},
+    "h_level": {"es": "Nivel", "en": "Level"},
+    "h_available": {"es": "Disponible", "en": "Available"},
+    "h_minimum_dd": {"es": "Mínimo (decisión de diseño)", "en": "Minimum (design decision)"},
+    "h_lacking": {"es": "Falta", "en": "Lacking"},
+    "h_ready": {"es": "Estado", "en": "Status"},
+    "ready_yes": {"es": "listo", "en": "ready"},
+    "ready_no": {"es": "no listo", "en": "not ready"},
+    "hist_l1_none": {"es": "No se ajustaron correlaciones (en la CLI, con --correlations).",
+                     "en": "No correlations were fitted (in the CLI, with --correlations)."},
+    "hist_l1_text": {
+        "es": "Cada par se ajusta por dominio (D1, D2…, por defecto la litología; Somodi et al. 2021 [V2]) y para "
+              "toda la mina. La OLS de Y sobre X con su intervalo de predicción al 95 % es la que predice (Warton et "
+              "al. 2006 [V2]); los IC de a y b salen de un bootstrap que remuestrea labores, no filas (Efron y "
+              "Tibshirani 1994 [V2]; Roberts et al. 2017 [V2]); Deming solo se calcula con la razón de varianzas de "
+              "error (Carroll et al. 2006 [V2]). El bayesiano parte de la correlación global como prior. Estado "
+              "«sitio»: 30 pares de 5 labores y el IC de la pendiente dentro de ±25 % de la OLS; «inestable»: cumple "
+              "el mínimo, pero el IC es ancho; «no calibrada al sitio»: bajo el mínimo, solo el bayesiano, cerca de "
+              "la global. El umbral de ±25 % y la fuerza del prior son decisiones de diseño.",
+        "en": "Each pair is fitted by domain (D1, D2…, lithology by default; Somodi et al. 2021 [V2]) and for the "
+              "whole mine. The OLS of Y on X with its 95 % prediction interval is the one that predicts (Warton et "
+              "al. 2006 [V2]); the CIs of a and b come from a bootstrap that resamples excavations, not rows (Efron and "
+              "Tibshirani 1994 [V2]; Roberts et al. 2017 [V2]); Deming is computed only with the error-variance "
+              "ratio (Carroll et al. 2006 [V2]). The Bayesian fit starts from the global correlation as prior. Status "
+              "\"site\": 30 pairs from 5 excavations and the slope CI within ±25 % of the OLS; \"unstable\": it meets the "
+              "minimum but the CI is wide; \"not calibrated to the site\": below the minimum, Bayesian only, close "
+              "to the global one. The ±25 % threshold and the prior strength are design decisions.",
+    },
+    "hist_prior": {
+        "es": "Prior: {method} [{mark}], a = {a:.4g}, b = {b:.4g}; desviación a priori de a {sd_a:.3g} y del nivel "
+              "{sd_b:.3g} puntos, σ a priori {sigma:.3g} (fuerza del prior: decisión de diseño).",
+        "en": "Prior: {method} [{mark}], a = {a:.4g}, b = {b:.4g}; prior SD of a {sd_a:.3g} and of the level "
+              "{sd_b:.3g} points, prior σ {sigma:.3g} (prior strength: design decision).",
+    },
+    "cap_hist_fits": {"es": "Ajustes: {form}", "en": "Fits: {form}"},
+    "h_fit": {"es": "Ajuste", "en": "Fit"},
+    "h_labors": {"es": "Labores", "en": "Excavations"},
+    "h_a_ci": {"es": "a (IC 95 %)", "en": "a (95 % CI)"},
+    "h_b_ci": {"es": "b (IC 95 %)", "en": "b (95 % CI)"},
+    "fit_mine": {"es": "mina", "en": "mine"},
+    "fit_site": {"es": "sitio", "en": "site"},
+    "fit_unstable": {"es": "inestable", "en": "unstable"},
+    "fit_not_calibrated": {"es": "no calibrada al sitio", "en": "not calibrated to the site"},
+    "method_ols": {"es": "OLS", "en": "OLS"},
+    "method_bayesian": {"es": "bayesiano", "en": "Bayesian"},
+    "hist_deming": {"es": "Deming (mina): a = {a:.4g}, b = {b:.4g}.", "en": "Deming (mine): a = {a:.4g}, b = {b:.4g}."},
+    "hist_no_deming": {"es": "Deming (mina): no calculado; {reason}.", "en": "Deming (mine): not computed; {reason}."},
+    "hist_not_fitted": {"es": "No ajustado: {reason}.", "en": "Not fitted: {reason}."},
+    "cap_hist_warnings": {"es": "Avisos del ajuste y cantidad de ajustes que los tienen",
+                          "en": "Fit warnings and number of fits that have them"},
+    "h_fits": {"es": "Ajustes", "en": "Fits"},
+    "fig_hist_corr": {"es": "Pares del sitio, correlación de la mina e intervalo de predicción: {form}",
+                      "en": "Site pairs, mine correlation and prediction interval: {form}"},
+    "cap_hist_methods": {"es": "Métodos del nivel 1 y su respaldo", "en": "Level 1 methods and their backing"},
+    "hm_ols": {"es": "OLS con intervalo de predicción al 95 %", "en": "OLS with 95 % prediction interval"},
+    "hm_boot": {"es": "Bootstrap por labor (2000 réplicas, semilla fija)",
+                "en": "Bootstrap by excavation (2000 replicates, fixed seed)"},
+    "hm_deming": {"es": "Deming (con la razón de varianzas de error)", "en": "Deming (with the error-variance ratio)"},
+    "hm_bayes": {"es": "Bayesiano conjugado normal–gamma inversa con la correlación global como prior",
+                 "en": "Conjugate normal–inverse-gamma Bayesian fit with the global correlation as prior"},
+    "hm_dd": {"es": "decisión de diseño", "en": "design decision"},
+    "hm_prior_strength": {"es": "fuerza del prior", "en": "prior strength"},
+    "hist_limits": {
+        "es": "Las correlaciones son del sitio y de su rango observado: fuera de ese rango no valen. Un tramo no es "
+              "independiente de sus vecinos de la misma labor; por eso el bootstrap es por labor. El histórico "
+              "registra lo que la mina midió y decidió, con sus sesgos de selección y de observador. Los mínimos, "
+              "el umbral de estabilidad y la fuerza del prior son decisiones de diseño por confirmar. El informe no "
+              "trae los niveles 2 y 3 (fase 4B y 4C).",
+        "en": "The correlations belong to the site and to its observed range: outside that range they do not hold. "
+              "A tramo is not independent of its neighbours in the same excavation; that is why the bootstrap is by "
+              "excavation. The history records what the mine measured and decided, with its selection and observer "
+              "biases. The minimums, the stability threshold and the prior strength are design decisions to be "
+              "confirmed. The report does not cover levels 2 and 3 (phases 4B and 4C).",
+    },
 }
 
 
