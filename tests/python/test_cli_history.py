@@ -330,7 +330,9 @@ def test_level_options_checked_before_reading(hist, tmp_path, capsys, monkeypatc
     assert main(["history", src, "--model-output", "m.json"]) == 1
     assert main(["history", src, "--performance", "--model-output", str(tmp_path / f"{SENT}.txt")]) == 1
     assert main(["history", src, "--performance", "--model-output", str(tmp_path / SENT / "m.json")]) == 1
-    assert main(["history", src, "--performance", "--quality", "gsi"]) == 1  # argparse
+    with pytest.raises(SystemExit) as e:  # argparse sale con 1 (_Parser)
+        main(["history", src, "--performance", "--quality", "gsi"])
+    assert e.value.code == 1
     cap = sin_centinela(capsys)
     assert cap.out == ""
     errs = [x for x in cap.err.splitlines() if x.startswith("error: ")]

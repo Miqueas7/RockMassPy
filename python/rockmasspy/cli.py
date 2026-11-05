@@ -639,7 +639,9 @@ def _print_validation(level: str, metric: str, report, fmt: str) -> None:
 
 def _print_practice(a) -> bool:
     """Líneas del nivel 2; True si hay que revisar (práctica incoherente, no significativa o datos insuficientes)."""
-    print(f"practice: n {a.n}, labors {a.labors}, types {', '.join(a.types)}, {a.status}")
+    ref = a.design.labor_levels[0] if a.design.labor_levels else None  # los tipo_labor=… son contrastes contra él
+    print(f"practice: n {a.n}, labors {a.labors}, types {', '.join(a.types)}, {a.status}"
+          + ("" if ref is None else f", reference tipo_labor {ref}"))
     for name, v in a.verdicts.items():
         c = a.coefficients.get(name)
         coef = "" if c is None else f" (beta {c.value:.3f}, 95% CI {c.ci_low:.3f}; {c.ci_high:.3f})"
@@ -648,14 +650,14 @@ def _print_practice(a) -> bool:
     print(f"practice beyond the Q chart: {'yes' if a.beyond_chart else 'no'} (describes the practice, "
           "it does not recommend)")
     n_sets = sum(x.conformal_set is not None for x in a.tramos)
-    cov = getattr(a, "coverage", getattr(a, "calibration_coverage", None))  # el campo puede cambiar de nombre
-    print(f"practice outside the conformal set: {len(a.outside_set)} of {n_sets} tramos (level {a.conformal_level:g}"
-          + ("" if cov is None else f", coverage {cov:.3f}") + ")")
+    print(f"practice outside the conformal set: {len(a.outside_set)} of {n_sets} tramos "
+          f"(level {a.conformal_level:g})")
     cc = a.concordance
     print("practice concordance: none" if cc is None else
           f"practice concordance: n {cc.n}, kappa {'-' if cc.kappa is None else f'{cc.kappa:.3f}'}")
     for w in a.warnings:
-        print(f"practice warning: {w}")
+        if w not in a.validation.warnings:  # ya salieron como «validation warning»
+            print(f"practice warning: {w}")
     return a.status != "ready" or any(v != "coherent" for v in a.verdicts.values())
 
 
@@ -671,8 +673,10 @@ def _print_performance(m) -> bool:
     for name, (lo, hi) in zip(coefs, m.coef_ci):
         bound = " (sign bound active)" if name in m.active_bounds else ""
         print(f"performance coefficient {name}: {coefs[name]:.4g} (95% CI {lo:.4g}; {hi:.4g}){bound}")
+    shown = m.validation.warnings if m.validation is not None else ()
     for w in m.warnings:
-        print(f"performance warning: {w}")
+        if w not in shown:
+            print(f"performance warning: {w}")
     return m.calibration != "site"
 
 
@@ -811,7 +815,7 @@ class _PositionedPractice:
             return self.audit.conformal_set(tramo)
         except ValueError as e:
             raise ValueError(f"tramo at position {i + 1}: practice model: "
-                             f"{re.sub(r'^tramo at position 0: ', '', str(e))}") from None
+                             f"{re.sub(r'^tramo( at position \d+)?: ', '', str(e))}") from None
 
 
 def _new_tramos(path):

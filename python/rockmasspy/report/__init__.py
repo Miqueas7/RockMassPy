@@ -1219,9 +1219,10 @@ def _validation_table(caption_key, report, refs, fmt, lang) -> list:
     return out
 
 
-def _warnings_table(warnings, lang) -> list:
-    return [Table(t("cap_level_warnings", lang), (t("h_warning", lang),), tuple((w,) for w in warnings))] \
-        if warnings else []
+def _warnings_table(warnings, validation, lang) -> list:
+    """Avisos del nivel sin repetir los de la validación (ya van en su tabla)."""
+    ws = [w for w in warnings if validation is None or w not in validation.warnings]
+    return [Table(t("cap_level_warnings", lang), (t("h_warning", lang),), tuple((w,) for w in ws))] if ws else []
 
 
 def _dd_table(rows, lang) -> Table:
@@ -1239,7 +1240,8 @@ def _practice_section(number, a, lang) -> Section:
                   (t("l2_types", lang), ", ".join(a.types)),
                   (t("l2_status", lang), t("l2_ready" if a.status == "ready" else "l2_insufficient", lang)),
                   (t("l2_missing", lang), ", ".join(a.missing_types) or none),
-                  (t("l2_dropped", lang), ", ".join(a.dropped_columns) or none))),
+                  (t("l2_dropped", lang), ", ".join(a.dropped_columns) or none),
+                  (t("l2_reference", lang), a.design.labor_levels[0] if a.design.labor_levels else none))),
               Table(t("cap_l2_coef", lang), (t("h_variable", lang), t("h_coef", lang), t("h_se", lang),
                                              t("h_ci95", lang), t("h_verdict", lang)),
                     tuple((name, _f(c.value), _f(c.se), f"{_f(c.ci_low)}; {_f(c.ci_high)}",
@@ -1259,7 +1261,7 @@ def _practice_section(number, a, lang) -> Section:
                          tuple((r, *map(str, cc.matrix[i])) for i, r in enumerate(cc.types)))]
     n_sets = sum(x.conformal_set is not None for x in a.tramos)
     blocks.append(Paragraph(t("l2_conformal", lang).format(level=a.conformal_level, q=_f(a.conformal_threshold),
-                                                            cov=_f(_coverage(a)), k=len(a.outside_set), n=n_sets)))
+                                                            k=len(a.outside_set), n=n_sets)))
     outside = [x for x in a.tramos if x.outside]
     blocks.append(Table(t("cap_l2_outside", lang), ("id_tramo", t("h_installed", lang), t("h_most_probable", lang),
                                                     t("h_conformal_set", lang)),
@@ -1271,13 +1273,8 @@ def _practice_section(number, a, lang) -> Section:
         (t("dd_conformal", lang), f"{a.conformal_level:.0%}"),
         (t("dd_gain_ci", lang), t("dd_gain_ci_v", lang)),
         (t("dd_discarded", lang), f"≤ {MAX_DISCARDED_FRACTION_DECISION:.0%}")), lang))
-    blocks += _warnings_table(a.warnings, lang)
+    blocks += _warnings_table(a.warnings, a.validation, lang)
     return Section(number, t("hs_l2", lang), tuple(blocks))
-
-
-def _coverage(a) -> float:
-    """Cobertura del conjunto conforme; el campo puede llamarse `coverage` o `calibration_coverage`."""
-    return getattr(a, "coverage", getattr(a, "calibration_coverage", float("nan")))
 
 
 def _iso_blocks(m, history, exposure_days, lang, figures) -> list:
@@ -1367,7 +1364,7 @@ def _performance_section(number, m, history, threshold, exposure_days, lang, fig
                    (t("dd_interval", lang), t("dd_interval_v", lang)),
                    (t("dd_maha", lang), t("dd_maha_v", lang).format(p=MAHALANOBIS_PERCENTILE)),
                    (t("dd_threshold", lang), t("dd_threshold_v", lang))), lang)]
-    blocks += _warnings_table(m.warnings, lang)
+    blocks += _warnings_table(m.warnings, m.validation, lang)
     return Section(number, t("hs_l3", lang), tuple(blocks))
 
 
@@ -1391,7 +1388,7 @@ def _level_methods(practice, performance, lang) -> tuple[MethodRef, ...]:
                 MethodRef("grouped conformal set", "V2", "Angelopoulos y Bates (2023)" if es
                           else "Angelopoulos and Bates (2023)")]
     if performance is not None:
-        out += [MethodRef("MAP logistic, Cauchy prior, Laplace", "V2", "Gelman et al. (2008)"),
+        out += [MethodRef("MAP model with sign bounds, Cauchy prior, Laplace", "V2", "Gelman et al. (2008)"),
                 MethodRef("calibration curve, intercept and slope", "V2", "Van Calster et al. (2019)"),
                 MethodRef("isoprobability contours", "V2", "Mawdesley et al. (2001)")]
     out += [MethodRef("grouped cross-validation", "V2", "Roberts et al. (2017)"),

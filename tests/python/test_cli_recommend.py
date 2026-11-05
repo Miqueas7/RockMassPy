@@ -106,12 +106,17 @@ def test_practice_from_adds_the_conformal_set(casos, capsys):
     assert all("; practice set " in x for x in _tramo_lines(cap.out))
 
 
-def test_required_arguments_exit_1(casos, capsys):
-    base = [casos / "nuevos.xlsx", "--model", casos / "site.json"]
-    assert run(capsys, *base, "--exposure-days", 365)[0] == 1
-    assert run(capsys, *base, "--threshold", 0.3)[0] == 1
-    code, cap = run(capsys, casos / "nuevos.xlsx", "--threshold", 0.3, "--exposure-days", 365)
-    assert code == 1 and "--model" in cap.err
+@pytest.mark.parametrize("falta, args", [
+    ("--threshold", ["--model", "M", "--exposure-days", "365"]),
+    ("--exposure-days", ["--model", "M", "--threshold", "0.3"]),
+    ("--model", ["--threshold", "0.3", "--exposure-days", "365"])])
+def test_required_arguments_exit_1(capsys, falta, args):
+    """Umbral, horizonte y modelo son obligatorios: argparse sale con 1 (_Parser) y no lee nada."""
+    with pytest.raises(SystemExit) as e:
+        main(["recommend", "nuevos.xlsx", *args])
+    assert e.value.code == 1
+    err = capsys.readouterr().err
+    assert f"error: the following arguments are required: {falta}" in err
 
 
 def test_values_and_outputs_checked_before_reading(casos, capsys, monkeypatch, tmp_path):

@@ -683,6 +683,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l2_missing": {"es": "Tipos bajo el mínimo", "en": "Types below the minimum"},
     "l2_dropped": {"es": "Variables fuera del ajuste (colineales o constantes)",
                    "en": "Variables left out of the fit (collinear or constant)"},
+    "l2_reference": {"es": "Tipo de labor de referencia (los tipo_labor=… son contrastes contra él)",
+                     "en": "Reference excavation type (the tipo_labor=… terms are contrasts against it)"},
     "l2_ready": {"es": "listo", "en": "ready"},
     "l2_insufficient": {"es": "datos insuficientes", "en": "insufficient data"},
     "cap_l2_coef": {"es": "Coeficientes del logit acumulado (ajuste final) y veredictos de signo",
@@ -703,17 +705,19 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     },
     "cap_l2_val": {"es": "Kappa ponderado cuadrático fuera de pliegue por partición",
                    "en": "Out-of-fold quadratic weighted kappa by partition"},
-    "l2_beyond_yes": {"es": "En la partición por labor, la práctica es más predecible que la carta Q (el IC 95 % de "
-                            "la mejora del kappa sobre la línea base NGI queda sobre cero). Esto no habilita ninguna "
-                            "recomendación: solo dice que la mina sigue un criterio propio y consistente.",
-                      "en": "In the excavation partition, the practice is more predictable than the Q chart (the "
-                            "95 % CI of the kappa gain over the NGI baseline is above zero). This enables no "
-                            "recommendation: it only says the mine follows a consistent criterion of its own."},
-    "l2_beyond_no": {"es": "En la partición por labor, la práctica no es más predecible que la carta Q (el IC 95 % "
-                           "de la mejora sobre la línea base NGI toca el cero, o la partición no se pudo evaluar).",
-                     "en": "In the excavation partition, the practice is not more predictable than the Q chart (the "
-                           "95 % CI of the gain over the NGI baseline reaches zero, or the partition could not be "
-                           "evaluated)."},
+    "l2_beyond_yes": {"es": "La práctica es más predecible que la carta Q y que el ficticio: en las particiones por "
+                            "labor y por zona fuera, el IC 95 % de la mejora del kappa queda sobre cero, y la temporal "
+                            "no sale peor. Esto no habilita ninguna recomendación: solo dice que la mina sigue un "
+                            "criterio propio y consistente.",
+                      "en": "The practice is more predictable than the Q chart and the dummy: in the excavation and "
+                            "zone-left-out partitions the 95 % CI of the kappa gain is above zero, and the temporal "
+                            "one is not worse. This enables no recommendation: it only says the mine follows a "
+                            "consistent criterion of its own."},
+    "l2_beyond_no": {"es": "La práctica no es más predecible que la carta Q y el ficticio en las particiones por "
+                           "labor y por zona fuera (los motivos van en la tabla), o alguna no se pudo evaluar.",
+                     "en": "The practice is not more predictable than the Q chart and the dummy in the excavation "
+                           "and zone-left-out partitions (the reasons are in the table), or one could not be "
+                           "evaluated."},
     "cap_l2_conc": {"es": "Concordancia entre el sostenimiento recomendado y el instalado (tramos)",
                     "en": "Agreement between recommended and installed support (tramos)"},
     "l2_conc_text": {"es": "{n} tramos traen los dos; kappa ponderado cuadrático {kappa}.",
@@ -721,14 +725,14 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l2_conc_none": {"es": "No hay tramos con sostenimiento recomendado e instalado de tipos definidos.",
                      "en": "No tramo has both a recommended and an installed support of defined types."},
     "l2_conformal": {
-        "es": "Conjunto conforme agrupado al {level:.0%} (Angelopoulos y Bates 2023 [V2]), con probabilidades fuera "
-              "de pliegue por labor: umbral del puntaje {q}, cobertura observada {cov}. {k} de {n} tramos tienen "
-              "un tipo instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa "
-              "condición. La cobertura supone labores intercambiables; con zonas muy distintas no se cumple.",
-        "en": "Grouped conformal set at {level:.0%} (Angelopoulos and Bates 2023 [V2]), with out-of-fold "
-              "probabilities by excavation: score threshold {q}, observed coverage {cov}. {k} of {n} tramos have an "
-              "installed type outside their set: the mine does not usually install that in that condition. The "
-              "coverage assumes exchangeable excavations; with very different zones it does not hold.",
+        "es": "Conjunto conforme agrupado al {level:.0%} (Angelopoulos y Bates 2023 [V2]): el umbral del puntaje "
+              "({q}) sale de las probabilidades fuera de pliegue por labor. {k} de {n} tramos tienen un tipo "
+              "instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa condición. La "
+              "cobertura es aproximada y supone labores intercambiables; con zonas muy distintas no se cumple.",
+        "en": "Grouped conformal set at {level:.0%} (Angelopoulos and Bates 2023 [V2]): the score threshold ({q}) "
+              "comes from the out-of-fold probabilities by excavation. {k} of {n} tramos have an installed type "
+              "outside their set: the mine does not usually install that in that condition. The coverage is "
+              "approximate and assumes exchangeable excavations; with very different zones it does not hold.",
     },
     "cap_l2_outside": {"es": "Tramos con el tipo instalado fuera del conjunto conforme",
                        "en": "Tramos with the installed type outside the conformal set"},
@@ -743,18 +747,20 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "dd_discarded": {"es": "Réplicas degeneradas admitidas", "en": "Degenerate replicates allowed"},
     # nivel 3
     "l3_text": {
-        "es": "P(falla) por tramo con una logística bayesiana MAP: prior Cauchy (0; 2,5) sobre las variables "
-              "estandarizadas e intercepto Cauchy (0; 10) (Gelman et al. 2008 [V2]), covarianza de Laplace y "
-              "restricciones de signo: peor macizo, más luz, más exposición y más profundidad no bajan P(falla); "
-              "más sostenimiento no la sube. Un tramo falla si alguna inspección dice Falla o Reparado (por "
-              "confirmar); la exposición va desde la instalación hasta la primera falla o la última inspección. "
-              "La línea base es la misma logística con la categoría de la carta Q NGI y ln exposición, sin cotas.",
-        "en": "P(failure) per tramo with a MAP Bayesian logistic regression: Cauchy (0, 2.5) prior on the "
-              "standardized variables and Cauchy (0, 10) intercept (Gelman et al. 2008 [V2]), Laplace covariance and "
-              "sign constraints: poorer rock, larger span, longer exposure and greater depth do not lower "
-              "P(failure); more support does not raise it. A tramo fails if any inspection says Falla or Reparado "
-              "(to be confirmed); exposure runs from installation to the first failure or the last inspection. The "
-              "baseline is the same logistic regression with the NGI Q chart category and ln exposure, unbounded.",
+        "es": "P(falla) por tramo en un horizonte de exposición, con un modelo bayesiano MAP: prior Cauchy débil "
+              "sobre las variables estandarizadas (Gelman et al. 2008 [V2]), covarianza de Laplace y restricciones "
+              "de signo: peor macizo, más luz y más profundidad no bajan P(falla); más sostenimiento no la sube. La "
+              "exposición entra en el modelo, así que P(falla) depende del horizonte que se pida. Un tramo falla si "
+              "alguna inspección dice Falla o Reparado (por confirmar); la exposición va desde la instalación hasta "
+              "la primera falla o la última inspección. La línea base es el mismo modelo con la categoría de la "
+              "carta Q NGI como única variable del macizo y la misma exposición, sin cotas.",
+        "en": "P(failure) per tramo over an exposure horizon, with a MAP Bayesian model: weak Cauchy prior on the "
+              "standardized variables (Gelman et al. 2008 [V2]), Laplace covariance and sign constraints: poorer "
+              "rock, larger span and greater depth do not lower P(failure); more support does not raise it. Exposure "
+              "enters the model, so P(failure) depends on the horizon asked for. A tramo fails if any inspection "
+              "says Falla or Reparado (to be confirmed); exposure runs from installation to the first failure or "
+              "the last inspection. The baseline is the same model with the NGI Q chart category as its only rock "
+              "variable and the same exposure, unbounded.",
     },
     "l3_rule_val": {
         "es": "Regla de calibración: «propio del sitio» exige cumplir el mínimo del nivel 3 y que las particiones "
@@ -789,8 +795,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "cal_not_calibrated": {"es": "no calibrado al sitio", "en": "not calibrated to the site"},
     "l3_no_fit": {"es": "No hay ajuste: todos los tramos usables tienen el mismo resultado.",
                   "en": "There is no fit: every usable tramo has the same outcome."},
-    "cap_l3_coef": {"es": "Coeficientes de la logística MAP (escala original) con su IC 95 % de Laplace",
-                    "en": "MAP logistic coefficients (original scale) with their 95 % Laplace CI"},
+    "cap_l3_coef": {"es": "Coeficientes del modelo MAP (escala original) con su IC 95 % de Laplace",
+                    "en": "MAP model coefficients (original scale) with their 95 % Laplace CI"},
     "sign_up": {"es": "≥ 0", "en": "≥ 0"},
     "sign_down": {"es": "≤ 0", "en": "≤ 0"},
     "sign_free": {"es": "libre", "en": "free"},
@@ -828,14 +834,18 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "tipo de la mina, del más liviano al más pesado, y se elige el más liviano cuyo límite superior queda "
               "bajo el umbral. El umbral lo fija el ingeniero: es obligatorio y no tiene valor por defecto, igual "
               "que el horizonte de exposición (rockmass recommend --threshold P --exposure-days D). Solo con el "
-              "nivel «propio del sitio» se elige un tipo. Cada recomendación trae las tres razones principales, la "
+              "nivel «propio del sitio» y sin motivo de bloqueo (extrapolación, tipos sin historia suficiente, "
+              "efecto del sostenimiento no significativo o cota activa) se elige un tipo; los motivos van con cada "
+              "recomendación. Cada recomendación trae las tres razones principales, la "
               "alerta de extrapolación y las columnas vacías decision_ingeniero y motivo, donde el ingeniero "
               "registra lo que decidió; con el desempeño posterior, alimentan el siguiente ajuste.",
         "en": "Recommendation rule: for a new tramo, P(failure) with its 90 % interval is computed for every "
               "support type of the mine, lightest to heaviest, and the lightest type whose upper bound stays below "
               "the threshold is chosen. The engineer sets the threshold: it is mandatory and has no default, like "
               "the exposure horizon (rockmass recommend --threshold P --exposure-days D). A type is chosen only at "
-              "the \"site\" level. Each recommendation carries the three main reasons, the extrapolation alert and "
+              "the \"site\" level and with no blocking reason (extrapolation, types without enough history, a "
+              "non-significant support effect or an active bound); the reasons go with each recommendation. Each "
+              "recommendation carries the three main reasons, the extrapolation alert and "
               "the empty columns decision_ingeniero and motivo, where the engineer records the decision; with the "
               "later performance, they feed the next fit.",
     },
@@ -851,8 +861,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "dd_signs_v": {"es": "por cotas (L-BFGS-B); el tipo de labor queda libre",
                    "en": "by bounds (L-BFGS-B); excavation type is free"},
     "dd_baseline": {"es": "Línea base de nivel 0", "en": "Level 0 baseline"},
-    "dd_baseline_v": {"es": "categoría de la carta Q NGI + ln exposición, sin cotas",
-                      "en": "NGI Q chart category + ln exposure, unbounded"},
+    "dd_baseline_v": {"es": "categoría de la carta Q NGI con la misma exposición, sin cotas",
+                      "en": "NGI Q chart category with the same exposure, unbounded"},
     "dd_temporal": {"es": "Partición temporal", "en": "Temporal partition"},
     "dd_temporal_v": {"es": "no inferioridad (mejora puntual ≥ 0)", "en": "non-inferiority (point gain ≥ 0)"},
     "dd_interval": {"es": "Intervalo de P(falla) y límite usado", "en": "P(failure) interval and bound used"},
