@@ -568,6 +568,54 @@ las coordenadas ni la litología, ni tampoco el nombre del archivo de entrada. L
 `id_tramo` y el dominio: guárdalos en la carpeta protegida de la mina, junto con el histórico. Mira
 `examples/12-historico-prediccion/`.
 
+### Auditoría de la práctica (nivel 2) y modelo de falla con recomendación (nivel 3)
+
+```python
+from rockmasspy.predictive import audit_practice, fit_performance, recommend, save_model
+
+practica = audit_practice(h)                  # logit ordinal del tipo instalado: describe, nunca recomienda
+modelo = fit_performance(h)                   # "site", "partial" o "not_calibrated"
+recs = recommend(modelo, tramos_nuevos, threshold=0.10, exposure_days=365, practice=practica)
+save_model(modelo, "modelo.json")             # coeficientes, rangos y conteos; nunca filas ni ids
+```
+
+- **Nivel 2:**
+  - Ajusta un logit acumulado del tipo de sostenimiento instalado sobre ln Q, ln De (luz/ESR), vida útil y tipo de
+    labor.
+  - Dice si la práctica es coherente con la calidad del macizo y con la luz, y si es más predecible que la carta Q
+    NGI.
+  - Marca los tramos cuyo tipo instalado queda fuera de su conjunto conforme al 90 %.
+- **Nivel 3:**
+  - Modela la tasa de falla con un riesgo constante y una fragilidad gamma por labor; la exposición entra como
+    *offset*.
+  - Tiene restricciones de signo: peor macizo o más luz nunca bajan el riesgo, y más sostenimiento nunca lo sube.
+  - Usa una covarianza robusta agrupada por zona.
+  - La P(falla en H días) de una labor nueva es 1 − (1 + θλH)^(−1/θ).
+- **Validación:**
+  - Particiones: por labor, dejando una zona fuera, y temporal.
+  - Referencias: un ficticio de tasa constante y la línea base de la categoría NGI, con bootstrap por labor.
+  - El modelo queda `site` solo si las particiones por labor y por zona superan a las dos referencias (IC 95 % de la
+    mejora de la devianza de Poisson sobre cero y sin pliegues fallidos), y la temporal no sale peor.
+- **Recomendación:**
+  - Elige el tipo más liviano cuyo límite superior (λ superior y el cuantil de la fragilidad, para una labor nueva)
+    queda bajo el umbral.
+  - El umbral y el horizonte los fija el ingeniero: no hay valores por defecto.
+  - No se elige nada si el modelo no es `site`, si el tramo extrapola, si un tipo tiene poca historia, si el efecto
+    del sostenimiento no está identificado, o si queda activa una restricción de signo en la calidad o en la luz. Las
+    opciones se muestran igual, con el motivo.
+
+```bash
+rockmass history historico.xlsx --practice --performance --model-output modelo.json --output resultados/ \
+    --threshold 0.10 --exposure-days 365 --report historico.docx
+rockmass recommend tramos_nuevos.xlsx --model modelo.json --threshold 0.10 --exposure-days 365 \
+    --practice-from historico.xlsx --output recomendaciones.csv
+```
+
+`recommend` imprime cada tramo por su posición. El `recomendaciones.csv` trae el `id_tramo` y dos columnas vacías,
+`decision_ingeniero` y `motivo`, donde el ingeniero anota lo que decidió. Los mínimos de datos por nivel se
+comprobaron por simulación (`docs/investigacion/SIMULACION_MINIMOS.md` en el repositorio). La librería recomienda; el
+ingeniero decide.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
