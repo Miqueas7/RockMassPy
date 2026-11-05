@@ -12,7 +12,9 @@ except ImportError as e:  # pragma: no cover - el mensaje se prueba simulando la
 
 from .stats import (BayesLinearFit, BootstrapResult, DemingFit, OlsFit, bayes_linear_fit,  # noqa: E402
                     deming_fit, group_bootstrap, ols_fit)
-from .synthetic import SyntheticTruth, save_history_xlsx, synthetic_history  # noqa: E402
+# reexportada: vive en history porque no necesita numpy
+from ..history import save_history_xlsx  # noqa: E402
+from .synthetic import SyntheticTruth, synthetic_history  # noqa: E402
 
 __all__ = ["BayesLinearFit", "BootstrapResult", "DemingFit", "OlsFit", "bayes_linear_fit", "deming_fit",
            "group_bootstrap", "ols_fit", "SyntheticTruth", "save_history_xlsx", "synthetic_history"]

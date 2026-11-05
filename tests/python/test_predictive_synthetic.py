@@ -3,15 +3,15 @@
 import dataclasses
 import math
 import re
+from collections import Counter
 
 import pytest
 
 np = pytest.importorskip("numpy")
 pytest.importorskip("scipy")
 
-from rockmasspy.history import audit_history, labor_key, load_history, tramo_outcomes  # noqa: E402
-from rockmasspy.predictive import (SyntheticTruth, group_bootstrap, ols_fit, save_history_xlsx,  # noqa: E402
-                                   synthetic_history)
+from rockmasspy.history import audit_history, labor_key, load_history, save_history_xlsx, tramo_outcomes  # noqa: E402
+from rockmasspy.predictive import SyntheticTruth, group_bootstrap, ols_fit, synthetic_history  # noqa: E402
 from rockmasspy.predictive.synthetic import LITHOLOGIES  # noqa: E402
 
 
@@ -29,11 +29,23 @@ def test_misma_semilla_mismo_historico_y_otra_semilla_otro():
 
 def test_tamano_y_codigos():
     h, _ = synthetic_history(n_zones=3, labors_per_zone=2, tramos_per_labor=4, seed=1)
-    assert len(h.tramos) == 24
     assert {t.zona_nivel for t in h.tramos} == {"Z1", "Z2", "Z3"}
     assert {t.labor_codigo for t in h.tramos} == {f"L{i:03d}" for i in range(1, 7)}
-    assert [t.id_tramo for t in h.tramos] == [f"T{i:04d}" for i in range(1, 25)]
+    assert [t.id_tramo for t in h.tramos] == [f"T{i:04d}" for i in range(1, len(h.tramos) + 1)]
     assert [s.codigo_tipo for s in h.support_types] == ["I", "II", "III", "IV", "V"]
+
+
+def test_labores_desbalanceadas_con_la_media_pedida():
+    h, _ = synthetic_history(n_zones=4, labors_per_zone=10, tramos_per_labor=12, seed=1)
+    sizes = Counter(labor_key(t) for t in h.tramos).values()
+    assert min(sizes) >= 4 and max(sizes) - min(sizes) >= 6
+    assert abs(sum(sizes) / len(sizes) - 12) < 1.5
+
+
+def test_verdad_hasheable_con_listas():
+    tr = SyntheticTruth(practice_cuts=[-2.0, -1.0, 0.0, 1.0], exposure_days=[10, 100])
+    assert tr.practice_cuts == (-2.0, -1.0, 0.0, 1.0) and tr.exposure_days == (10, 100)
+    hash(tr)
 
 
 def test_ida_y_vuelta_por_xlsx(tmp_path):
@@ -50,7 +62,16 @@ def test_auditoria_limpia_y_niveles_listos():
     assert audit.findings == ()  # ni Q, ni coherencia, ni solapes, ni componentes repetidos
     assert all(r.ready for r in audit.readiness)
     assert len({t.zona_nivel for t in h.tramos}) >= 3
-    assert len({t.fecha_evaluacion[:4] for t in h.tramos}) >= 3
+    assert len({t.fecha_evaluacion[:4] for t in h.tramos}) >= 4
+    lnde = [math.log(t.luz_m / t.esr) for t in h.tramos]
+    assert max(lnde) - min(lnde) >= 1.5
+
+
+def test_auditoria_lista_tambien_sin_efecto_del_sitio():
+    h, _ = synthetic_history(seed=0, truth=SyntheticTruth(site_effect=False))
+    audit = audit_history(h)
+    assert audit.findings == ()
+    assert all(r.ready for r in audit.readiness)
 
 
 def test_resultados_por_tramo():
@@ -58,7 +79,7 @@ def test_resultados_por_tramo():
     out = tramo_outcomes(h)
     assert len(out) == len(h.tramos)  # todos tienen inspecciones
     rate = sum(o.failed for o in out) / len(out)
-    assert 0.25 < rate < 0.55
+    assert 0.30 < rate < 0.65
     assert all(o.exposure_days is not None and o.exposure_days > 0 for o in out)
     # la falla, si hay, es la última inspección
     last = {}
@@ -71,27 +92,31 @@ def test_resultados_por_tramo():
 
 
 def test_sin_efecto_del_sitio_depende_solo_de_la_categoria():
-    # sin pendiente de la categoría, la probabilidad es la misma para todos: ni Q ni De ni exposición cuentan
-    tr = SyntheticTruth(site_effect=False, fail_category_beta0=0.0, fail_category_beta=0.0)
-    h, _ = synthetic_history(n_zones=4, labors_per_zone=10, tramos_per_labor=25, truth=tr, seed=5)
-    out = tramo_outcomes(h)
-    lnq = np.array([math.log(t.q_valor) for t in h.tramos])
-    failed = np.array([o.failed for o in out])
-    low = lnq < np.median(lnq)
-    assert abs(failed.mean() - 0.5) < 0.05
-    assert abs(failed[low].mean() - failed[~low].mean()) < 0.08
+    # condicionado a la categoría NGI, ln Q, ln De, rango y exposición no aportan nada (oráculo: statsmodels Logit)
+    sm = pytest.importorskip("statsmodels.api")
+    from rockmasspy.q_support import read_q_chart
+    h, _ = synthetic_history(n_zones=8, labors_per_zone=10, tramos_per_labor=25, seed=0,
+                             truth=SyntheticTruth(site_effect=False))
+    out = {o.id_tramo: o for o in tramo_outcomes(h)}
+    rank = {s.codigo_tipo: s.orden for s in h.support_types}
+    rows = [(read_q_chart(t.q_valor, t.luz_m / t.esr).category, math.log(t.q_valor), math.log(t.luz_m / t.esr),
+             rank[t.sost_instalado], math.log(out[t.id_tramo].exposure_days)) for t in h.tramos]
+    y = np.array([out[t.id_tramo].failed for t in h.tramos], dtype=float)
+    fit = sm.Logit(y, sm.add_constant(np.array(rows))).fit(disp=0)
+    assert fit.params[1] > 0 and fit.pvalues[1] < 1e-6  # la categoría sí cuenta
+    assert all(p > 0.01 for p in fit.pvalues[2:])  # semilla fija; con otras, ~1 de 40 cae bajo 0.01 por azar
 
 
 def test_nivel1_ic_bootstrap_cubre_la_pendiente_verdadera():
     cover = 0
-    for seed in range(20):
+    for seed in range(40):  # cobertura real ~92 %: con 40 semillas, >= 33 casi nunca falla por azar
         h, tr = synthetic_history(seed=seed)
         x, y = _lnq_rmr(h)
         bs = group_bootstrap([labor_key(t) for t in h.tramos], lambda i: ols_fit(x[i], y[i]).a,
                              n_boot=200, seed=seed)
         lo, hi = bs.percentile_ci()
         cover += lo <= tr.rmr_a <= hi
-    assert cover >= 18
+    assert cover >= 33
 
 
 def test_nivel1_gsi_sigue_al_rmr_y_a_q_prima():

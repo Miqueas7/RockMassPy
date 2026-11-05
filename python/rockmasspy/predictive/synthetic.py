@@ -12,9 +12,10 @@ Mecanismo (u = calidad latente del macizo = efecto de zona + efecto de labor + r
   el GSI, a través del RMR). Los componentes del RMR quedan vacíos: la auditoría no lo recalcula.
 - Nivel 2: latente s = k·(γ_q·ln Q + γ_de·ln De) + efecto de labor + ruido logístico; rango = 1 + #(cortes < s),
   con k = 1 − 2·incoherencia (0 coherente, 0.5 la práctica ignora el macizo, 1 la invierte).
-- Nivel 3: logit P(falla) = β0 + β_q·ln Q + β_de·ln De + β_rank·rango + β_exp·ln(exposición) + efecto de zona.
-  Con `site_effect=False`, logit P(falla) = β0_cat + β_cat·categoría de `read_q_chart(Q, De)`: el modelo del sitio
-  no agrega nada sobre la línea base de nivel 0 (pruebas de 4B y 4C).
+- Nivel 3: logit P(falla) = β0 + β_q·ln Q + β_de·ln De + β_rank·rango + β_exp·ln(exposición) + efecto de zona
+  + efecto de labor. Con `site_effect=False`, logit P(falla) = β0_cat + β_cat·categoría de `read_q_chart(Q, De)`,
+  sin efectos de zona ni de labor: la P(falla) depende solo de la categoría y el modelo del sitio no agrega nada
+  sobre la línea base de nivel 0 (pruebas de 4B y 4C).
   La falla se registra en la última inspección: la exposición que calcula `tramo_outcomes` es exactamente la del
   modelo verdadero.
 """
@@ -29,11 +30,9 @@ import numpy as np
 from scipy.special import expit, ndtr
 
 from .. import _rockmasspy_core as rm
-from ..excel_io import TIPOS
 from ..history import HISTORY_TRAMO_COLUMNS, INSPECTION_COLUMNS, History, HistoryTramo, Inspection, SupportTypeDef
 from ..q_support import read_q_chart
 from ..support import Bolt, Shotcrete, SupportType
-from ..table_io import _optional
 
 # Valores válidos de las tablas NGI 2025, del peor al mejor macizo
 _JN = (15.0, 12.0, 9.0, 6.0, 4.0, 3.0, 2.0)
@@ -45,9 +44,12 @@ _SRF = (5.0, 2.5, 1.0)
 LITHOLOGIES = ("andesita", "caliza", "diorita", "brecha")  # genéricas: nunca nombres de minas
 # tipo de labor: (luz mínima y máxima en m, vida útil, ESR de NGI para aberturas mineras temporales/permanentes).
 # Solo 3 tipos: cada tipo extra suma un parámetro al nivel 3 (audit_history) y subiría el mínimo de eventos.
-_LABOR_TYPES = {"Galería": (3.0, 4.5, "Permanente", 1.6), "Rampa": (4.0, 5.5, "Permanente", 1.6),
-                "Tajeo": (5.0, 12.0, "Temporal", 3.0)}
-_START, _START_SPAN_DAYS = datetime.date(2021, 1, 1), 900  # inicio de cada labor: 2021-01-01 + 0..900 días
+# Las luces dan ln De de 0 a 2.12: más de 1.5 unidades, para que el signo de ln De sea identificable.
+_LABOR_TYPES = {"Galería": (2.5, 4.5, "Permanente", 1.6), "Rampa": (4.0, 5.5, "Permanente", 1.6),
+                "Tajeo": (3.0, 25.0, "Temporal", 3.0)}
+# inicio de cada labor: 2019-01-01 + 0..1460 días; las evaluaciones cubren al menos 4 años (validación temporal)
+_START, _START_SPAN_DAYS = datetime.date(2019, 1, 1), 1460
+_MIN_TRAMOS_PER_LABOR = 4
 
 SUPPORT_TYPES = tuple(SupportTypeDef(code, order, desc, SupportType(code, order, desc, bolt, shot, mesh, arch, cost),
                                      order + 1)
@@ -91,13 +93,16 @@ class SyntheticTruth:
     fail_beta_rank: float = -0.6
     fail_beta_lnexp: float = 0.8
     sd_zone_failure: float = 0.4
+    sd_labor_failure: float = 0.5
     site_effect: bool = True
-    fail_category_beta0: float = -2.3  # solo con site_effect=False
-    fail_category_beta: float = 0.35
+    fail_category_beta0: float = -1.2  # solo con site_effect=False; prevalencia parecida a la del modo con efecto
+    fail_category_beta: float = 0.5
     # exposición: días desde la instalación hasta la última inspección
     exposure_days: tuple[int, int] = (30, 900)
 
     def __post_init__(self):
+        for name in ("practice_cuts", "exposure_days"):  # una lista también entra, y la verdad sigue hasheable
+            object.__setattr__(self, name, tuple(getattr(self, name)))
         cuts = self.practice_cuts
         if len(cuts) != len(SUPPORT_TYPES) - 1 or any(b <= a for a, b in zip(cuts, cuts[1:])):
             raise ValueError(f"practice_cuts must be {len(SUPPORT_TYPES) - 1} strictly increasing values")
@@ -122,7 +127,11 @@ def _positive_int(name, v):
 
 def synthetic_history(*, n_zones: int = 4, labors_per_zone: int = 5, tramos_per_labor: int = 12,
                       truth: SyntheticTruth | None = None, seed: int = 0) -> tuple[History, SyntheticTruth]:
-    """Histórico sintético con mecanismo conocido. Misma semilla → mismo History."""
+    """Histórico sintético con mecanismo conocido. Misma semilla → mismo History.
+
+    `tramos_per_labor` es la MEDIA: cada labor sortea su tamaño (Poisson, al menos min(4, tramos_per_labor)), así
+    que las labores quedan desbalanceadas, como en una mina real, y el total de tramos varía con la semilla.
+    """
     for name, v in (("n_zones", n_zones), ("labors_per_zone", labors_per_zone), ("tramos_per_labor", tramos_per_labor)):
         _positive_int(name, v)
     tr = SyntheticTruth() if truth is None else truth
@@ -138,11 +147,12 @@ def synthetic_history(*, n_zones: int = 4, labors_per_zone: int = 5, tramos_per_
             span_lo, span_hi, vida, esr = _LABOR_TYPES[tipo]
             lit = LITHOLOGIES[int(rng.integers(len(LITHOLOGIES)))]
             labor_q, labor_rmr = rng.normal(0, tr.sd_labor_quality), rng.normal(0, tr.sd_labor_rmr)
-            labor_p = rng.normal(0, tr.sd_labor_practice)
+            labor_p, labor_f = rng.normal(0, tr.sd_labor_practice), rng.normal(0, tr.sd_labor_failure)
+            n_tramos = max(min(_MIN_TRAMOS_PER_LABOR, tramos_per_labor), int(rng.poisson(tramos_per_labor)))
             depth = float(rng.integers(100, 800))
             date = _START + datetime.timedelta(days=int(rng.integers(_START_SPAN_DAYS + 1)))
             chain, prev = 0, None
-            for _ in range(tramos_per_labor):
+            for _ in range(n_tramos):
                 u = zone_q + labor_q + rng.normal(0, tr.sd_tramo_quality)
                 e = rng.normal(0, 0.5, 6)
                 rqd = float(np.clip(round(55 + 22 * (0.6 * u + e[0])), 10, 100))
@@ -166,7 +176,7 @@ def synthetic_history(*, n_zones: int = 4, labors_per_zone: int = 5, tramos_per_
                 exposure = int(rng.integers(tr.exposure_days[0], tr.exposure_days[1] + 1))
                 if tr.site_effect:
                     eta = (tr.fail_beta0 + tr.fail_beta_lnq * lnq + tr.fail_beta_lnde * lnde + tr.fail_beta_rank * rank
-                           + tr.fail_beta_lnexp * math.log(exposure) + zone_f)
+                           + tr.fail_beta_lnexp * math.log(exposure) + zone_f + labor_f)
                 else:
                     eta = tr.fail_category_beta0 + tr.fail_category_beta * category
                 failed = bool(rng.random() < expit(eta))
@@ -198,34 +208,3 @@ def synthetic_history(*, n_zones: int = 4, labors_per_zone: int = 5, tramos_per_
                 chain += length
                 date += datetime.timedelta(days=int(rng.integers(5, 21)))
     return History(tuple(tramos), SUPPORT_TYPES, tuple(inspections)), tr
-
-
-def _support_row(s: SupportTypeDef) -> dict:
-    e = s.elementos
-    return {"codigo_tipo": s.codigo_tipo, "orden": s.orden, "descripcion": s.descripcion or None,
-            "perno_tipo": e.bolt and e.bolt.kind, "perno_longitud_m": e.bolt and e.bolt.length_m,
-            "perno_espaciamiento_m": e.bolt and e.bolt.spacing_m,
-            "shotcrete_espesor_mm": e.shotcrete and e.shotcrete.thickness_mm,
-            "shotcrete_fibra": e.shotcrete and ("Sí" if e.shotcrete.fiber else "No"), "malla": e.mesh,
-            "cimbra": e.arch, "costo_relativo": e.relative_cost}
-
-
-def save_history_xlsx(history: History, path) -> None:
-    """Escribe las hojas Tramos, Tipos_sostenimiento y Desempeno con las columnas de la plantilla, en su orden.
-
-    `load_history` del archivo devuelve el mismo History si las filas (`fila`) son las de la hoja (2, 3, …), como las
-    del generador. `codigo_mina`, `evaluador_codigo` y `observaciones` van vacías: el histórico no las guarda.
-    """
-    openpyxl = _optional("openpyxl")
-    tramo_cols = ("id_tramo", "codigo_mina", *HISTORY_TRAMO_COLUMNS[1:], "evaluador_codigo", "observaciones")
-    sheets = (("Tramos", tramo_cols, [vars(t) for t in history.tramos]),
-              ("Tipos_sostenimiento", TIPOS, [_support_row(s) for s in history.support_types]),
-              ("Desempeno", (*INSPECTION_COLUMNS, "observaciones"), [vars(i) for i in history.inspections]))
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-    for name, cols, rows in sheets:
-        ws = wb.create_sheet(name)
-        ws.append(list(cols))
-        for r in rows:
-            ws.append([r.get(c) for c in cols])
-    wb.save(path)
