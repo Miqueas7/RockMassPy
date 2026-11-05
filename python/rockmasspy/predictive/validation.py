@@ -389,10 +389,16 @@ class ValidationReport:
 
     @property
     def recommend(self) -> bool:
-        """Recomiendan la partición por labor Y la de zona fuera (si falta alguna, no se recomienda); la temporal
-        también, si se pudo armar (si quedó en `skipped` no bloquea: lo dice `warnings`). La aleatoria no cuenta."""
+        """Recomiendan la partición por labor Y la de zona fuera (si falta alguna, no se recomienda). La aleatoria
+        no cuenta.
+
+        Decisión de diseño: la temporal entra como NO INFERIORIDAD, no como superioridad significativa. Si se pudo
+        armar, bloquea solo cuando la mejora puntual contra alguna referencia es < 0 (el sitio sale peor en el
+        último año); su IC no se exige porque el test de un solo año es chico y casi siempre toca el cero. Si quedó
+        en `skipped`, no bloquea y lo dice `warnings`."""
+        temporal = self.results.get("temporal")
         return all(p in self.results and self.results[p].recommend for p in ("labor", "zone")) \
-            and ("temporal" not in self.results or self.results["temporal"].recommend)
+            and (temporal is None or not any(i.value < 0 for i in temporal.improvements.values()))
 
     @property
     def warnings(self) -> tuple[str, ...]:
@@ -415,8 +421,10 @@ def validate(y, models: Mapping[str, Callable[[np.ndarray, np.ndarray], object]]
     sin peso en la decisión. `models` = {nombre: fit_predict}, con las referencias incluidas.
 
     Decisión (`ValidationReport.recommend`, §7.3): tienen que recomendar la partición por labor y la de zona fuera;
-    si alguna no se pudo armar, no se recomienda. La temporal decide si se pudo armar; si no (un solo año, un solo
-    grupo en el último año), no bloquea y el reporte lo avisa en `warnings`.
+    si alguna no se pudo armar, no se recomienda. Decisión de diseño: la temporal entra como no inferioridad, porque
+    el test de un solo año es chico y su IC casi siempre toca el cero: si se pudo armar, bloquea solo si la mejora
+    puntual contra alguna referencia es < 0; si no (un solo año, un solo grupo en el último año), no bloquea y el
+    reporte lo avisa en `warnings`.
     """
     n = len(labors)
     if not (len(zones) == len(years) == n == np.asarray(y).shape[0]):

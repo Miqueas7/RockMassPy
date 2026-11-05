@@ -315,14 +315,15 @@ def test_sin_efecto_del_sitio_no_recomienda_en_al_menos_90_por_ciento_de_semilla
 
 
 def test_con_efecto_del_sitio_el_modelo_correcto_gana_al_ficticio():
-    for seed in range(3):
+    recommended = 0
+    for seed in range(5):
         # el efecto de labor y zona pesa: con 240 tramos el IC de la mejora aún toca el cero
         rep = _decision(seed, True, n_boot=150, n_zones=6, labors_per_zone=8, tramos_per_labor=15)
         for part in ("labor", "zone"):
             cmp = rep.results[part]
             assert cmp.beats("dummy") and cmp.recommend, (part, cmp.improvements)
-        # la temporal (solo el último año) es chica y a menudo no alcanza: con ella decidiendo, rep.recommend
-        # sale falso en la mayoría de semillas aunque el efecto exista (lo mide R11)
+        recommended += rep.recommend  # la temporal, como no inferioridad, a veces sale peor por azar
+    assert recommended >= 3
 
 
 def test_validate_omite_particiones_imposibles_y_decide_por_labor():
@@ -357,10 +358,28 @@ def test_temporal_exige_dos_grupos_en_el_ultimo_ano():
     assert rep.recommend  # la temporal omitida no bloquea; labor y zona deciden
 
 
+def test_temporal_peor_que_la_referencia_bloquea():
+    rng = np.random.default_rng(5)
+    labors = np.repeat(np.arange(20), 10)
+    zones, years = labors // 5, np.where(np.arange(200) % 10 >= 8, 2021, 2020)
+    y = rng.integers(0, 2, 200).astype(float)
+    models = {"dummy": dummy_proba_fit_predict(y)}
+
+    def run(site):
+        models["site"] = site
+        return validate(y, models, kind="proba", labors=labors, zones=zones, years=years, metric=_brier,
+                        higher_is_better=False, reference="dummy", n_boot=200)
+    # perfecto salvo en el último año, donde se equivoca con 0.7: gana en labor y zona, pierde en la temporal
+    worse = run(lambda tr, te: np.where(years[te] == 2021, 0.7 - 0.4 * y[te], y[te]))
+    assert worse.results["labor"].recommend and worse.results["zone"].recommend
+    assert worse.results["temporal"].improvements["dummy"].value < 0 and not worse.recommend
+    assert run(lambda tr, te: y[te]).recommend
+
+
 def _cmp(**over):
     base = dict(main="site", metrics={}, improvements={}, higher_is_better=False, n_rows=10, n_groups=5, n_boot=100,
                 n_discarded=0, failed_folds={"site": 0}, optimistic=False)
-    base["improvements"] = {"dummy": Improvement(0.1, over.pop("lo", 0.05), 0.2)}
+    base["improvements"] = {"dummy": Improvement(over.pop("value", 0.1), over.pop("lo", 0.05), 0.2)}
     return Comparison(**{**base, **over})
 
 
@@ -378,7 +397,9 @@ def test_reporte_exige_labor_y_zona_y_la_temporal_si_existe():
     assert R({"labor": yes, "zone": yes, "temporal": yes}, {}).recommend
     assert not R({"labor": yes, "zone": no, "temporal": yes}, {}).recommend
     assert not R({"labor": no, "zone": yes, "temporal": yes}, {}).recommend
-    assert not R({"labor": yes, "zone": yes, "temporal": no}, {}).recommend
+    # temporal como no inferioridad: un IC que toca el cero no bloquea; una mejora puntual negativa sí
+    assert R({"labor": yes, "zone": yes, "temporal": no}, {}).recommend
+    assert not R({"labor": yes, "zone": yes, "temporal": _cmp(value=-0.01, lo=-0.1)}, {}).recommend
     assert not R({"labor": yes, "temporal": yes}, {"zone": "x"}).recommend  # sin zona fuera no se recomienda
     skipped_t = R({"labor": yes, "zone": yes, "random": no}, {"temporal": "x"})
     assert skipped_t.recommend and len(skipped_t.warnings) == 2
