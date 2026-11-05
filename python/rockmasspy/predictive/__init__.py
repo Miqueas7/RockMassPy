@@ -35,6 +35,12 @@ from .practice import (PRACTICE_RESULT_COLUMNS, Coefficient, Concordance, Practi
                        PracticeDesign, PracticeTramo, audit_practice, save_practice_results)
 __all__ += ["PRACTICE_RESULT_COLUMNS", "Coefficient", "Concordance", "PracticeAudit", "PracticeDesign",
             "PracticeTramo", "audit_practice", "save_practice_results"]
+from .performance import (CALIBRATION_LEVELS, RECOMMENDATION_COLUMNS, IsoprobabilityGrid,  # noqa: E402
+                          PerformanceModel, Reason, Recommendation, SupportOption, fit_performance,
+                          isoprobability_grid, load_model, recommend, save_model, save_recommendations)
+__all__ += ["CALIBRATION_LEVELS", "RECOMMENDATION_COLUMNS", "IsoprobabilityGrid", "PerformanceModel", "Reason",
+            "Recommendation", "SupportOption", "fit_performance", "isoprobability_grid", "load_model", "recommend",
+            "save_model", "save_recommendations"]
 __all__ += ["Comparison", "Fold", "FoldFailure", "Improvement", "OofPredictions", "ValidationReport",
             "compare_models", "dummy_class_fit_predict", "dummy_proba_fit_predict", "group_kfold",
             "leave_one_group_out", "out_of_fold", "random_kfold", "temporal_split", "tramo_groups", "validate"]
