@@ -597,15 +597,360 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
         "es": "Las correlaciones son del sitio y de su rango observado: fuera de ese rango no valen. Un tramo no es "
               "independiente de sus vecinos de la misma labor; por eso el bootstrap es por labor. El histórico "
               "registra lo que la mina midió y decidió, con sus sesgos de selección y de observador. Los mínimos, "
-              "el umbral de estabilidad y la fuerza del prior son decisiones de diseño por confirmar. El informe no "
-              "trae los niveles 2 y 3 (fase 4B y 4C).",
+              "el umbral de estabilidad y la fuerza del prior son decisiones de diseño por confirmar.",
         "en": "The correlations belong to the site and to its observed range: outside that range they do not hold. "
               "A tramo is not independent of its neighbours in the same excavation; that is why the bootstrap is by "
               "excavation. The history records what the mine measured and decided, with its selection and observer "
               "biases. The minimums, the stability threshold and the prior strength are design decisions to be "
-              "confirmed. The report does not cover levels 2 and 3 (phases 4B and 4C).",
+              "confirmed.",
     },
+    "hist_limits_none": {"es": "Los niveles 2 y 3 no se pidieron (en la CLI, con --practice y --performance).",
+                         "en": "Levels 2 and 3 were not requested (in the CLI, with --practice and --performance)."},
+    # --- niveles 2 y 3 (Fase 4B y 4C) ---
+    "hist_subtitle_full": {"es": "Auditoría de ingesta y niveles 1 a 3", "en": "Ingestion audit and levels 1 to 3"},
+    "hs_l2": {"es": "Nivel 2: auditoría de la práctica", "en": "Level 2: support practice audit"},
+    "hs_l3": {"es": "Nivel 3: desempeño y recomendación", "en": "Level 3: performance and recommendation"},
+    "hs_tripod": {"es": "Lista TRIPOD+AI", "en": "TRIPOD+AI checklist"},
+    "hist_limits_l23": {
+        "es": "La práctica pasada como etiqueta: el nivel 2 aprende lo que la mina instaló, que depende de la clase "
+              "de roca que se evaluó; reproduce las decisiones del pasado, no las óptimas, y por eso describe y no "
+              "recomienda. Sesgo de selección: las fallas del nivel 3 dependen del sostenimiento que se eligió (un "
+              "tipo pesado se instaló donde el macizo era malo), así que el efecto del sostenimiento queda "
+              "confundido con la calidad del macizo; las cotas de signo lo acotan, no lo eliminan. Extrapolación: "
+              "fuera del rango de entrenamiento, o lejos de él en distancia de Mahalanobis, el modelo no vale; la "
+              "recomendación lo avisa tramo por tramo. Un tramo sin inspecciones no entra al nivel 3: nunca se "
+              "asume estable. La validación es interna (otra parte de la misma mina), no externa.",
+        "en": "Past practice as the label: level 2 learns what the mine installed, which depends on the rock class "
+              "that was assessed; it reproduces past decisions, not optimal ones, and so it describes and does not "
+              "recommend. Selection bias: level 3 failures depend on the support that was chosen (a heavy type was "
+              "installed where the rock was poor), so the support effect is confounded with rock quality; the sign "
+              "bounds limit this, they do not remove it. Extrapolation: outside the training range, or far from it "
+              "in Mahalanobis distance, the model does not hold; the recommendation flags it tramo by tramo. A tramo "
+              "without inspections is left out of level 3: it is never assumed stable. The validation is internal "
+              "(another part of the same mine), not external.",
+    },
+    "dd": {"es": "decisión de diseño", "en": "design decision"},
+    "cap_dd": {"es": "Mínimos y umbrales (todos son decisión de diseño, por confirmar)",
+               "en": "Minimums and thresholds (all are design decisions, to be confirmed)"},
+    "h_variable": {"es": "Variable", "en": "Variable"},
+    "h_coef": {"es": "Coeficiente", "en": "Coefficient"},
+    "h_se": {"es": "Error estándar", "en": "Standard error"},
+    "h_ci95": {"es": "IC 95 %", "en": "95 % CI"},
+    "h_verdict": {"es": "Veredicto", "en": "Verdict"},
+    "h_partition": {"es": "Partición", "en": "Partition"},
+    "h_rows": {"es": "Filas", "en": "Rows"},
+    "h_groups": {"es": "Labores", "en": "Excavations"},
+    "h_gain_vs": {"es": "Mejora sobre {ref} (IC 95 %)", "en": "Gain over {ref} (95 % CI)"},
+    "h_blockers": {"es": "Motivos para no recomendar", "en": "Reasons not to recommend"},
+    "h_installed": {"es": "Instalado", "en": "Installed"},
+    "h_most_probable": {"es": "Más probable", "en": "Most probable"},
+    "h_conformal_set": {"es": "Conjunto conforme", "en": "Conformal set"},
+    "h_sign": {"es": "Restricción de signo", "en": "Sign constraint"},
+    "h_bound_active": {"es": "Cota activa", "en": "Bound active"},
+    "h_recommended_installed": {"es": "Recomendado \\ instalado", "en": "Recommended \\ installed"},
+    "yes": {"es": "sí", "en": "yes"},
+    "no": {"es": "no", "en": "no"},
+    "none": {"es": "ninguno", "en": "none"},
+    "part_labor": {"es": "por labor (k pliegues)", "en": "by excavation (k folds)"},
+    "part_zone": {"es": "zona fuera", "en": "zone left out"},
+    "part_temporal": {"es": "temporal (último año)", "en": "temporal (last year)"},
+    "part_random": {"es": "aleatoria por fila (optimista)", "en": "random by row (optimistic)"},
+    "part_skipped": {"es": "omitida: {reason}", "en": "skipped: {reason}"},
+    "cap_val_warnings": {"es": "Avisos de la validación", "en": "Validation warnings"},
+    "cap_level_warnings": {"es": "Avisos del ajuste", "en": "Fit warnings"},
+    # nivel 2
+    "l2_text": {
+        "es": "Este nivel describe la práctica de la mina, no recomienda: dice qué sostenimiento instala la mina en "
+              "cada condición, nunca qué instalar. Es un logit acumulado de odds proporcionales (Bürkner y Vuorre "
+              "2019 [V2]) del rango del tipo instalado sobre ln Q, ln De, la vida útil y el tipo de labor, sin "
+              "restricciones de signo. Un coeficiente β > 0 empuja a un tipo más pesado. Lo esperado es β(ln Q) < 0 "
+              "y β(ln De) > 0: si el IC 95 % excluye el cero con el signo contrario, la práctica es incoherente; si "
+              "incluye el cero, «no significativo», nunca «coherente».",
+        "en": "This level describes the mine's practice, it does not recommend: it says which support the mine "
+              "installs in each condition, never what to install. It is a proportional-odds cumulative logit "
+              "(Bürkner and Vuorre 2019 [V2]) of the installed type rank on ln Q, ln De, service life and "
+              "excavation type, without sign constraints. A coefficient β > 0 pushes towards a heavier type. The "
+              "expected signs are β(ln Q) < 0 and β(ln De) > 0: if the 95 % CI excludes zero with the opposite "
+              "sign, the practice is incoherent; if it includes zero, \"not significant\", never \"coherent\".",
+    },
+    "cap_l2_data": {"es": "Datos del nivel 2", "en": "Level 2 data"},
+    "l2_n": {"es": "Tramos usados (Q, luz y ESR > 0, tipo definido)",
+             "en": "Tramos used (Q, span and ESR > 0, defined type)"},
+    "l2_labors": {"es": "Labores", "en": "Excavations"},
+    "l2_types": {"es": "Tipos instalados (del más liviano al más pesado)",
+                 "en": "Installed types (lightest to heaviest)"},
+    "l2_status": {"es": "Estado", "en": "Status"},
+    "l2_missing": {"es": "Tipos bajo el mínimo", "en": "Types below the minimum"},
+    "l2_dropped": {"es": "Variables fuera del ajuste (colineales o constantes)",
+                   "en": "Variables left out of the fit (collinear or constant)"},
+    "l2_reference": {"es": "Tipo de labor de referencia (los tipo_labor=… son contrastes contra él)",
+                     "en": "Reference excavation type (the tipo_labor=… terms are contrasts against it)"},
+    "l2_ready": {"es": "listo", "en": "ready"},
+    "l2_insufficient": {"es": "datos insuficientes", "en": "insufficient data"},
+    "cap_l2_coef": {"es": "Coeficientes del logit acumulado (ajuste final) y veredictos de signo",
+                    "en": "Cumulative logit coefficients (final fit) and sign verdicts"},
+    "verdict_coherent": {"es": "coherente", "en": "coherent"},
+    "verdict_not_significant": {"es": "no significativo", "en": "not significant"},
+    "verdict_rock": {"es": "práctica incoherente con la calidad del macizo",
+                     "en": "practice incoherent with rock quality"},
+    "verdict_span": {"es": "práctica incoherente con la luz", "en": "practice incoherent with span"},
+    "verdict_not_estimable": {"es": "no estimable", "en": "not estimable"},
+    "l2_val_text": {
+        "es": "Validación agrupada (Roberts et al. 2017 [V2]) con el kappa ponderado cuadrático (Cohen 1968 [V2]) "
+              "contra el clasificador ficticio (la clase más frecuente) y la línea base NGI (el mismo logit con la "
+              "categoría de la carta Q como única variable). Los IC de la mejora salen de un bootstrap por labor.",
+        "en": "Grouped validation (Roberts et al. 2017 [V2]) with the quadratic weighted kappa (Cohen 1968 [V2]) "
+              "against the dummy classifier (the most frequent class) and the NGI baseline (the same logit with the "
+              "Q chart category as its only variable). The CIs of the gain come from a bootstrap by excavation.",
+    },
+    "cap_l2_val": {"es": "Kappa ponderado cuadrático fuera de pliegue por partición",
+                   "en": "Out-of-fold quadratic weighted kappa by partition"},
+    "l2_beyond_yes": {"es": "La práctica es más predecible que la carta Q y que el ficticio: en las particiones por "
+                            "labor y por zona fuera, el IC 95 % de la mejora del kappa queda sobre cero, y la temporal "
+                            "no sale peor. Esto no habilita ninguna recomendación: solo dice que la mina sigue un "
+                            "criterio propio y consistente.",
+                      "en": "The practice is more predictable than the Q chart and the dummy: in the excavation and "
+                            "zone-left-out partitions the 95 % CI of the kappa gain is above zero, and the temporal "
+                            "one is not worse. This enables no recommendation: it only says the mine follows a "
+                            "consistent criterion of its own."},
+    "l2_beyond_no": {"es": "La práctica no es más predecible que la carta Q y el ficticio en las particiones por "
+                           "labor y por zona fuera (los motivos van en la tabla), o alguna no se pudo evaluar.",
+                     "en": "The practice is not more predictable than the Q chart and the dummy in the excavation "
+                           "and zone-left-out partitions (the reasons are in the table), or one could not be "
+                           "evaluated."},
+    "cap_l2_conc": {"es": "Concordancia entre el sostenimiento recomendado y el instalado (tramos)",
+                    "en": "Agreement between recommended and installed support (tramos)"},
+    "l2_conc_text": {"es": "{n} tramos traen los dos; kappa ponderado cuadrático {kappa}.",
+                     "en": "{n} tramos have both; quadratic weighted kappa {kappa}."},
+    "l2_conc_none": {"es": "No hay tramos con sostenimiento recomendado e instalado de tipos definidos.",
+                     "en": "No tramo has both a recommended and an installed support of defined types."},
+    "l2_conformal": {
+        "es": "Conjunto conforme agrupado al {level:.0%} (Angelopoulos y Bates 2023 [V2]): el umbral del puntaje "
+              "({q}) sale de las probabilidades fuera de pliegue por labor. {k} de {n} tramos tienen un tipo "
+              "instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa condición. La "
+              "cobertura es aproximada y supone labores intercambiables; con zonas muy distintas no se cumple.",
+        "en": "Grouped conformal set at {level:.0%} (Angelopoulos and Bates 2023 [V2]): the score threshold ({q}) "
+              "comes from the out-of-fold probabilities by excavation. {k} of {n} tramos have an installed type "
+              "outside their set: the mine does not usually install that in that condition. The coverage is "
+              "approximate and assumes exchangeable excavations; with very different zones it does not hold.",
+    },
+    "cap_l2_outside": {"es": "Tramos con el tipo instalado fuera del conjunto conforme",
+                       "en": "Tramos with the installed type outside the conformal set"},
+    "l2_none_outside": {"es": "Ningún tramo quedó fuera de su conjunto conforme.",
+                        "en": "No tramo fell outside its conformal set."},
+    "dd_l2_min": {"es": "Mínimo del nivel 2 por tipo instalado", "en": "Level 2 minimum per installed type"},
+    "dd_l2_min_v": {"es": "{t} tramos de {l} labores", "en": "{t} tramos from {l} excavations"},
+    "dd_conformal": {"es": "Nivel del conjunto conforme", "en": "Conformal set level"},
+    "dd_gain_ci": {"es": "Mejora significativa", "en": "Significant gain"},
+    "dd_gain_ci_v": {"es": "límite inferior del IC 95 % por bootstrap de labores > 0",
+                     "en": "lower bound of the 95 % CI from an excavation bootstrap > 0"},
+    "dd_discarded": {"es": "Réplicas degeneradas admitidas", "en": "Degenerate replicates allowed"},
+    # nivel 3
+    "l3_text": {
+        "es": "P(falla) por tramo en un horizonte de exposición, con un modelo bayesiano MAP: prior Cauchy débil "
+              "sobre las variables estandarizadas (Gelman et al. 2008 [V2]), covarianza de Laplace y restricciones "
+              "de signo: peor macizo, más luz y más profundidad no bajan P(falla); más sostenimiento no la sube. La "
+              "exposición entra en el modelo, así que P(falla) depende del horizonte que se pida. Un tramo falla si "
+              "alguna inspección dice Falla o Reparado (por confirmar); la exposición va desde la instalación hasta "
+              "la primera falla o la última inspección. La línea base es el mismo modelo con la categoría de la "
+              "carta Q NGI como única variable del macizo y la misma exposición, sin cotas.",
+        "en": "P(failure) per tramo over an exposure horizon, with a MAP Bayesian model: weak Cauchy prior on the "
+              "standardized variables (Gelman et al. 2008 [V2]), Laplace covariance and sign constraints: poorer "
+              "rock, larger span and greater depth do not lower P(failure); more support does not raise it. Exposure "
+              "enters the model, so P(failure) depends on the horizon asked for. A tramo fails if any inspection "
+              "says Falla or Reparado (to be confirmed); exposure runs from installation to the first failure or "
+              "the last inspection. The baseline is the same model with the NGI Q chart category as its only rock "
+              "variable and the same exposure, unbounded.",
+    },
+    "l3_rule_val": {
+        "es": "Regla de calibración: «propio del sitio» exige cumplir el mínimo del nivel 3 y que las particiones "
+              "por labor y por zona fuera superen al ficticio y a la línea base NGI con el límite inferior del IC "
+              "95 % de la mejora del Brier sobre cero, sin pliegues fallidos y con no más del 1 % de réplicas "
+              "degeneradas. La partición temporal entra como no inferioridad: bloquea solo si la mejora puntual "
+              "contra alguna referencia es negativa, porque el test de un solo año es chico y su IC casi siempre "
+              "toca el cero; si no se pudo armar, no bloquea y la validación lo avisa. «Parcial»: cumple el mínimo "
+              "pero no lo demás; muestra P(falla) y no elige. «No calibrado al sitio»: bajo el mínimo.",
+        "en": "Calibration rule: \"site\" requires the level-3 minimum and that the excavation and zone-left-out "
+              "partitions beat the dummy and the NGI baseline with the lower bound of the 95 % CI of the Brier gain "
+              "above zero, with no failed fold and no more than 1 % degenerate replicates. The temporal partition "
+              "enters as non-inferiority: it blocks only if the point gain over a reference is negative, because "
+              "the single-year test is small and its CI almost always reaches zero; if it could not be built, it "
+              "does not block and the validation warns. \"Partial\": meets the minimum but not the rest; it shows "
+              "P(failure) and does not choose. \"Not calibrated to the site\": below the minimum.",
+    },
+    "cap_l3_state": {"es": "Estado y datos del nivel 3", "en": "Level 3 status and data"},
+    "l3_calibration": {"es": "Nivel de calibración", "en": "Calibration level"},
+    "l3_reason": {"es": "Motivo", "en": "Reason"},
+    "l3_quality": {"es": "Calidad del macizo", "en": "Rock quality"},
+    "l3_tramos": {"es": "Tramos con inspección usados", "en": "Inspected tramos used"},
+    "l3_failures": {"es": "Con falla", "en": "With failure"},
+    "l3_non_failures": {"es": "Sin falla", "en": "Without failure"},
+    "l3_labors": {"es": "Labores", "en": "Excavations"},
+    "l3_zones": {"es": "Zonas", "en": "Zones"},
+    "l3_params": {"es": "Parámetros", "en": "Parameters"},
+    "l3_minority": {"es": "Clase menor / mínimo (decisión de diseño)",
+                    "en": "Minority class / minimum (design decision)"},
+    "cal_site": {"es": "propio del sitio", "en": "site"},
+    "cal_partial": {"es": "parcial", "en": "partial"},
+    "cal_not_calibrated": {"es": "no calibrado al sitio", "en": "not calibrated to the site"},
+    "l3_no_fit": {"es": "No hay ajuste: todos los tramos usables tienen el mismo resultado.",
+                  "en": "There is no fit: every usable tramo has the same outcome."},
+    "cap_l3_coef": {"es": "Coeficientes del modelo MAP (escala original) con su IC 95 % de Laplace",
+                    "en": "MAP model coefficients (original scale) with their 95 % Laplace CI"},
+    "sign_up": {"es": "≥ 0", "en": "≥ 0"},
+    "sign_down": {"es": "≤ 0", "en": "≤ 0"},
+    "sign_free": {"es": "libre", "en": "free"},
+    "cap_l3_val": {"es": "Brier fuera de pliegue por partición (menor es mejor)",
+                   "en": "Out-of-fold Brier score by partition (lower is better)"},
+    "cap_l3_oof": {"es": "Desempeño fuera de pliegue (partición por labor)",
+                   "en": "Out-of-fold performance (excavation partition)"},
+    "m_brier": {"es": "Brier", "en": "Brier"},
+    "m_auc": {"es": "AUC", "en": "AUC"},
+    "m_ap": {"es": "Precisión promedio (PR)", "en": "Average precision (PR)"},
+    "m_cal_a": {"es": "Intercepto de calibración", "en": "Calibration intercept"},
+    "m_cal_b": {"es": "Pendiente de calibración", "en": "Calibration slope"},
+    "fig_l3_cal": {"es": "Curva de calibración fuera de pliegue por deciles (Van Calster et al. 2019 [V2])",
+                   "en": "Out-of-fold calibration curve by deciles (Van Calster et al. 2019 [V2])"},
+    "l3_iso_text": {
+        "es": "Isoprobabilidades de falla por tipo en el plano Q–De, al estilo de Mawdesley et al. (2001) [V2 + resumen], "
+              "dentro del rango de entrenamiento, a {days:.0f} días de exposición (el horizonte del ingeniero o, si "
+              "no lo dio, la mediana del histórico), con el tipo de labor de referencia y, si el modelo la usa, la "
+              "profundidad media. Los puntos son los tramos con ese tipo instalado.",
+        "en": "Probability of failure contours by type in the Q–De plane, after Mawdesley et al. (2001) [V2 + resumen], "
+              "within the training range, at {days:.0f} days of exposure (the engineer's horizon or, if none was "
+              "given, the history's median), with the reference excavation type and, if the model uses it, the mean "
+              "depth. The points are the tramos with that type installed.",
+    },
+    "l3_iso_no_horizon": {"es": "Sin histórico ni horizonte de exposición no se dibujan las isoprobabilidades.",
+                          "en": "Without the history or an exposure horizon the contours are not drawn."},
+    "noninf_met": {"es": "no inferioridad: cumple", "en": "non-inferiority: met"},
+    "noninf_not": {"es": "no inferioridad: no cumple (bloquea)", "en": "non-inferiority: not met (blocks)"},
+    "random_no_weight": {"es": "optimista: no cuenta en la decisión", "en": "optimistic: does not count"},
+    "l3_iso_rmr": {"es": "El modelo usa RMR: las isoprobabilidades en el plano Q–De no aplican.",
+                   "en": "The model uses RMR: the Q–De contours do not apply."},
+    "fig_l3_iso": {"es": "Isoprobabilidad de falla, tipo {code}", "en": "Probability of failure contours, type {code}"},
+    "l3_rule": {
+        "es": "Regla de recomendación: para un tramo nuevo se calcula P(falla) con su intervalo al 90 % para cada "
+              "tipo de la mina, del más liviano al más pesado, y se elige el más liviano cuyo límite superior queda "
+              "bajo el umbral. El umbral lo fija el ingeniero: es obligatorio y no tiene valor por defecto, igual "
+              "que el horizonte de exposición (rockmass recommend --threshold P --exposure-days D). Solo con el "
+              "nivel «propio del sitio» y sin motivo de bloqueo (extrapolación, tipos sin historia suficiente, "
+              "efecto del sostenimiento no significativo o cota activa) se elige un tipo; los motivos van con cada "
+              "recomendación. Cada recomendación trae las tres razones principales, la "
+              "alerta de extrapolación y las columnas vacías decision_ingeniero y motivo, donde el ingeniero "
+              "registra lo que decidió; con el desempeño posterior, alimentan el siguiente ajuste.",
+        "en": "Recommendation rule: for a new tramo, P(failure) with its 90 % interval is computed for every "
+              "support type of the mine, lightest to heaviest, and the lightest type whose upper bound stays below "
+              "the threshold is chosen. The engineer sets the threshold: it is mandatory and has no default, like "
+              "the exposure horizon (rockmass recommend --threshold P --exposure-days D). A type is chosen only at "
+              "the \"site\" level and with no blocking reason (extrapolation, types without enough history, a "
+              "non-significant support effect or an active bound); the reasons go with each recommendation. Each "
+              "recommendation carries the three main reasons, the extrapolation alert and "
+              "the empty columns decision_ingeniero and motivo, where the engineer records the decision; with the "
+              "later performance, they feed the next fit.",
+    },
+    "l3_threshold": {"es": "Umbral de este informe, fijado por el ingeniero: P(falla) ≤ {thr:g}.",
+                     "en": "Threshold of this report, set by the engineer: P(failure) ≤ {thr:g}."},
+    "l3_threshold_none": {"es": "Este informe no fija un umbral: el ingeniero lo da al pedir la recomendación.",
+                          "en": "This report sets no threshold: the engineer gives it when asking for the "
+                                "recommendation."},
+    "dd_l3_min": {"es": "Mínimo del nivel 3", "en": "Level 3 minimum"},
+    "dd_l3_min_v": {"es": "{e} eventos de la clase menor por parámetro y {z} zonas",
+                    "en": "{e} minority-class events per parameter and {z} zones"},
+    "dd_signs": {"es": "Restricciones de signo", "en": "Sign constraints"},
+    "dd_signs_v": {"es": "por cotas (L-BFGS-B); el tipo de labor queda libre",
+                   "en": "by bounds (L-BFGS-B); excavation type is free"},
+    "dd_baseline": {"es": "Línea base de nivel 0", "en": "Level 0 baseline"},
+    "dd_baseline_v": {"es": "categoría de la carta Q NGI con la misma exposición, sin cotas",
+                      "en": "NGI Q chart category with the same exposure, unbounded"},
+    "dd_temporal": {"es": "Partición temporal", "en": "Temporal partition"},
+    "dd_temporal_v": {"es": "no inferioridad (mejora puntual ≥ 0)", "en": "non-inferiority (point gain ≥ 0)"},
+    "dd_interval": {"es": "Intervalo de P(falla) y límite usado", "en": "P(failure) interval and bound used"},
+    "dd_interval_v": {"es": "90 %, límite superior (conservador)", "en": "90 %, upper bound (conservative)"},
+    "dd_maha": {"es": "Alerta de extrapolación", "en": "Extrapolation alert"},
+    "dd_maha_v": {"es": "fuera del rango o Mahalanobis sobre el percentil {p:g} del entrenamiento",
+                  "en": "outside the range or Mahalanobis above the training {p:g}th percentile"},
+    "dd_threshold": {"es": "Umbral de P(falla)", "en": "P(failure) threshold"},
+    "dd_threshold_v": {"es": "lo fija el ingeniero; sin valor por defecto", "en": "set by the engineer; no default"},
+    # TRIPOD+AI
+    "tripod_text": {
+        "es": "TRIPOD+AI (Collins et al. 2024 [V2]) es la lista de verificación más completa para informar modelos "
+              "de predicción con regresión o aprendizaje automático. Viene de la medicina y se aplica sin cambios "
+              "de fondo. La tabla dice qué cubre este informe y qué no; los ítems van por nombre (la numeración "
+              "está en la fuente). Lo que no cubre lo completa el autor del estudio.",
+        "en": "TRIPOD+AI (Collins et al. 2024 [V2]) is the most complete checklist for reporting prediction models "
+              "built with regression or machine learning. It comes from medicine and applies without substantive "
+              "changes. The table says what this report covers and what it does not; items go by name (the "
+              "numbering is in the source). The author of the study completes what it does not cover.",
+    },
+    "cap_tripod": {"es": "TRIPOD+AI: lo que cubre este informe", "en": "TRIPOD+AI: what this report covers"},
+    "h_tripod_item": {"es": "Ítem", "en": "Item"},
+    "h_tripod_covered": {"es": "Cubierto", "en": "Covered"},
+    "h_tripod_where": {"es": "Dónde o por qué", "en": "Where or why"},
+    "tr_yes": {"es": "sí", "en": "yes"},
+    "tr_partial": {"es": "parcial", "en": "partial"},
+    "tr_no": {"es": "no", "en": "no"},
+    "tr_na": {"es": "no aplica", "en": "not applicable"},
 }
+
+# TRIPOD+AI (Collins et al. 2024): (estado, {idioma: (ítem, dónde o por qué)}). Estado: yes, partial, no, na.
+TRIPOD_ITEMS: tuple[tuple[str, dict[str, tuple[str, str]]], ...] = (
+    ("yes", {"es": ("Fuente de los datos y fechas", "Datos: hojas y años cubiertos (nunca el archivo)"),
+             "en": ("Data source and dates", "Data: sheets and years covered (never the file)")}),
+    ("yes", {"es": ("Unidades y criterios de elegibilidad", "Preparación por nivel y datos de cada nivel"),
+             "en": ("Units and eligibility criteria", "Readiness by level and the data of each level")}),
+    ("yes", {"es": ("Preparación de los datos", "Auditoría de ingesta (Q y RMR recalculados, independencia)"),
+             "en": ("Data preparation", "Ingestion audit (Q and RMR recomputed, independence)")}),
+    ("yes", {"es": ("Resultado y cómo se define", "Nivel 2: tipo instalado; nivel 3: Falla o Reparado y exposición"),
+             "en": ("Outcome and its definition", "Level 2: installed type; level 3: Falla or Reparado and exposure")}),
+    ("yes", {"es": ("Predictores", "Tablas de coeficientes de los niveles 2 y 3"),
+             "en": ("Predictors", "Coefficient tables of levels 2 and 3")}),
+    ("partial", {"es": ("Tamaño de muestra", "Mínimos por nivel (decisión de diseño), sin el cálculo de Riley et al. "
+                                             "(2020)"),
+                 "en": ("Sample size", "Minimums by level (design decision), without the Riley et al. (2020) "
+                                       "calculation")}),
+    ("partial", {"es": ("Datos faltantes", "Casos completos: las filas incompletas no entran; sin imputación"),
+                 "en": ("Missing data", "Complete cases: incomplete rows are left out; no imputation")}),
+    ("yes", {"es": ("Métodos analíticos y validación interna", "Particiones por labor, zona fuera y temporal; "
+                                                               "bootstrap por labor"),
+             "en": ("Analytical methods and internal validation", "Excavation, zone-left-out and temporal "
+                                                                  "partitions; excavation bootstrap")}),
+    ("yes", {"es": ("Desbalance de clases", "Sin rebalanceo; kappa ponderado y Brier"),
+             "en": ("Class imbalance", "No rebalancing; weighted kappa and Brier")}),
+    ("na", {"es": ("Equidad entre grupos de personas", "Las unidades son tramos, no personas; la heterogeneidad entre "
+                                                       "zonas se mide con la zona fuera"),
+            "en": ("Fairness across groups of people", "The units are tramos, not people; heterogeneity across "
+                                                       "zones is measured with the zone left out")}),
+    ("yes", {"es": ("Salida del modelo", "P(falla) con su intervalo y la regla de recomendación"),
+             "en": ("Model output", "P(failure) with its interval and the recommendation rule")}),
+    ("yes", {"es": ("Entrenamiento frente a evaluación", "Métricas fuera de pliegue"),
+             "en": ("Training versus evaluation", "Out-of-fold metrics")}),
+    ("yes", {"es": ("Desempeño: discriminación y calibración", "Nivel 3: Brier, AUC, PR y curva de calibración; "
+                                                               "nivel 2: kappa ponderado"),
+             "en": ("Performance: discrimination and calibration", "Level 3: Brier, AUC, PR and calibration curve; "
+                                                                   "level 2: weighted kappa")}),
+    ("yes", {"es": ("Especificación completa del modelo", "Coeficientes en el informe; el modelo JSON"),
+             "en": ("Full model specification", "Coefficients in the report; the model JSON")}),
+    ("partial", {"es": ("Actualización del modelo", "decision_ingeniero y el desempeño posterior; sin reajuste "
+                                                    "automático"),
+                 "en": ("Model updating", "decision_ingeniero and later performance; no automatic refit")}),
+    ("no", {"es": ("Validación externa", "Solo interna: otra mina o un periodo largo nuevo no están en el histórico"),
+            "en": ("External validation", "Internal only: another mine or a long new period is not in the history")}),
+    ("yes", {"es": ("Interpretación y limitaciones", "Limitaciones"),
+             "en": ("Interpretation and limitations", "Limitations")}),
+    ("partial", {"es": ("Uso del modelo en la práctica", "rockmass recommend; sin evaluación de impacto"),
+                 "en": ("Use of the model in practice", "rockmass recommend; no impact assessment")}),
+    ("partial", {"es": ("Datos y código disponibles", "Código abierto (MIT); los datos son de la mina y no se "
+                                                      "publican"),
+                 "en": ("Data and code availability", "Open source code (MIT); the data belong to the mine and are "
+                                                       "not published")}),
+    ("no", {"es": ("Protocolo, registro, financiamiento, conflictos y ética", "Fuera del informe automático: los "
+                                                                             "completa el autor"),
+            "en": ("Protocol, registration, funding, conflicts and ethics", "Outside the automatic report: the "
+                                                                           "author completes them")}),
+    ("na", {"es": ("Participación de pacientes y del público", "No aplica a tramos de labores"),
+            "en": ("Patient and public involvement", "Does not apply to excavation tramos")}),
+)
 
 
 def t(key: str, lang: str) -> str:

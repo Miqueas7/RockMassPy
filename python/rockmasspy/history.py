@@ -33,7 +33,7 @@ MIN_LABORS_LEVEL1 = 5
 MIN_TRAMOS_PER_TYPE_LEVEL2 = 10
 MIN_LABORS_PER_TYPE_LEVEL2 = 5
 MIN_EVENTS_PER_PARAMETER_LEVEL3 = 10  # se aplica a la clase menor: min(fallas, no fallas)
-LEVEL3_BASE_PARAMETERS = 4  # ln Q, ln De, rango del sostenimiento y ln exposición (R9); decisión de diseño
+LEVEL3_BASE_PARAMETERS = 3  # ln Q, ln De y rango del sostenimiento; la exposición entra como offset (R9); decisión de diseño
 MIN_ZONES_LEVEL3 = 3
 
 # Tolerancias de la auditoría (R3)
