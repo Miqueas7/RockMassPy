@@ -125,15 +125,20 @@ def read_records(src, sheet, column_map, *, columns, text, required, ident, id_c
     return out
 
 
+def _normalize_gsi_cell(vals, sheet, n):
+    """Deja gsi_celda como S/C (la comparte el histórico de la Fase 4); el error ubica la celda."""
+    if vals["gsi_celda"] is not None:
+        try:
+            vals["gsi_celda"] = normalize_cell(vals["gsi_celda"])
+        except ValueError as e:
+            raise ValueError(f"{_where(sheet, n, 'gsi_celda')}: {e}") from None
+
+
 def _leer(src, sheet, column_map):
     out = []
     for n, vals in read_records(src, sheet, column_map, columns=TRAMO_COLUMNS, text=_TEXTO, required=_OBLIGATORIAS,
                                 ident=_IDENT, id_column="id_tramo", dates=("fecha_evaluacion",)):
-        if vals["gsi_celda"] is not None:
-            try:
-                vals["gsi_celda"] = normalize_cell(vals["gsi_celda"])
-            except ValueError as e:
-                raise ValueError(f"{_where(sheet, n, 'gsi_celda')}: {e}") from None
+        _normalize_gsi_cell(vals, sheet, n)
         out.append(Tramo(**vals, fila=n))
     return out
 

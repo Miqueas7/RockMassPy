@@ -54,6 +54,9 @@ from .table_io import SCHEMA, SCHEMA_VERSION, from_dict, load_json, load_yaml, s
 from .excel_io import load_excel, load_support_catalog_excel, save_excel  # noqa: E402,F401
 from .csv_io import load_csv_dir, load_support_catalog_csv, save_csv_dir  # noqa: E402,F401
 from .tramos import TRAMO_COLUMNS, Tramo, load_tramos  # noqa: E402,F401
+from .history import (FINDING_KINDS, HISTORY_TRAMO_COLUMNS, INSPECTION_COLUMNS, History, HistoryAudit,  # noqa: E402,F401
+                      HistoryFinding, HistoryTramo, Inspection, LevelReadiness, SupportTypeDef, TramoOutcome,
+                      audit_history, history_audit_counts, labor_key, load_history, tramo_outcomes)
 from .batch import (BatchSummary, EsrSpec, TramoResult, add_q_chart_reference, classify_tramos,  # noqa: E402,F401
                     q_chart_crosstab, save_results, summarize)  # noqa: E402,F401
 from .stope_surfaces import (SURFACE_COLUMNS, StopeSurface, StopeSurfaceResult, assess_stope_surfaces,  # noqa: E402,F401

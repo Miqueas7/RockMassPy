@@ -87,7 +87,12 @@ def load_csv_dir(path) -> LaborTable:
 
     Los nombres de archivo se reconocen sin importar mayúsculas (tabla.csv o TABLA.CSV son la hoja Tabla).
     """
-    canon = {h.lower(): h for h in _HOJAS}
+    return _load(_CsvSource(_csv_files(path, _HOJAS)))
+
+
+def _csv_files(path, hojas) -> dict:
+    """{hoja: archivo} de una carpeta; `hojas` da los nombres canónicos (sin importar mayúsculas)."""
+    canon = {h.lower(): h for h in hojas}
     files = {}
     for f in sorted(Path(path).glob("*")):  # glob: una carpeta inexistente da «missing file», como antes
         if f.suffix.lower() != ".csv":
@@ -96,7 +101,7 @@ def load_csv_dir(path) -> LaborTable:
         if sheet in files:  # tabla.csv y Tabla.csv juntos (posible fuera de Windows): no se elige uno a ciegas
             raise ValueError(f"two files for sheet '{sheet}': {files[sheet].name} and {f.name}")
         files[sheet] = f
-    return _load(_CsvSource(files))
+    return files
 
 
 def load_support_catalog_csv(path) -> SupportCatalog:
