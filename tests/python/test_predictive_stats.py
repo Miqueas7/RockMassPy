@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 np = pytest.importorskip("numpy")
-pytest.importorskip("scipy")
+student_t = pytest.importorskip("scipy.stats").t
 
 from rockmasspy.predictive import bayes_linear_fit, deming_fit, group_bootstrap, ols_fit  # noqa: E402
 
@@ -76,7 +76,8 @@ def test_ols_y_constante_r2_nan():
 
 def test_deming_ratio_1_es_ortogonal():
     x, y = _data(sd=1.0)
-    a, b = deming_fit(x, y, 1.0)
+    fit = deming_fit(x, y, 1.0)
+    a, b = fit.a, fit.b
     centered = np.column_stack([x - x.mean(), y - y.mean()])
     v = np.linalg.svd(centered, full_matrices=False)[2][0]
     assert a == pytest.approx(v[1] / v[0], rel=1e-10)
@@ -96,16 +97,24 @@ def test_deming_extremos_del_cociente():
 @pytest.mark.parametrize("slope", [3.0, -0.4])
 def test_deming_datos_exactos(ratio, slope):
     x = np.linspace(-1, 4, 9)
-    a, b = deming_fit(x, slope * x - 2.0, ratio)
-    assert a == pytest.approx(slope, rel=1e-12) and b == pytest.approx(-2.0, abs=1e-12)
+    fit = deming_fit(x, slope * x - 2.0, ratio)
+    assert fit.a == pytest.approx(slope, rel=1e-12) and fit.b == pytest.approx(-2.0, abs=1e-12)
+
+
+def test_deming_escala_enorme_sin_desborde():
+    x, y = _data(sd=1.0)
+    ref = deming_fit(x, y, 1.0)
+    fit = deming_fit(x * 1e100, y * 1e100, 1.0)
+    assert fit.a == pytest.approx(ref.a, rel=1e-10) and fit.b == pytest.approx(ref.b * 1e100, rel=1e-10)
 
 
 # ---------- bootstrap por grupos ----------
 
 def _grupos(n_groups=30, per=6, seed=0):
+    # x casi constante dentro de cada grupo (como una labor) y efecto de grupo: las filas no son independientes
     rng = np.random.default_rng(seed)
     g = np.repeat(np.arange(n_groups), per)
-    x = rng.uniform(0, 10, g.size)
+    x = rng.uniform(0, 10, n_groups)[g] + rng.normal(0, 0.5, g.size)
     y = 1.5 * x + 4 + rng.normal(0, 2.0, n_groups)[g] + rng.normal(0, 1.0, g.size)
     return g, x, y
 
@@ -139,18 +148,30 @@ def test_bootstrap_descarta_degeneradas():
     assert res.n_discarded > 0 and len(res.replicates) + res.n_discarded == 200
     res_nan = group_bootstrap(groups, lambda i: np.nan, n_boot=10)
     assert res_nan.n_discarded == 10
-    with pytest.raises(ValueError, match="no valid bootstrap replicates"):
+    with pytest.raises(ValueError, match="no valid bootstrap replicates") as info:
         res_nan.percentile_ci()
+    assert "last error" not in str(info.value)
+
+
+def test_bootstrap_todas_fallan_muestra_el_error_de_la_estadistica():
+    # error del usuario (largos distintos) no debe leerse solo como «réplicas degeneradas»
+    res = group_bootstrap(["A", "A", "B", "B"], lambda i: ols_fit(np.arange(4.0)[i], [1.0, 2.0]).a, n_boot=5)
+    with pytest.raises(ValueError, match="last error from statistic: ValueError: x and y must have the same") as info:
+        res.percentile_ci()
+    assert isinstance(info.value.__cause__, ValueError)
 
 
 def test_bootstrap_cubre_la_pendiente_verdadera():
-    cubre = 0
+    # con estas semillas: por grupos cubre 37/40; remuestreando filas, solo 25/40 (IC demasiado angosto)
+    por_grupo = por_fila = 0
     for seed in range(40):
         g, x, y = _grupos(seed=seed)
-        res = group_bootstrap(g, lambda i: ols_fit(x[i], y[i]).a, n_boot=300, seed=seed)
-        lo, hi = res.percentile_ci(0.95)
-        cubre += lo <= 1.5 <= hi
-    assert cubre >= 36
+        stat = lambda i: ols_fit(x[i], y[i]).a  # noqa: E731
+        lo, hi = group_bootstrap(g, stat, n_boot=300, seed=seed).percentile_ci(0.95)
+        por_grupo += lo <= 1.5 <= hi
+        lo, hi = group_bootstrap(np.arange(g.size), stat, n_boot=300, seed=seed).percentile_ci(0.95)
+        por_fila += lo <= 1.5 <= hi
+    assert por_grupo >= 36 and por_fila <= 30
 
 
 # ---------- bayesiano conjugado ----------
@@ -171,15 +192,64 @@ def test_bayes_prior_fuerte_tiende_al_prior():
     assert fit.a == pytest.approx(5.0, abs=1e-6) and fit.b == pytest.approx(40.0, abs=1e-6)
 
 
-@pytest.mark.parametrize("n", [0, 1, 2])
+@pytest.mark.parametrize("n", [0, 1])
 def test_bayes_pocos_datos_queda_cerca_del_prior(n):
-    x, y = [3.0, 1.0][:n], [60.0, 52.0][:n]
+    x, y = [3.0][:n], [60.0][:n]
     fit = bayes_linear_fit(x, y, **PRIOR)
     assert abs(fit.a - 5.0) < 2.5 and abs(fit.b - 40.0) < 10.0 and fit.n == n
     yhat, lo, hi = fit.predict(2.0)
     assert np.isfinite([lo, hi]).all() and lo < yhat < hi
     if n == 0:
         assert (fit.a, fit.b) == (5.0, 40.0) and fit.alpha == 2.0 and fit.beta == pytest.approx(36.0)
+
+
+@pytest.mark.parametrize("n", [2, 4])
+def test_bayes_se_encoge_entre_ols_y_el_prior(n):
+    # OLS lejos del prior (a = 5, b = 40): el ajuste queda estrictamente entre los dos. x centrado → X'X y Λ0
+    # diagonales, así el encogimiento vale coordenada a coordenada (con x sin centrar no siempre)
+    x = np.array([-1.0, 1.0]) if n == 2 else np.array([-1.5, -0.5, 0.5, 1.5])
+    y = np.array([15.0, 5.0]) if n == 2 else np.array([18.0, 12.0, 8.0, 2.0])
+    ols = np.polyfit(x, y, 1)
+    fit = bayes_linear_fit(x, y, **PRIOR)
+    for post, lsq, prior in ((fit.a, ols[0], 5.0), (fit.b, ols[1], 40.0)):
+        assert min(lsq, prior) < post < max(lsq, prior)
+        assert abs(post - lsq) > 0.01 * abs(prior - lsq) and abs(post - prior) > 0.01 * abs(prior - lsq)
+
+
+def test_bayes_predictiva_a_priori_exacta():
+    # n = 0, α0 = 3: ν = 6 y la varianza t es ν/(ν−2)·escala² = σp² + sa²·x0² + sb² (exacto)
+    s, sa, sb = 6.0, 2.5, 10.0
+    fit = bayes_linear_fit([], [], prior_mean=(5.0, 40.0), prior_sd=(sa, sb), prior_sigma=s, prior_strength=3.0)
+    x0 = np.array([-2.0, 0.0, 1.5, 4.0])
+    yhat, lo, hi = fit.predict(x0, level=0.95)
+    np.testing.assert_allclose(yhat, 5.0 * x0 + 40.0, rtol=1e-14)
+    var = s ** 2 + sa ** 2 * x0 ** 2 + sb ** 2
+    np.testing.assert_allclose(hi - yhat, student_t.ppf(0.975, 6) * np.sqrt(var * 4 / 6), rtol=1e-12)
+    np.testing.assert_allclose(yhat - lo, hi - yhat, rtol=1e-12)
+    assert fit.beta == pytest.approx(2 * s ** 2) and fit.alpha == 3.0
+
+
+@pytest.mark.parametrize("n", [3, 5])
+def test_bayes_posterior_contra_la_forma_clasica(n):
+    # oráculo: βn = β0 + ½(y'y + m0'Λ0m0 − mn'Λn·mn) y la predictiva t calculada a mano con Λn⁻¹ completa
+    x = np.array([2.0, 3.5, 4.0, 5.5, 7.0][:n])
+    y = np.array([20.0, 31.0, 30.0, 45.0, 52.0][:n])
+    m0, s, sa, sb, a0 = np.array([5.0, 40.0]), 6.0, 2.5, 10.0, 3.0
+    fit = bayes_linear_fit(x, y, prior_mean=tuple(m0), prior_sd=(sa, sb), prior_sigma=s, prior_strength=a0)
+    X = np.column_stack([x, np.ones(n)])
+    lam0 = np.diag([s ** 2 / sa ** 2, s ** 2 / sb ** 2])
+    lam_n = X.T @ X + lam0
+    mn = np.linalg.solve(lam_n, X.T @ y + lam0 @ m0)
+    alpha_n = a0 + n / 2
+    beta_n = s ** 2 * (a0 - 1) + 0.5 * (y @ y + m0 @ lam0 @ m0 - mn @ lam_n @ mn)
+    np.testing.assert_allclose([fit.a, fit.b], mn, rtol=1e-12)
+    assert fit.alpha == alpha_n and fit.beta == pytest.approx(beta_n, rel=1e-10)
+    for x0 in (0.0, 3.0, 10.0):
+        xt = np.array([x0, 1.0])
+        scale = np.sqrt(beta_n / alpha_n * (1 + xt @ np.linalg.inv(lam_n) @ xt))
+        half = student_t.ppf(0.95, 2 * alpha_n) * scale
+        yhat, lo, hi = fit.predict(x0, level=0.90)
+        assert (yhat, lo, hi) == pytest.approx((xt @ mn, xt @ mn - half, xt @ mn + half), rel=1e-10)
 
 
 def test_bayes_intervalo_predictivo_se_acerca_al_de_ols():

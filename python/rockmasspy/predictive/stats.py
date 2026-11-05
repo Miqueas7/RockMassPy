@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Hashable, Sequence
-from dataclasses import dataclass
-from typing import NamedTuple
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.stats import t as student_t
@@ -118,7 +117,8 @@ def ols_fit(x, y) -> OlsFit:
                   sigma=sigma, r2=r2, n=n, dof=n - 2, x_mean=float(xm), sxx=sxx)
 
 
-class DemingFit(NamedTuple):
+@dataclass(frozen=True)
+class DemingFit:
     a: float
     b: float
 
@@ -136,7 +136,7 @@ def deming_fit(x, y, ratio: float) -> DemingFit:
     dx, dy = xa - xa.mean(), ya - ya.mean()
     sxx, syy, sxy = float(dx @ dx), float(dy @ dy), float(dx @ dy)
     if _constant(sxx, xa.mean(), xa.size) or _constant(syy, ya.mean(), ya.size) \
-            or abs(sxy) <= 1e-12 * math.sqrt(sxx * syy):
+            or abs(sxy) <= 1e-12 * math.sqrt(sxx) * math.sqrt(syy):  # por separado: sxx·syy se desborda
         raise ValueError("x and y are uncorrelated (or one is constant): the Deming slope is undefined")
     d = syy - d_ratio * sxx
     s = math.hypot(d, 2.0 * math.sqrt(d_ratio) * abs(sxy))
@@ -152,12 +152,16 @@ class BootstrapResult:
     replicates: np.ndarray  # (réplicas válidas,) o (réplicas válidas, k)
     n_discarded: int
     n_boot: int
+    # última excepción de la estadística: si todas fallan, distingue un error del usuario de réplicas degeneradas
+    last_error: Exception | None = field(default=None, repr=False, compare=False)
 
     def percentile_ci(self, level: float = 0.95) -> tuple:
         """IC por percentiles: (inferior, superior), escalares o arreglos según la estadística."""
         lv = _level(level)
         if len(self.replicates) == 0:
-            raise ValueError("no valid bootstrap replicates: every resample was degenerate")
+            e = self.last_error
+            detail = f"; last error from statistic: {type(e).__name__}: {e}" if e is not None else ""
+            raise ValueError("no valid bootstrap replicates: every resample was degenerate" + detail) from e
         lo, hi = np.quantile(self.replicates, [0.5 - lv / 2, 0.5 + lv / 2], axis=0)
         return (float(lo), float(hi)) if np.ndim(lo) == 0 else (lo, hi)
 
@@ -186,21 +190,21 @@ def group_bootstrap(groups: Sequence[Hashable], statistic: Callable[[np.ndarray]
     # orden de primera aparición: reproducible sin ordenar etiquetas de tipos mezclados
     members = [np.asarray(v, dtype=np.intp) for v in rows.values()]
     rng = np.random.default_rng(seed)
-    kept, discarded = [], 0
+    kept, discarded, last_error = [], 0, None
     for _ in range(int(n_boot)):
         pick = rng.integers(0, len(members), size=len(members))
         idx = np.concatenate([members[k] for k in pick])
         try:
             value = np.asarray(statistic(idx), dtype=float)
-        except (ValueError, FloatingPointError, np.linalg.LinAlgError):
-            discarded += 1
+        except (ValueError, FloatingPointError, np.linalg.LinAlgError) as e:
+            discarded, last_error = discarded + 1, e
             continue
         if not np.all(np.isfinite(value)):
             discarded += 1
             continue
         kept.append(value)
     reps = np.stack(kept) if kept else np.empty((0,))
-    return BootstrapResult(replicates=reps, n_discarded=discarded, n_boot=int(n_boot))
+    return BootstrapResult(replicates=reps, n_discarded=discarded, n_boot=int(n_boot), last_error=last_error)
 
 
 @dataclass(frozen=True)
