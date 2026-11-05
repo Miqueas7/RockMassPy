@@ -33,10 +33,12 @@ def _grid(lo: float, hi: float, log: bool) -> list[float]:
 
 def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
                      global_correlations: Sequence[rm.Correlation] = (),
-                     site: Sequence[rm.CustomCorrelation] = (), style: Style = Style()):
+                     site: Sequence[rm.CustomCorrelation] = (), bands: Sequence = (), style: Style = Style()):
     """Puntos (x, y) del usuario más una curva por correlación, rotulada con su method_id.
 
-    Q y Q′ van en escala logarítmica. Cada curva se dibuja solo donde el núcleo la acepta.
+    Q y Q′ van en escala logarítmica. Cada curva se dibuja solo donde el núcleo la acepta. `bands`: ajustes con
+    `predict(x)` → (ŷ, inferior, superior) y rango `x_min`/`x_max` (p. ej. `predictive.SiteCorrelationFit`); se
+    sombrea su intervalo de predicción al 95 % dentro del rango observado.
     """
     pairs = list(pairs)
     if not pairs:
@@ -81,6 +83,13 @@ def plot_correlation(pairs: Sequence[tuple[float, float]], *, x: str, y: str,
             mid = r.info.method_id
         if cx:  # sin puntos no hay curva ni entrada de leyenda
             ax.plot(cx, cy, linestyle=_DASHES[k % len(_DASHES)], linewidth=1.6, label=mid or c.name)
+    for k, f in enumerate(bands):
+        a, b = max(lo, f.x_min), min(hi, f.x_max)
+        if a < b:
+            gx = _grid(a, b, log)
+            _, low, high = f.predict(gx, 0.95)
+            ax.fill_between(gx, low, high, alpha=0.15, linewidth=0,
+                            label=text("prediction_band", style.lang) if k == 0 else None)
     for c in site:
         a, b = max(lo, c.valid_min), min(hi, c.valid_max)
         cx, cy = [], []
