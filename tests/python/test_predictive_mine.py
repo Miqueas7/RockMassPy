@@ -44,7 +44,12 @@ def test_misma_semilla_misma_mina_y_otra_semilla_otra():
 def test_escenarios_y_validacion():
     assert all(name == s.name for name, s in SCENARIOS.items())
     assert {"base", "ngi_site", "worse_site", "better_site", "shifted_correlation", "conservative_practice",
-            "incoherent_practice", "mine_practice", "noisy_mapping", "small_mine", "large_mine"} == set(SCENARIOS)
+            "incoherent_practice", "mine_practice", "noisy_mapping", "small_mine", "large_mine", "saturating_large",
+            "saturating_worse"} == set(SCENARIOS)
+    with pytest.raises(ValueError, match="failure_mechanism"):
+        MineScenario(failure_mechanism="otro")
+    with pytest.raises(ValueError, match="saturating"):
+        MineScenario(saturating_support_scale=0)
     assert MineScenario(practice_gsi_cuts=[20, 30, 40, 50]).practice_gsi_cuts == (20, 30, 40, 50)
     with pytest.raises(ValueError, match="unknown scenario"):
         synthetic_mine("no_existe")
@@ -82,6 +87,14 @@ def test_ida_y_vuelta_por_xlsx(tmp_path):
     p = tmp_path / "mina.xlsx"
     save_history_xlsx(h, p)
     assert load_history(p) == h
+
+
+def test_base_de_unos_800_tramos_y_los_derivados_de_unos_600(bases):
+    # Fase 5B: la base llega al mínimo del nivel 3; los derivados conservan el tamaño del banco c575d12
+    assert 700 < np.mean([len(h.tramos) for h, _ in bases.values()]) < 900
+    assert SCENARIOS["base"].labors_per_zone == 8 and MineScenario() == SCENARIOS["base"]
+    assert all(s.labors_per_zone == 6 for n, s in SCENARIOS.items()
+               if n not in ("base", "small_mine", "large_mine", "saturating_large"))
 
 
 def test_base_rmr_y_clases_como_la_calibracion(bases):
@@ -256,6 +269,46 @@ def test_p_verdadera_coincide_con_la_frecuencia_simulada(grandes):
         assert sign * z_w1 > 4 and sign * z_marg > 4, (lo, z_w1, z_marg)
 
 
+@pytest.fixture(scope="module")
+def saturadas():
+    return [synthetic_mine("saturating_large", seed=seed) for seed in range(3)]
+
+
+def test_mecanismo_saturado_p_verdadera_exacta(saturadas):
+    # mismo contraste que con el mecanismo M5: la P verdadera condicional coincide con lo simulado
+    for horizon in (180, 730):
+        z = _z_failures(saturadas, horizon, lambda tr, v: tr.p_fail(v.id_tramo, v.installed_type, horizon,
+                                                                     conditional=True))
+        assert abs(z) < 4, (horizon, z)
+    z = _z_failures(saturadas, 730, lambda tr, v: tr.p_fail(v.id_tramo, v.installed_type, 730, conditional=True),
+                    lambda v: v.frailty > 1.5)
+    assert abs(z) < 4, z
+    rates = [np.mean([o.failed for o in tramo_outcomes(h)]) for h, _ in saturadas]
+    assert 0.05 < np.mean(rates) < 0.2  # D7.5, como large_mine
+
+
+def test_mecanismo_saturado_sin_carta_ni_deficit(saturadas):
+    from rockmasspy.predictive.mine import _LABOR_TYPE_NAMES
+    h, tr = saturadas[0]
+    sc = tr.scenario
+    assert sc.failure_mechanism == "saturating" and SCENARIOS["base"].failure_mechanism == "chart_deficit"
+    steps = []
+    for t, v in list(zip(h.tramos, tr.tramos))[:300]:
+        for rk, hours in enumerate(v.unsupported_hours_by_type, start=1):
+            log_rate = (sc.log_lambda0[_LABOR_TYPE_NAMES.index(t.tipo_labor)] + v.zone_failure_effect
+                        + (math.log(sc.unsupported_multiplier) if hours > v.standup_hours else 0.0)
+                        - sc.saturating_beta_lnq * math.log(v.q) + sc.saturating_beta_lnde * math.log(t.luz_m / t.esr)
+                        - sc.saturating_support_max * (1 - math.exp(-(rk - 1) / sc.saturating_support_scale)))
+            assert v.rates[rk - 1] == pytest.approx(math.exp(log_rate))
+        hb = v.unsupported_hours_by_type
+        if all((x > v.standup_hours) == (hb[0] > v.standup_hours) for x in hb):  # mismo término de horas
+            steps.append(np.diff(np.log(v.rates)))
+    # el efecto del sostenimiento se satura (cada paso ayuda menos) y es el mismo en cualquier macizo
+    steps = np.array(steps)
+    assert steps.size and np.all(steps < 0) and np.all(np.diff(steps, axis=1) > 0)
+    assert np.allclose(steps, steps[0])
+
+
 def test_p_contrafactual_con_los_desvios_como_experimento_natural():
     # El desvío a un tipo más liviano se sortea sin mirar el tramo: entre los tramos donde la tabla pide k, la
     # fracción f que se desvió a k − 1 es una muestra al azar, así que sus fallas ≈ f·Σ P(k − 1) de TODOS ellos.
@@ -387,6 +440,8 @@ def test_defectos_en_la_tasa_pedida_y_la_auditoria_los_ve():
         # la auditoría ve exactamente los defectos detectables y nada más
         found = {(f.kind, f.id_tramo) for f in audit_history(h).findings}
         detectable = {(k, tid) for k, tid, _ in tr.defects if k != "empty_cell"}
+        # las celdas vacías salen contadas por columna, sin id (tarea 8)
+        detectable |= {("missing_values", None)} if any(k == "empty_cell" for k, _, _ in tr.defects) else set()
         assert found == detectable
         for k, tid, col in tr.defects:
             if k == "empty_cell":

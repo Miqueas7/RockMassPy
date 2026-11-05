@@ -25,6 +25,11 @@ Mecanismo, de la geología al registro (a diferencia de `synthetic_history`, nad
   los cinco tipos salen del mismo número aleatorio (cada tipo con su mediana), así que la P contrafactual usa las
   horas que habría tenido ese tipo; el multiplicador es daño persistente (toda la vida del tramo). Con fragilidad
   gamma la P de falla en H de una labor nueva de la misma zona es cerrada: 1 − (1 + θλH)^(−1/θ).
+- Mecanismo alternativo (Fase 5B, `failure_mechanism="saturating"`), para no medir el nivel 3 solo con la receta de
+  arriba: sin carta Q ni déficit, log λ = log λ0(tipo de labor) − β_q·ln Q_verdadero + β_De·ln De
+  − A·(1 − exp(−(rango − 1)/s)) + efecto de zona + término de horas sin sostener. El efecto del sostenimiento se
+  satura con el rango (el paso I→II ayuda más que el IV→V) y no depende del macizo; la calidad y la luz entran de
+  forma continua. Supuesto de diseño: no sale de la calibración, es un contraste.
 - Defectos (M7, `defects=True`): se inyectan con un generador aparte, así que el resto del History es idéntico al
   de `defects=False` con la misma semilla.
 """
@@ -79,6 +84,7 @@ _DEFECT_KINDS = ("empty_cell", "q_mismatch", "overlapping_chainage", "inspection
 _EMPTY_COLUMNS = ("rqd_pct", "jn", "jr", "ja", "jw", "srf", "ucs_mpa", "espaciamiento_m", "puntaje_condicion_juntas",
                   "agua", "q_valor", "rmr_valor", "gsi_valor")
 _UNKNOWN_TYPE = "VI"
+FAILURE_MECHANISMS = ("chart_deficit", "saturating")
 # Nombres de roca genéricos que acepta `lithologies`: así nadie mete sin querer el nombre de una veta o de una mina
 GENERIC_LITHOLOGIES = (*LITHOLOGIES, "granito", "granodiorita", "tonalita", "monzonita", "dacita", "riolita",
                        "basalto", "toba", "arenisca", "lutita", "lodolita", "conglomerado", "dolomita", "mármol",
@@ -91,9 +97,10 @@ class MineScenario:
     """Parámetros de una mina sintética. Cada campo con su clave de la calibración o «supuesto de diseño»."""
 
     name: str = "base"
-    # tamaño: ≈ 600 tramos, lo que pide el nivel 3 con 5–10 % de fallas (D7.5)
+    # tamaño: ≈ 800 tramos (Fase 5B: con ≈ 600 la base quedaba bajo el mínimo del nivel 3 en 2/3 de las semillas;
+    # D7.5 pide ≈ 600 con 5–10 % de fallas). Los escenarios derivados conservan los ≈ 600 de la Fase 5
     n_zones: int = 5
-    labors_per_zone: int = 6
+    labors_per_zone: int = 8
     tramos_per_labor: int = 20  # media (Poisson, al menos 4)
     years: int = 5
     # A1: (litología genérica, UCS mediana en MPa, calidad media en unidades de u); supuesto de diseño
@@ -144,7 +151,8 @@ class MineScenario:
     unsupported_hours_heavy: float = 12.0  # C6.5: mediana de 1 turno en roca IV–V (tipos IV y V)
     unsupported_hours_light: float = 72.0  # C6.5: 1–7 días en roca II–III
     sd_log_unsupported: float = 0.6  # supuesto de diseño
-    # D: falla (tasa por día)
+    # D: falla (tasa por día). `failure_mechanism`: "chart_deficit" (M5, por defecto) o "saturating" (Fase 5B)
+    failure_mechanism: str = "chart_deficit"
     site_shift_delta: float = 0.5  # δ: el sitio lee la carta con Q·exp(−δ); 0 = igual a NGI; supuesto de diseño
     log_lambda0: tuple[float, float, float] = (-9.8, -9.8, -8.4)  # Galería, Rampa, Tajeo; calibrado con D7.5
     kappa_deficit: float = 0.8  # por tipo que falta; D7.5 (× ≈ 10 con déficit) y D8.4
@@ -155,6 +163,12 @@ class MineScenario:
     # C6.5: × 3–5 si las horas sin sostener pasan el autosoporte (D8.5). Decisión de diseño: daño persistente, el
     # multiplicador dura toda la vida del tramo (la exposición se cuenta desde la instalación)
     unsupported_multiplier: float = 4.0
+    # mecanismo "saturating" (supuesto de diseño): −β_q·ln Q + β_De·ln De − A·(1 − exp(−(rango − 1)/s)); con A = 4 y
+    # s = 2.5 los pasos I→II, II→III, III→IV y IV→V bajan log λ en 1.32, 0.88, 0.59 y 0.40
+    saturating_beta_lnq: float = 0.6
+    saturating_beta_lnde: float = 0.8
+    saturating_support_max: float = 4.0
+    saturating_support_scale: float = 2.5
     # D9: inspecciones y vida útil
     inspection_active_days: int = 30  # D9.5: mensual en labores activas
     active_period_days: int = 180  # supuesto de diseño
@@ -201,6 +215,11 @@ class MineScenario:
             raise ValueError(f"practice_gsi_cuts must be {len(SUPPORT_TYPES) - 1} strictly increasing values")
         if self.practice_mode not in ("gsi_table", "q_chart"):
             raise ValueError("practice_mode must be 'gsi_table' or 'q_chart'")
+        if self.failure_mechanism not in FAILURE_MECHANISMS:
+            raise ValueError(f"failure_mechanism must be one of {', '.join(FAILURE_MECHANISMS)}")
+        if any(not getattr(self, n) >= 0 for n in ("saturating_beta_lnq", "saturating_beta_lnde",
+                                                    "saturating_support_max"))                 or not self.saturating_support_scale > 0:
+            raise ValueError("the saturating betas and support_max must be >= 0 and support_scale > 0")
         if not 1 <= self.practice_min_rank <= len(SUPPORT_TYPES):
             raise ValueError("practice_min_rank must be between 1 and 5")
         if len(self.log_lambda0) != len(_LABOR_TYPES):
@@ -236,7 +255,7 @@ class TrueTramo:
     table_type: str  # lo que pide la tabla de la mina con el GSI registrado (sost_recomendado)
     installed_type: str  # el instalado de verdad (aunque un defecto cambie la celda)
     practice_deviation: int  # instalado − tabla, en tipos (−1 más liviano, +1 más pesado)
-    required_type: str  # lo que pide la carta Q con Q·exp(−δ) y De
+    required_type: str  # lo que pide la carta Q con Q·exp(−δ) y De (con "saturating" no entra en la tasa)
     unsupported_hours: float  # las del tipo instalado (tiempo_sin_sostener_h)
     frailty: float  # fragilidad de la labor (media 1)
     censor_days: int  # censura planeada: fin de la vida útil o del histórico, desde la instalación
@@ -340,12 +359,20 @@ def _table_rank(sc, gsi, temporary, date):
     return int(np.clip(max(rank, sc.practice_min_rank), 1, len(SUPPORT_TYPES)))
 
 
-def _rates(sc, ti, zone_f, rmr_true, required, hours_by_type, standup_h):
-    """Tasa verdadera por día de cada tipo I…V con fragilidad 1 (M5), cada uno con sus horas sin sostener."""
+def _support_term(sc, rk, required, rmr_true, q_true, de):
+    """Lo que el macizo y el sostenimiento suman a log λ con el tipo de rango `rk` (1…5), según el mecanismo."""
+    if sc.failure_mechanism == "saturating":
+        return (-sc.saturating_beta_lnq * math.log(q_true) + sc.saturating_beta_lnde * math.log(de)
+                - sc.saturating_support_max * -math.expm1(-(rk - 1) / sc.saturating_support_scale))
     kd = sc.kappa_deficit if sc.kappa_deficit_rock_v is None or rmr_true >= 21 else sc.kappa_deficit_rock_v
+    return kd * max(0, required - rk) - sc.kappa_surplus * max(0, rk - required)
+
+
+def _rates(sc, ti, zone_f, rmr_true, required, hours_by_type, standup_h, q_true, de):
+    """Tasa verdadera por día de cada tipo I…V con fragilidad 1 (M5), cada uno con sus horas sin sostener."""
     return tuple(math.exp(sc.log_lambda0[ti] + zone_f
                           + (math.log(sc.unsupported_multiplier) if h > standup_h else 0.0)
-                          + kd * max(0, required - rk) - sc.kappa_surplus * max(0, rk - required))
+                          + _support_term(sc, rk, required, rmr_true, q_true, de))
                  for rk, h in enumerate(hours_by_type, start=1))
 
 
@@ -467,7 +494,7 @@ def synthetic_mine(scenario: MineScenario | str | None = None, *, seed: int = 0,
                 # falla (M5)
                 required = _chart_rank(q_true * math.exp(-sc.site_shift_delta), de)
                 standup_h = 10 ** float(np.interp(rmr_true, _STANDUP_RMR, _STANDUP_LOG10_H))
-                rates = _rates(sc, ti, zone_f, rmr_true, required, hours_by_type, standup_h)
+                rates = _rates(sc, ti, zone_f, rmr_true, required, hours_by_type, standup_h, q_true, de)
                 to_end = (end - inst_date).days
                 censor = max(1, min(life, to_end))
                 abandoned = life < to_end
@@ -560,35 +587,44 @@ def _inject_defects(sc, rng, tramos, insp, labor_of):
 
 
 _BASE = MineScenario()
-# «Propuesta de escenarios» de la calibración, traducida a los campos de MineScenario (cambian solo lo indicado)
+_REF = dataclasses.replace(_BASE, labors_per_zone=6)  # ≈ 600 tramos: el tamaño de la Fase 5 (banco c575d12)
+# «Propuesta de escenarios» de la calibración, traducida a los campos de MineScenario (cambian solo lo indicado);
+# salen de _REF (≈ 600 tramos), salvo los de tamaño propio
 SCENARIOS: dict[str, MineScenario] = {s.name: s for s in (
     _BASE,
     # el nivel 3 no tiene que inventar efecto de sitio: δ = 0, sin efectos aleatorios ni horas sin sostener, la
     # misma tasa base en todas las labores y la práctica = la carta Q. La recta RMR–ln Q no se fija en 9 ln Q + 44
     # (Bieniawski): emerge de los componentes, igual que en la base
-    dataclasses.replace(_BASE, name="ngi_site", site_shift_delta=0.0, sd_zone_failure=0.0, frailty_variance=0.0,
+    dataclasses.replace(_REF, name="ngi_site", site_shift_delta=0.0, sd_zone_failure=0.0, frailty_variance=0.0,
                         unsupported_multiplier=1.0, log_lambda0=(-9.0, -9.0, -9.0), practice_mode="q_chart"),
     # roca débil (A1.4: RMR ~ N(32, 15)); zonas de falla 3–5/km; prevalencia 15–25 %; en roca V el sostenimiento
     # ayuda poco (D8.4: β_rank −0.2 frente a −0.5): κ_def 0.3 solo con RMR89 verdadero < 21
-    dataclasses.replace(_BASE, name="worse_site", quality_shift=-1.7, sd_path_quality=1.2, fault_rate_per_km=4.0,
+    dataclasses.replace(_REF, name="worse_site", quality_shift=-1.7, sd_path_quality=1.2, fault_rate_per_km=4.0,
                         kappa_deficit_rock_v=0.3, log_lambda0=(-9.0, -9.0, -7.8)),
     # A1.5: RMR ~ N(63, 13); prevalencia 1–3 %
-    dataclasses.replace(_BASE, name="better_site", quality_shift=1.9, sd_path_quality=0.9,
+    dataclasses.replace(_REF, name="better_site", quality_shift=1.9, sd_path_quality=0.9,
                         log_lambda0=(-11.0, -11.0, -9.6)),
     # B5.4: la recta RMR–ln Q de la mina se corre (intercepto +≈ 8, pendiente mayor) sin tocar el Q
-    dataclasses.replace(_BASE, name="shifted_correlation", jcond_shift=8.0, jcond_sd=9.0),
+    dataclasses.replace(_REF, name="shifted_correlation", jcond_shift=8.0, jcond_sd=9.0),
     # la mina sostiene de más: todo un tipo más pesado; fallas muy raras (≈ 2 %)
-    dataclasses.replace(_BASE, name="conservative_practice", practice_type_shift=1,
+    dataclasses.replace(_REF, name="conservative_practice", practice_type_shift=1,
                         log_lambda0=(-10.8, -10.8, -9.4)),
     # C6.1 y C6.6: GSI visual con DE 10, desvíos más frecuentes y un cambio de tabla en el año 3
-    dataclasses.replace(_BASE, name="incoherent_practice", sd_gsi_visual=10.0, p_lighter=0.2, p_heavier=0.2,
+    dataclasses.replace(_REF, name="incoherent_practice", sd_gsi_visual=10.0, p_lighter=0.2, p_heavier=0.2,
                         table_change_date="2022-01-01"),
     # C6.3 (Peck y Lee): pendiente de la práctica al 60 % y piso en el tipo II
-    dataclasses.replace(_BASE, name="mine_practice", practice_slope=0.6, practice_min_rank=2),
+    dataclasses.replace(_REF, name="mine_practice", practice_slope=0.6, practice_min_rank=2),
     # B4 y la propuesta: ruido de observador ≈ RMR 5.4, log10 Q 0.27, GSI 9 y efecto de geólogo ≈ 2.4 puntos de
     # RMR (B4.6: 2–4). Con el GSI en 9 el RMR y el Q no bajan a 5 y 0.25: no cuadran juntos
-    dataclasses.replace(_BASE, name="noisy_mapping", sd_geologist_bias=0.15, sd_mapping_z=0.10, sd_mapping_rqd=16.0,
+    dataclasses.replace(_REF, name="noisy_mapping", sd_geologist_bias=0.15, sd_mapping_z=0.10, sd_mapping_rqd=16.0,
                         sd_mapping_jcond=3.0, sd_mapping_log_spacing=0.15, sd_mapping_log_ucs=0.15),
-    dataclasses.replace(_BASE, name="small_mine", n_zones=2, labors_per_zone=4, tramos_per_labor=10, years=4),
-    dataclasses.replace(_BASE, name="large_mine", n_zones=8, labors_per_zone=15, tramos_per_labor=40, years=10),
+    dataclasses.replace(_REF, name="small_mine", n_zones=2, labors_per_zone=4, tramos_per_labor=10, years=4),
+    dataclasses.replace(_REF, name="large_mine", n_zones=8, labors_per_zone=15, tramos_per_labor=40, years=10),
+    # Fase 5B, mecanismo alternativo (sin carta ni déficit, el sostenimiento se satura): una mina grande como
+    # large_mine y una de roca mala con la geología de worse_site. λ0 calibrado para ≈ 12 % y ≈ 20 % de
+    # fallas, como large_mine y worse_site (D7.5)
+    dataclasses.replace(_REF, name="saturating_large", n_zones=8, labors_per_zone=15, tramos_per_labor=40, years=10,
+                        failure_mechanism="saturating", log_lambda0=(-9.1, -9.1, -7.7)),
+    dataclasses.replace(_REF, name="saturating_worse", quality_shift=-1.7, sd_path_quality=1.2, fault_rate_per_km=4.0,
+                        failure_mechanism="saturating", log_lambda0=(-9.0, -9.0, -7.6)),
 )}
