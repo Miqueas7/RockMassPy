@@ -100,7 +100,7 @@ def _seed(*parts) -> int:
 
 
 def _fmt(x):
-    return "" if isinstance(x, str) else (f"{x:.6g}" if isinstance(x, float) else x)
+    return f"{x:.6g}" if isinstance(x, float) else x
 
 
 # ---------- armado de históricos ----------
@@ -392,8 +392,7 @@ def level2(out: Out, reps: int, n_boot: int, seed: int):
                 out.prop(2, esc, cell, "tasa_coherent_ln_q", coh_q, n)
                 out.prop(2, esc, cell, "tasa_coherent_ln_de", coh_de, n)
                 out.prop(2, esc, cell, "tasa_coherent_ambos", coh, n)
-            else:
-                out.prop(2, esc, cell, "tasa_falso_incoherent", false_inc, n)
+            out.prop(2, esc, cell, "tasa_falso_incoherent", false_inc, n)  # en los dos escenarios es un error
             out.ratio(2, esc, cell, "cobertura_conforme_90_labores_nuevas", cnum, cden)
             out.mean(2, esc, cell, "tamano_medio_conjunto", size)
             print(f"[nivel 2 {esc}] {cell}: n={n}, coherent ambos {coh}/{n}, falso incoherent {false_inc}/{n}, "
