@@ -672,7 +672,9 @@ def _print_performance(m) -> bool:
         print(f"performance: calibration {m.calibration} ({m.calibration_reason})")
     print(f"performance: n {c['tramos']}, failures {c['failures']}, labors {c['labors']}, zones {c['zones']}, "
           f"parameters {c['parameters']}, quality {m.quality}")
-    print("performance model: constant failure rate; P(failure in H days) = 1 - exp(-lambda*H)")
+    print("performance model: constant failure rate with a gamma frailty per excavation; P(failure in H days) "
+          "for a new excavation = 1 - (1 + theta*lambda*H)^(-1/theta); the decision bound uses the upper lambda "
+          "and the frailty quantile")
     if m.validation is not None:
         _print_validation("performance", "poisson_deviance", m.validation, ".4f")
     coefs = m.coefficients  # {} sin ajuste

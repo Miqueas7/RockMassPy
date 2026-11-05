@@ -296,7 +296,8 @@ def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_
     assert "practice outside the conformal set: " in out and "practice concordance: n " in out
     assert ("performance: calibration site, but recommend will not choose: " if rb
             else "performance: calibration site (") in out
-    assert "performance model: constant failure rate; P(failure in H days) = 1 - exp(-lambda*H)" in out
+    assert ("performance model: constant failure rate with a gamma frailty per excavation; P(failure in H days) "
+            "for a new excavation = 1 - (1 + theta*lambda*H)^(-1/theta)") in out
     assert "performance poisson_deviance labor: site " in out and "over baseline_ngi " in out
     assert "performance poisson_deviance temporal: " in out and "non-inferiority" in out
     assert "performance coefficient ln_q: " in out and "performance coefficient support_rank: " in out
@@ -373,3 +374,19 @@ def test_level_options_checked_before_reading(hist, tmp_path, capsys, monkeypatc
         "error: --exposure-days needs --performance",
         "error: --threshold must be a probability strictly between 0 and 1",
         "error: --exposure-days must be greater than 0"]
+
+
+def test_model_output_refused_below_100_tramos(tmp_path, capsys, niveles_rapidos):
+    """Con menos de 100 tramos usables, save_model se niega (los resúmenes casi reconstruyen las filas): código 1,
+    un mensaje claro, sin la ruta, y ningún archivo."""
+    h, _ = pred.synthetic_history(seed=1, n_zones=2, labors_per_zone=3, tramos_per_labor=5)
+    folder = tmp_path / f"{SENT}-chico"
+    folder.mkdir()
+    rm.save_history_xlsx(h, folder / "historico.xlsx")
+    modelo = folder / "modelo.json"
+    code = main(["history", str(folder / "historico.xlsx"), "--performance", "--model-output", str(modelo)])
+    cap = sin_centinela(capsys)
+    assert code == 1 and not modelo.exists()
+    err = cap.err.strip().splitlines()[-1]
+    assert err.startswith("error: the model was fitted with fewer than 100 usable tramos")
+    assert "modelo.json" not in cap.err and str(tmp_path) not in cap.err

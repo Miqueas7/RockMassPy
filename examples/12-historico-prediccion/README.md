@@ -65,13 +65,16 @@ llevan ids inventados (`N001`…).
    que la carta Q (kappa ponderado contra el ficticio y la línea base NGI, por partición) y qué tramos tienen un tipo
    instalado fuera de su conjunto conforme al 90 %. **Describe la práctica, no recomienda**: lo que la mina instaló
    no es necesariamente lo que debió instalar.
-3. **Nivel 3** con `fit_performance`: P(falla) por tramo con restricciones de signo, validado por labor, por zona
+3. **Nivel 3** con `fit_performance`: una tasa de falla constante con fragilidad gamma por labor (las labores no son
+   copias) y restricciones de signo, con covarianza robusta por zona, validada por labor, por zona
    fuera y por año contra el ficticio y la línea base NGI. Sale «propio del sitio» solo si las particiones por labor
    y por zona superan a las dos referencias (IC 95 % de la mejora de la devianza de Poisson sobre cero) y la temporal no sale peor.
 4. Guarda el modelo en `modelo.json` (coeficientes, rangos, métricas y conteos; **nunca filas ni ids**) y lo vuelve
    a leer con `load_model`.
-5. Recomienda para 6 tramos nuevos (`tramos_nuevos.xlsx`) con `recommend`: P(falla) con su intervalo al 90 % para
-   cada tipo y el más liviano cuyo límite superior queda bajo el umbral. El **umbral de ejemplo es 0.35 a 365 días**
+5. Recomienda para 6 tramos nuevos (`tramos_nuevos.xlsx`) con `recommend`: P(falla) de una labor nueva con su
+   intervalo al 90 % para cada tipo y el más liviano cuyo límite superior queda bajo el umbral. Ese límite es
+   conservador por diseño (λ superior y el cuantil de la fragilidad con θ superior). El **umbral de ejemplo es 0.35 a
+   365 días**
    y lo fija el ingeniero según el costo de una falla en su labor: la librería no trae valor por defecto. Un tramo
    puede quedar sin elección (ningún tipo cumple, o hay extrapolación u otro motivo de bloqueo) y lo dice.
 6. Escribe el informe completo `prediccion.html` (y `.docx`): datos, auditoría, preparación, nivel 1, nivel 2,

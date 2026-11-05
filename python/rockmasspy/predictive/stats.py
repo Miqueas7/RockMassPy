@@ -812,17 +812,28 @@ class FrailtyHazardFit:
         """P(falla dentro de `days`) para una labor NUEVA: 1 − (1 + θλ·days)^(−1/θ)."""
         return self._marginal(self.rate(X), _exposure_days(days))
 
-    def frailty_quantile(self, level: float) -> float:
-        """Cuantil `level` de la Gamma(media 1, varianza θ); 1 con θ = 0."""
+    def theta_upper(self, level: float) -> float:
+        """Cota superior de θ: exp(log θ̂ + z·sd(log θ)), z = cuantil `level` de la normal. Sin desviación finita
+        (Laplace singular), θ̂."""
         lv = _level(level)
-        return 1.0 if self.theta < 1e-12 else float(gamma_dist.ppf(lv, 1.0 / self.theta, scale=self.theta))
+        if self.theta < 1e-12 or not math.isfinite(self.log_theta_sd):
+            return self.theta
+        return float(math.exp(math.log(self.theta) + norm.ppf(lv) * self.log_theta_sd))
+
+    def frailty_quantile(self, level: float) -> float:
+        """Cuantil `level` de la Gamma(media 1, varianza θ_sup), con θ_sup = `theta_upper(level)`; 1 con θ = 0.
+        Conservador por diseño: con pocas labores θ̂ puede salir bajo, y un θ chico angosta la cola de Z."""
+        lv = _level(level)
+        th = self.theta_upper(lv)
+        return 1.0 if th < 1e-12 else float(gamma_dist.ppf(lv, 1.0 / th, scale=th))
 
     def prob_interval(self, X, days, level: float = 0.9):
         """(central, inferior, superior) de P(falla dentro de `days`) para una labor NUEVA.
 
-        Central = la media marginal con λ̂; inferior = la media marginal con la cota inferior de η. Superior =
+        Central = la media marginal con λ̂ y θ̂; inferior = la media marginal con la cota inferior de η. Superior =
         1 − exp(−λ_sup·days·Z_q), con λ_sup = la cota superior de η al nivel (con `cov` y el ajuste por cota activa)
-        y Z_q = el cuantil `level` de la fragilidad: doblemente conservador (dos cuantiles a la vez)."""
+        y Z_q = el cuantil `level` de la fragilidad con la cota superior de θ: conservador por diseño (tres cotas a
+        la vez: η, θ y Z)."""
         d = _exposure_days(days)
         eta, lo, hi = _eta_interval(self, X, level)
         return (self._marginal(np.exp(eta), d), self._marginal(np.exp(lo), d),

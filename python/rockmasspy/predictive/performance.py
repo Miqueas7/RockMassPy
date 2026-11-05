@@ -23,7 +23,8 @@ train) y la línea base de nivel 0, el modelo exponencial con una sola variable,
 La recomendación (R10, §4 punto 7) es para una labor NUEVA: muestra P(falla en H días) para CADA tipo de la mina
 (central = la media marginal 1 − (1 + θλH)^(−1/θ)); elige el más liviano elegible cuyo límite superior
 1 − exp(−λ_sup·H·Z_q) queda bajo el umbral del ingeniero (umbral y H obligatorios), con λ_sup la cota de η al nivel y
-Z_q el cuantil `level` de la fragilidad (doblemente conservador). Solo elige si el modelo está calibrado al sitio,
+Z_q el cuantil `level` de la fragilidad evaluado con la cota superior de θ, exp(log θ̂ + z·sd(log θ)): conservador
+por diseño (con pocas labores θ̂ puede salir bajo). Solo elige si el modelo está calibrado al sitio,
 el efecto del sostenimiento está identificado y el tramo no extrapola. La decisión final queda en las columnas
 `decision_ingeniero` y `motivo`.
 

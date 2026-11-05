@@ -691,6 +691,11 @@ def test_fragilidad_intervalo_y_covarianza_agrupada():
     assert np.all(lo <= c0) and np.all(c0 <= hi)
     # el superior lleva el cuantil de la fragilidad: supera a la condicional con la cota de η
     assert f.frailty_quantile(0.9) > 1 and np.all(hi > f.prob_within(x0, 365.0))
+    # Z_q usa la cota superior de θ (conservador por diseño): mayor que con θ̂
+    from scipy.stats import gamma as gamma_dist
+    th = f.theta_upper(0.9)
+    assert th == pytest.approx(math.exp(math.log(f.theta) + 1.2815515655446004 * f.log_theta_sd))
+    assert th > f.theta and f.frailty_quantile(0.9) > gamma_dist.ppf(0.9, 1 / f.theta, scale=f.theta)
     assert f.theta > 0.2
     with pytest.raises(ValueError, match="at least one event and one non-event"):
         frailty_hazard_map_fit(X, np.zeros(len(d)), t, g)

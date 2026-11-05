@@ -30,12 +30,13 @@ def casos(tmp_path_factory):
     grande, _ = pred.synthetic_history(seed=0, n_zones=8, labors_per_zone=12, tramos_per_labor=15)
     grande = rm.History(_sent(grande.tramos), grande.support_types, grande.inspections)
     rm.save_history_xlsx(grande, d / "historico.xlsx")
-    chico, _ = pred.synthetic_history(seed=1, n_zones=2, labors_per_zone=3, tramos_per_labor=5)
+    # dos zonas: queda bajo el mínimo del nivel 3 (3 zonas) pero con ≥ 100 tramos, para que save_model lo guarde
+    chico, _ = pred.synthetic_history(seed=1, n_zones=2, labors_per_zone=6, tramos_per_labor=10)
     site = pred.fit_performance(grande, n_boot=N_BOOT)
     assert site.calibration == "site", site.calibration_reason
     pred.save_model(site, d / "site.json")
     no_site = pred.fit_performance(chico, n_boot=N_BOOT)
-    assert no_site.calibration != "site"
+    assert no_site.calibration != "site" and no_site.counts["tramos"] >= 100
     pred.save_model(no_site, d / "no_site.json")
     nuevos = tuple(dataclasses.replace(t, id_tramo=f"{SENT}-N{i}") for i, t in enumerate(grande.tramos[:5], 1))
     rm.save_history_xlsx(rm.History(nuevos, (), ()), d / "nuevos.xlsx")

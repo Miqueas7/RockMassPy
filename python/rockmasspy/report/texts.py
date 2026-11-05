@@ -621,7 +621,7 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "recomendación lo avisa tramo por tramo. Un tramo sin inspecciones no entra al nivel 3: nunca se "
               "asume estable. La validación es interna (otra parte de la misma mina), no externa. Tasa constante en el "
               "tiempo (sin envejecimiento del sostenimiento): el nivel 3 supone que λ no cambia con los días de "
-              "exposición. La cobertura se verificó con datos sintéticos; con datos reales se confirma con el "
+              "exposición, y que la variabilidad entre labores es una fragilidad gamma. La cobertura se verificó con datos sintéticos; con datos reales se confirma con el "
               "desempeño posterior.",
         "en": "Past practice as the label: level 2 learns what the mine installed, which depends on the rock class "
               "that was assessed; it reproduces past decisions, not optimal ones, and so it describes and does not "
@@ -631,7 +631,8 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "in Mahalanobis distance, the model does not hold; the recommendation flags it tramo by tramo. A tramo "
               "without inspections is left out of level 3: it is never assumed stable. The validation is internal "
               "(another part of the same mine), not external. Constant rate over time (no ageing of the support): "
-              "level 3 assumes λ does not change with the days of exposure. The coverage was checked with synthetic "
+              "level 3 assumes λ does not change with the days of exposure, and that the variability between "
+              "excavations is a gamma frailty. The coverage was checked with synthetic "
               "data; with real data it is confirmed by the later performance.",
     },
     "dd": {"es": "decisión de diseño", "en": "design decision"},
@@ -752,20 +753,26 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "dd_discarded": {"es": "Réplicas degeneradas admitidas", "en": "Degenerate replicates allowed"},
     # nivel 3
     "l3_text": {
-        "es": "P(falla) por tramo en un horizonte de exposición, con un modelo bayesiano MAP: prior Cauchy débil "
-              "sobre las variables estandarizadas (Gelman et al. 2008 [V2]), covarianza de Laplace y restricciones "
-              "de signo: peor macizo, más luz y más profundidad no bajan P(falla); más sostenimiento no la sube. La "
-              "exposición entra en el modelo, así que P(falla) depende del horizonte que se pida. Un tramo falla si "
+        "es": "P(falla) por tramo en un horizonte de exposición, con una tasa de falla constante y una fragilidad "
+              "gamma compartida por labor (las labores de una mina no son copias: la fragilidad recoge esa "
+              "variabilidad), ajustadas por MAP sobre la verosimilitud marginal: prior Cauchy débil sobre las "
+              "variables estandarizadas (Gelman et al. 2008 [V2]), normal(0, 2) sobre log θ, covarianza robusta "
+              "agrupada por zona (Laplace con menos de 5 zonas) y restricciones de signo: peor macizo, más luz y más "
+              "profundidad no bajan P(falla); más sostenimiento no la sube. La exposición entra como offset, así que "
+              "P(falla) depende del horizonte que se pida. Un tramo falla si "
               "alguna inspección dice Falla o Reparado (por confirmar); la exposición va desde la instalación hasta "
               "la primera falla o la última inspección. La línea base es el mismo modelo con la categoría de la "
-              "carta Q NGI como única variable del macizo y la misma exposición, sin cotas.",
-        "en": "P(failure) per tramo over an exposure horizon, with a MAP Bayesian model: weak Cauchy prior on the "
-              "standardized variables (Gelman et al. 2008 [V2]), Laplace covariance and sign constraints: poorer "
-              "rock, larger span and greater depth do not lower P(failure); more support does not raise it. Exposure "
-              "enters the model, so P(failure) depends on the horizon asked for. A tramo fails if any inspection "
+              "carta Q NGI como única variable del macizo y la misma exposición, sin cotas ni fragilidad.",
+        "en": "P(failure) per tramo over an exposure horizon, with a constant failure rate and a gamma frailty "
+              "shared by excavation (the excavations of a mine are not copies: the frailty captures that "
+              "variability), fitted by MAP on the marginal likelihood: weak Cauchy prior on the standardized "
+              "variables (Gelman et al. 2008 [V2]), normal(0, 2) on log θ, zone-clustered robust covariance (Laplace "
+              "with fewer than 5 zones) and sign constraints: poorer rock, larger span and greater depth do not lower "
+              "P(failure); more support does not raise it. Exposure enters as an offset, so P(failure) depends on the "
+              "horizon asked for. A tramo fails if any inspection "
               "says Falla or Reparado (to be confirmed); exposure runs from installation to the first failure or "
               "the last inspection. The baseline is the same model with the NGI Q chart category as its only rock "
-              "variable and the same exposure, unbounded.",
+              "variable and the same exposure, unbounded and without frailty.",
     },
     "l3_rule_val": {
         "es": "Regla de calibración: «propio del sitio» exige cumplir el mínimo del nivel 3 y que las particiones "
@@ -783,8 +790,12 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "does not block and the validation warns. \"Partial\": meets the minimum but not the rest; it shows "
               "P(failure) and does not choose. \"Not calibrated to the site\": below the minimum.",
     },
-    "l3_model": {"es": "Modelo: tasa de falla constante; P(falla en H días) = 1 − exp(−λH).",
-                 "en": "Model: constant failure rate; P(failure in H days) = 1 − exp(−λH)."},
+    "l3_model": {"es": "Modelo: tasa de falla constante con fragilidad gamma por labor; P(falla en H días) de una "
+                       "labor nueva = 1 − (1 + θλH)^(−1/θ); la cota de decisión usa λ superior y el cuantil de la "
+                       "fragilidad.",
+                 "en": "Model: constant failure rate with a gamma frailty per excavation; P(failure in H days) for "
+                       "a new excavation = 1 − (1 + θλH)^(−1/θ); the decision bound uses the upper λ and the frailty "
+                       "quantile."},
     "cap_l3_state": {"es": "Estado y datos del nivel 3", "en": "Level 3 status and data"},
     "l3_calibration": {"es": "Nivel de calibración", "en": "Calibration level"},
     "l3_reason": {"es": "Motivo", "en": "Reason"},
@@ -802,8 +813,10 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "cal_not_calibrated": {"es": "no calibrado al sitio", "en": "not calibrated to the site"},
     "l3_no_fit": {"es": "No hay ajuste: todos los tramos usables tienen el mismo resultado.",
                   "en": "There is no fit: every usable tramo has the same outcome."},
-    "cap_l3_coef": {"es": "Coeficientes del modelo MAP (escala original) con su IC 95 % de Laplace",
-                    "en": "MAP model coefficients (original scale) with their 95 % Laplace CI"},
+    "cap_l3_coef": {"es": "Coeficientes del modelo MAP (escala original) con su IC 95 % (covarianza robusta por "
+                          "zona; Laplace con menos de 5 zonas)",
+                    "en": "MAP model coefficients (original scale) with their 95 % CI (zone-robust covariance; "
+                          "Laplace with fewer than 5 zones)"},
     "sign_up": {"es": "≥ 0", "en": "≥ 0"},
     "sign_down": {"es": "≤ 0", "en": "≤ 0"},
     "sign_free": {"es": "libre", "en": "free"},
@@ -820,11 +833,11 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
                    "en": "Out-of-fold calibration curve: expected versus observed events by decile of λ "
                          "(Van Calster et al. 2019 [V2])"},
     "l3_iso_text": {
-        "es": "Isoprobabilidades de falla por tipo en el plano Q–De, al estilo de Mawdesley et al. (2001) [V2 + resumen], "
+        "es": "Isoprobabilidades de falla de una labor nueva (media marginal) por tipo en el plano Q–De, al estilo de Mawdesley et al. (2001) [V2 + resumen], "
               "dentro del rango de entrenamiento, a {days:.0f} días de exposición (el horizonte del ingeniero o, si "
               "no lo dio, la mediana del histórico), con el tipo de labor de referencia y, si el modelo la usa, la "
               "profundidad media. Los puntos son los tramos con ese tipo instalado.",
-        "en": "Probability of failure contours by type in the Q–De plane, after Mawdesley et al. (2001) [V2 + resumen], "
+        "en": "Probability of failure contours for a new excavation (marginal mean) by type in the Q–De plane, after Mawdesley et al. (2001) [V2 + resumen], "
               "within the training range, at {days:.0f} days of exposure (the engineer's horizon or, if none was "
               "given, the history's median), with the reference excavation type and, if the model uses it, the mean "
               "depth. The points are the tramos with that type installed.",
@@ -838,18 +851,20 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
                    "en": "The model uses RMR: the Q–De contours do not apply."},
     "fig_l3_iso": {"es": "Isoprobabilidad de falla, tipo {code}", "en": "Probability of failure contours, type {code}"},
     "l3_rule": {
-        "es": "Regla de recomendación: para un tramo nuevo se calcula P(falla) con su intervalo al 90 % para cada "
-              "tipo de la mina, del más liviano al más pesado, y se elige el más liviano cuyo límite superior queda "
-              "bajo el umbral. El umbral lo fija el ingeniero: es obligatorio y no tiene valor por defecto, igual "
+        "es": "Regla de recomendación: para un tramo nuevo (en una labor nueva) se calcula P(falla) con su "
+              "intervalo al 90 % para cada tipo de la mina, del más liviano al más pesado, y se elige el más liviano "
+              "cuyo límite superior queda bajo el umbral. El límite superior es conservador por diseño: usa λ "
+              "superior y el cuantil de la fragilidad con θ superior. El umbral lo fija el ingeniero: es obligatorio y no tiene valor por defecto, igual "
               "que el horizonte de exposición (rockmass recommend --threshold P --exposure-days D). Solo con el "
               "nivel «propio del sitio» y sin motivo de bloqueo (extrapolación, tipos sin historia suficiente, "
               "efecto del sostenimiento no significativo o cota activa) se elige un tipo; los motivos van con cada "
               "recomendación. Cada recomendación trae las tres razones principales, la "
               "alerta de extrapolación y las columnas vacías decision_ingeniero y motivo, donde el ingeniero "
               "registra lo que decidió; con el desempeño posterior, alimentan el siguiente ajuste.",
-        "en": "Recommendation rule: for a new tramo, P(failure) with its 90 % interval is computed for every "
-              "support type of the mine, lightest to heaviest, and the lightest type whose upper bound stays below "
-              "the threshold is chosen. The engineer sets the threshold: it is mandatory and has no default, like "
+        "en": "Recommendation rule: for a new tramo (in a new excavation), P(failure) with its 90 % interval is "
+              "computed for every support type of the mine, lightest to heaviest, and the lightest type whose upper "
+              "bound stays below the threshold is chosen. The upper bound is conservative by design: it uses the "
+              "upper λ and the frailty quantile at the upper θ. The engineer sets the threshold: it is mandatory and has no default, like "
               "the exposure horizon (rockmass recommend --threshold P --exposure-days D). A type is chosen only at "
               "the \"site\" level and with no blocking reason (extrapolation, types without enough history, a "
               "non-significant support effect or an active bound); the reasons go with each recommendation. Each "
@@ -874,12 +889,12 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "dd_temporal": {"es": "Partición temporal", "en": "Temporal partition"},
     "dd_temporal_v": {"es": "no inferioridad (mejora puntual ≥ 0)", "en": "non-inferiority (point gain ≥ 0)"},
     "dd_interval": {"es": "Intervalo de P(falla) y límite usado", "en": "P(failure) interval and bound used"},
-    "dd_interval_v": {"es": "límite superior de P(falla) para una labor nueva: incluye la incertidumbre de los "
-                            "coeficientes (covarianza robusta por zona) y la variabilidad entre labores (fragilidad "
-                            "gamma)",
-                      "en": "upper bound of P(failure) for a new excavation: it includes the uncertainty of the "
-                            "coefficients (zone-robust covariance) and the variability between excavations (gamma "
-                            "frailty)"},
+    "dd_interval_v": {"es": "límite superior de P(falla) para una labor nueva, 1 − exp(−λ_sup·H·Z_q): incluye la "
+                            "incertidumbre de los coeficientes (covarianza robusta por zona) y la variabilidad entre "
+                            "labores (cuantil de la fragilidad gamma con la cota superior de θ)",
+                      "en": "upper bound of P(failure) for a new excavation, 1 − exp(−λ_sup·H·Z_q): it includes the "
+                            "uncertainty of the coefficients (zone-robust covariance) and the variability between "
+                            "excavations (gamma frailty quantile at the upper bound of θ)"},
     "l3_rec_blocked": {"es": "Atención: recommend no elegirá ningún tipo con este modelo, aunque su nivel sea «propio "
                              "del sitio». Motivos: {reasons}.",
                        "en": "Attention: recommend will not choose any type with this model, even at the \"site\" "
