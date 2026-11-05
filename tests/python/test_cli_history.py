@@ -251,3 +251,89 @@ def test_single_pair_domain_skipped_in_json(hist, tmp_path, capsys):
     csv_text = (out_dir / "site_correlations.csv").read_text(encoding="utf-8-sig")
     assert csv_text.count(f"{SENT}-solo") == 3  # una fila por par
     assert js["correlations"] and all("n=1," not in c["source"] for c in js["correlations"])
+
+
+# ---------- niveles 2 y 3: --practice, --performance, --model-output ----------
+
+@pytest.fixture(scope="module")
+def grande(tmp_path_factory):
+    """Histórico grande con efecto del sitio (el nivel 3 queda «site»), con ZZSENT en labor, zona y litología."""
+    h, _ = pred.synthetic_history(seed=0, n_zones=8, labors_per_zone=12, tramos_per_labor=15)
+    ts = [dataclasses.replace(t, labor_codigo=f"{SENT}-{t.labor_codigo}", zona_nivel=f"{SENT}-{t.zona_nivel}",
+                              litologia=f"{SENT}-{t.litologia}") for t in h.tramos]
+    p = tmp_path_factory.mktemp("grande") / "historico.xlsx"
+    rm.save_history_xlsx(rm.History(tuple(ts), h.support_types, h.inspections), p)
+    return p
+
+
+@pytest.fixture
+def niveles_rapidos(monkeypatch):
+    """La CLI llama a predictive.audit_practice y predictive.fit_performance al correr: se cambian ahí."""
+    calls = []
+    for name in ("audit_practice", "fit_performance"):
+        orig = getattr(pred, name)
+
+        def rapido(*args, _orig=orig, _name=name, **kw):
+            calls.append(_name)
+            return _orig(*args, **{**kw, "n_boot": N_BOOT})
+
+        monkeypatch.setattr(pred, name, rapido)
+    return calls
+
+
+def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_rapidos):
+    out_dir, modelo, informe = tmp_path / f"{SENT}-res", tmp_path / "modelo.json", tmp_path / "informe.html"
+    code = main(["history", str(grande), "--practice", "--performance", "-o", str(out_dir),
+                 "--model-output", str(modelo), "--report", str(informe), "--lang", "en"])
+    out = sin_centinela(capsys).out
+    assert niveles_rapidos == ["audit_practice", "fit_performance"]
+    assert code == 0, out
+    assert "practice ln_q: coherent (beta " in out and "practice ln_de: coherent (beta " in out
+    assert "practice kappa labor: practice " in out and "over ngi " in out
+    assert "practice outside the conformal set: " in out and "practice concordance: n " in out
+    assert "performance: calibration site (" in out
+    assert "performance brier labor: site " in out and "over baseline_ngi " in out
+    assert "performance brier temporal: " in out and "non-inferiority" in out
+    assert "performance coefficient ln_q: " in out and "performance coefficient support_rank: " in out
+    assert not any(w.startswith("T0") for w in out.split())  # ningún id_tramo
+    assert [x for x in out.splitlines() if x.startswith(("results: ", "model: "))] == [
+        "results: history_findings.csv", "results: practice_results.csv", "results: validation_summary.csv",
+        "model: modelo.json"]
+    prac = _csv(out_dir / "practice_results.csv")
+    assert tuple(prac[0]) == pred.PRACTICE_RESULT_COLUMNS and prac[1][0].startswith("T0")  # el id sí va al archivo
+    val = _csv(out_dir / "validation_summary.csv")
+    assert {r[0] for r in val[1:]} == {"2", "3"} and {"labor", "zone", "temporal"} <= {r[1] for r in val[1:]}
+    js = modelo.read_text(encoding="utf-8")
+    assert SENT not in js and "T0" not in js
+    assert pred.load_model(modelo).calibration == "site"
+    html = informe.read_text(encoding="utf-8")
+    assert SENT not in html and "historico.xlsx" not in html
+    assert "Level 2" in html and "Level 3" in html and "TRIPOD+AI" in html
+
+
+def test_small_history_levels_exit_2(hist, capsys, niveles_rapidos):
+    """Con unos 250 tramos el nivel 3 no queda «site»: código 2 aunque la auditoría esté limpia."""
+    code = main(["history", str(hist["limpio"]), "--practice", "--performance", "--quality", "rmr"])
+    out = sin_centinela(capsys).out
+    assert code == 2
+    assert "practice: n " in out and "performance: calibration " in out
+    assert "performance: calibration site" not in out and "quality rmr" in out
+
+
+def test_level_options_checked_before_reading(hist, tmp_path, capsys, monkeypatch):
+    def no_leer(*a, **k):
+        raise AssertionError("the history was read before checking the options")
+
+    monkeypatch.setattr(rm.history, "load_history", no_leer)
+    src = str(hist["limpio"])
+    assert main(["history", src, "--quality", "q"]) == 1
+    assert main(["history", src, "--model-output", "m.json"]) == 1
+    assert main(["history", src, "--performance", "--model-output", str(tmp_path / f"{SENT}.txt")]) == 1
+    assert main(["history", src, "--performance", "--model-output", str(tmp_path / SENT / "m.json")]) == 1
+    assert main(["history", src, "--performance", "--quality", "gsi"]) == 1  # argparse
+    cap = sin_centinela(capsys)
+    assert cap.out == ""
+    errs = [x for x in cap.err.splitlines() if x.startswith("error: ")]
+    assert errs[:4] == ["error: --quality needs --performance", "error: --model-output needs --performance",
+                        "error: --model-output must end in .json", "error: --model-output: its folder does not exist"]
+    assert errs[4].startswith("error: argument --quality: invalid choice: 'gsi'")

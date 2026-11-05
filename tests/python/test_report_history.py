@@ -142,3 +142,100 @@ def test_methods_table_separates_marks(caso):
         assert all(r[2] == "-" and r[3] in ("Primary", "Secondary") for r in priors)
         boot = stats[1][0]
         assert "200" in boot and "2000" not in boot
+
+
+# ---------- niveles 2 y 3 y TRIPOD+AI ----------
+
+@pytest.fixture(scope="module")
+def niveles():
+    """Histórico grande con efecto del sitio (nivel 3 «site») y ZZSENT en labor, zona y litología."""
+    h, _ = pred.synthetic_history(seed=0, n_zones=8, labors_per_zone=12, tramos_per_labor=15)
+    ts = [dataclasses.replace(t, labor_codigo=f"{SENT}{t.labor_codigo}", zona_nivel=f"{SENT}{t.zona_nivel}",
+                              litologia=f"{SENT}{t.litologia}") for t in h.tramos]
+    h = rm.History(tuple(ts), h.support_types, h.inspections)
+    return h, rm.audit_history(h), pred.audit_practice(h, n_boot=100), pred.fit_performance(h, n_boot=100)
+
+
+def _rep(niveles, **kw):
+    h, audit, practice, perf = niveles
+    return rp.build_history_report(audit, history=h, practice=practice, performance=perf, figures=False, **kw)
+
+
+def test_level_sections_order(niveles):
+    rep = _rep(niveles, threshold=0.3)
+    assert [s.number for s in rep.sections] == [str(i) for i in range(1, 9)]
+    assert [s.title for s in rep.sections[4:]] == [rp.t(k, "es") for k in ("hs_l2", "hs_l3", "hs_tripod", "hs_5")]
+    h, audit, practice, _ = niveles
+    solo2 = rp.build_history_report(audit, practice=practice, figures=False)
+    assert [s.title for s in solo2.sections[4:]] == [rp.t(k, "es") for k in ("hs_l2", "hs_tripod", "hs_5")]
+    assert rp.build_history_report(audit).sections[-1].blocks[1].text == rp.t("hist_limits_none", "es")
+
+
+def test_level2_describes_and_lists_outside(niveles):
+    _, _, practice, _ = niveles
+    s = _rep(niveles).sections[4]
+    texto = " ".join(b.text for b in s.blocks if isinstance(b, rp.Paragraph))
+    assert "describe la práctica de la mina, no recomienda" in texto
+    data, coef, val, conc, outside, dd = tablas(s)[:6]
+    assert dict(data.rows)[rp.t("l2_n", "es")] == str(practice.n)
+    assert {r[0]: r[4] for r in coef.rows}["ln_q"] == "coherente"
+    assert [r[0] for r in val.rows] == [rp.t(f"part_{p}", "es") for p in ("labor", "zone", "temporal")]
+    assert val.header[3:6] == ("practice", "dummy", "ngi")
+    assert len(conc.rows) == len(practice.concordance.types)
+    assert outside.header[0] == "id_tramo" and {r[0] for r in outside.rows} == set(practice.outside_set)
+    assert "decisión de diseño" in dd.caption and len(dd.rows) == 4
+
+
+def test_level3_state_validation_figures_and_rule(niveles):
+    _, _, _, perf = niveles
+    s = _rep(niveles, threshold=0.3).sections[5]
+    state, coef, val = tablas(s)[:3]
+    assert dict(state.rows)[rp.t("l3_calibration", "es")] == "propio del sitio"
+    assert [r[0] for r in coef.rows] == list(perf.features)
+    temporal = dict((r[0], r[-1]) for r in val.rows)[rp.t("part_temporal", "es")]
+    assert temporal.startswith("no inferioridad")
+    figs = [b for b in s.blocks if isinstance(b, rp.Figure)]
+    assert len(figs) == 1 + len(perf.support_types) and all(f.png is None for f in figs)  # figures=False
+    texto = " ".join(b.text for b in s.blocks if isinstance(b, rp.Paragraph))
+    assert "obligatorio y no tiene valor por defecto" in texto and "P(falla) ≤ 0.3" in texto
+    assert "no inferioridad" in texto and "zona fuera" in texto
+    dd = [x for x in tablas(s) if "decisión de diseño" in x.caption]
+    assert dd and len(dd[0].rows) == 9
+    sin_umbral = _rep(niveles).sections[5]
+    assert any(isinstance(b, rp.Paragraph) and b.text == rp.t("l3_threshold_none", "es") for b in sin_umbral.blocks)
+    with pytest.raises(ValueError, match="threshold"):
+        _rep(niveles, threshold=1.0)
+
+
+def test_tripod_and_limitations(niveles):
+    from rockmasspy.report.texts import TRIPOD_ITEMS
+
+    rep = _rep(niveles)
+    (tab,) = tablas(rep.sections[6])
+    assert len(tab.rows) == len(TRIPOD_ITEMS) and {r[1] for r in tab.rows} <= {"sí", "parcial", "no", "no aplica"}
+    assert "Collins et al. 2024" in rep.sections[6].blocks[0].text
+    lim = " ".join(b.text for b in rep.sections[7].blocks)
+    for frase in ("práctica pasada como etiqueta", "Sesgo de selección", "Extrapolación"):
+        assert frase in lim
+    assert {"TRIPOD+AI", "Gelman et al. (2008)"} <= {m.method_id for m in rep.methods} | {m.source for m in rep.methods}
+
+
+def test_levels_no_sentinel_english_and_writers(niveles, tmp_path):
+    for lang in ("es", "en"):
+        rep = _rep(niveles, lang=lang)
+        assert not any(SENT in x for x in textos(rep))
+    en = _rep(niveles, lang="en")
+    assert en.sections[4].title.startswith("Level 2") and en.sections[6].title == "TRIPOD+AI checklist"
+    pytest.importorskip("matplotlib")
+    h, audit, practice, perf = niveles
+    rep = rp.build_history_report(audit, history=h, practice=practice, performance=perf, threshold=0.3)
+    figs = [b for b in rep.sections[5].blocks if isinstance(b, rp.Figure)]
+    assert figs and all(f.png[:4] == b"\x89PNG" for f in figs)
+    html = rp.write_html(rep, tmp_path / "n.html").read_text(encoding="utf-8")
+    assert SENT not in html and practice.outside_set[0] in html  # el id_tramo, solo en su tabla
+    docx = pytest.importorskip("docx")
+    d = docx.Document(str(rp.write_docx(rep, tmp_path / "n.docx")))
+    heads = [p.text for p in d.paragraphs if p.style.name == "Heading 1"]
+    assert heads[4:] == ["5. Nivel 2: auditoría de la práctica", "6. Nivel 3: desempeño y recomendación",
+                         "7. Lista TRIPOD+AI", "8. Limitaciones"]
+    assert SENT not in "\n".join(c.text for t in d.tables for row in t.rows for c in row.cells)

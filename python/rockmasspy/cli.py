@@ -610,6 +610,93 @@ def _fit_correlations(history, group_by, deming_ratio) -> list:
     return out
 
 
+def _gain(i, fmt: str = ".3f") -> str:
+    return f"{i.value:{fmt}} ({i.ci_low:{fmt}}; {i.ci_high:{fmt}})"
+
+
+def _decision_note(partition: str, c) -> str:
+    """Cómo pesa la partición en la decisión (ValidationReport.recommend): labor y zona por superioridad, la
+    temporal por no inferioridad (mejora puntual ≥ 0), la aleatoria no cuenta."""
+    if partition == "temporal":
+        return "non-inferiority " + ("met" if all(i.value >= 0 for i in c.improvements.values()) else "not met")
+    if partition == "random":
+        return "optimistic, does not count"
+    return f"blockers {len(c.blockers)}"
+
+
+def _print_validation(level: str, metric: str, report, fmt: str) -> None:
+    """Una línea por partición: métricas, mejora con IC y cuántos motivos hay para no recomendar (sin etiquetas)."""
+    for p, c in report.results.items():
+        refs = list(c.improvements)
+        ms = ", ".join(f"{m} {c.metrics[m]:{fmt}}" for m in (c.main, *refs))
+        gains = ", ".join(f"over {r} {_gain(c.improvements[r], fmt)}" for r in refs)
+        print(f"{level} {metric} {p}: {ms}; gain {gains}; {_decision_note(p, c)}")
+    for p, why in report.skipped.items():
+        print(f"{level} {metric} {p}: skipped ({why})")
+    for w in report.warnings:
+        print(f"{level} validation warning: {w}")
+
+
+def _print_practice(a) -> bool:
+    """Líneas del nivel 2; True si hay que revisar (práctica incoherente, no significativa o datos insuficientes)."""
+    print(f"practice: n {a.n}, labors {a.labors}, types {', '.join(a.types)}, {a.status}")
+    for name, v in a.verdicts.items():
+        c = a.coefficients.get(name)
+        coef = "" if c is None else f" (beta {c.value:.3f}, 95% CI {c.ci_low:.3f}; {c.ci_high:.3f})"
+        print(f"practice {name}: {v}{coef}")
+    _print_validation("practice", "kappa", a.validation, ".3f")
+    print(f"practice beyond the Q chart: {'yes' if a.beyond_chart else 'no'} (describes the practice, "
+          "it does not recommend)")
+    n_sets = sum(x.conformal_set is not None for x in a.tramos)
+    cov = getattr(a, "coverage", getattr(a, "calibration_coverage", None))  # el campo puede cambiar de nombre
+    print(f"practice outside the conformal set: {len(a.outside_set)} of {n_sets} tramos (level {a.conformal_level:g}"
+          + ("" if cov is None else f", coverage {cov:.3f}") + ")")
+    cc = a.concordance
+    print("practice concordance: none" if cc is None else
+          f"practice concordance: n {cc.n}, kappa {'-' if cc.kappa is None else f'{cc.kappa:.3f}'}")
+    for w in a.warnings:
+        print(f"practice warning: {w}")
+    return a.status != "ready" or any(v != "coherent" for v in a.verdicts.values())
+
+
+def _print_performance(m) -> bool:
+    """Líneas del nivel 3; True si el modelo no quedó «site»."""
+    c = m.counts
+    print(f"performance: calibration {m.calibration} ({m.calibration_reason})")
+    print(f"performance: n {c['tramos']}, failures {c['failures']}, labors {c['labors']}, zones {c['zones']}, "
+          f"parameters {c['parameters']}, quality {m.quality}")
+    if m.validation is not None:
+        _print_validation("performance", "brier", m.validation, ".4f")
+    coefs = m.coefficients  # {} sin ajuste
+    for name, (lo, hi) in zip(coefs, m.coef_ci):
+        bound = " (sign bound active)" if name in m.active_bounds else ""
+        print(f"performance coefficient {name}: {coefs[name]:.4g} (95% CI {lo:.4g}; {hi:.4g}){bound}")
+    for w in m.warnings:
+        print(f"performance warning: {w}")
+    return m.calibration != "site"
+
+
+def _save_validation_summary(reports: dict, path) -> Path:
+    """Resumen de la validación: una fila por nivel × partición × modelo (o una por partición omitida). Sin ids."""
+    from .batch import write_table
+
+    rows = []
+    for level, r in reports.items():
+        for p, c in r.results.items():
+            blockers = "; ".join(c.blockers)
+            for m in (c.main, *c.improvements):
+                i = c.improvements.get(m)
+                rows.append((level, p, m, c.metrics[m], None if i is None else i.value,
+                             None if i is None else i.ci_low, None if i is None else i.ci_high, c.n_rows,
+                             c.n_groups, c.failed_folds.get(m, 0), blockers, None))
+        rows += [(level, p, None, None, None, None, None, None, None, None, None, why) for p, why in r.skipped.items()]
+    return write_table(path, _VALIDATION_COLUMNS, rows, sheet="Validacion")
+
+
+_VALIDATION_COLUMNS = ("nivel", "particion", "modelo", "metrica", "mejora_del_principal", "ic_inf", "ic_sup",
+                       "filas", "labores", "pliegues_fallidos", "motivos_no_recomienda", "omitida")
+
+
 def _history(a) -> int:
     from collections import Counter
 
@@ -625,6 +712,12 @@ def _history(a) -> int:
         raise ValueError("--report: its folder does not exist")
     if a.output and Path(a.output).is_file():
         raise ValueError("--output must be a folder, not a file")
+    if not a.performance and (a.quality is not None or a.model_output):
+        raise ValueError(f"{'--quality' if a.quality is not None else '--model-output'} needs --performance")
+    if a.model_output and Path(a.model_output).suffix.lower() != ".json":
+        raise ValueError("--model-output must end in .json")
+    if a.model_output and not Path(a.model_output).resolve().parent.is_dir():
+        raise ValueError("--model-output: its folder does not exist")
     group_by = None if a.group_by.lower() == "none" else a.group_by
     try:
         check_group_by(group_by)
@@ -637,6 +730,15 @@ def _history(a) -> int:
     history = load_history(a.history)
     audit = audit_history(history)
     fits = _fit_correlations(history, group_by, a.deming_ratio) if a.correlations else None  # antes del 1.er print
+    practice = performance = None
+    if a.practice:
+        from . import predictive  # el atributo del paquete: las pruebas cambian n_boot ahí
+
+        practice = predictive.audit_practice(history)
+    if a.performance:
+        from . import predictive
+
+        performance = predictive.fit_performance(history, quality=a.quality or "q")
     c = history_audit_counts(audit)
     print(f"tramos: {c['tramos']}\nsupport types: {c['support_types']}\ninspections: {c['inspections']}")
     print(f"findings: {c['findings']}")
@@ -660,6 +762,8 @@ def _history(a) -> int:
             warns.update({*r.warnings, *f.warnings})
     for w, n in sorted(warns.items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"warning: {w} ({n} fit{'' if n == 1 else 's'})")
+    review = (practice is not None and _print_practice(practice)) | \
+        (performance is not None and _print_performance(performance))
     try:  # en Excel o sin permiso: el OSError de Python trae la ruta completa
         if a.output:  # solo el nombre: la carpeta protegida puede llevar el nombre de la mina
             out = Path(a.output)
@@ -669,16 +773,112 @@ def _history(a) -> int:
                 from .predictive import save_site_correlations
 
                 paths += save_site_correlations(fits, out)
+            if practice is not None:
+                from .predictive import save_practice_results
+
+                paths.append(save_practice_results(practice, out / "practice_results.csv"))
+            reports = {lv: x.validation for lv, x in (("2", practice), ("3", performance))
+                       if x is not None and x.validation is not None}
+            if reports:
+                paths.append(_save_validation_summary(reports, out / "validation_summary.csv"))
             for p in paths:
                 print(f"results: {p.name}")
+        if a.model_output:
+            from .predictive import save_model
+
+            print(f"model: {save_model(performance, a.model_output).name}")
         if a.report:
-            rep = rp.build_history_report(audit, fits or (), history=history, lang=a.lang)
+            rep = rp.build_history_report(audit, fits or (), history=history, practice=practice,
+                                          performance=performance, lang=a.lang)
             out = rp.write_docx(rep, a.report) if ext == ".docx" else rp.write_html(rep, a.report)
             print(f"report: {Path(out).name}")
     except OSError:
         raise OSError("results or report could not be written (in use or no permission)") from None
     print("the library recommends, the engineer decides")
-    return 2 if audit.findings or not_site else 0
+    return 2 if audit.findings or not_site or review else 0
+
+
+class _PositionedPractice:
+    """El nivel 2 para `recommend`: un tramo que el modelo de práctica no puede evaluar falla con SU posición
+    (practice.conformal_set recibe un solo tramo y diría siempre «position 0»)."""
+
+    def __init__(self, audit):
+        self.audit, self.i = audit, 0
+
+    def conformal_set(self, tramo):
+        i, self.i = self.i, self.i + 1
+        try:
+            return self.audit.conformal_set(tramo)
+        except ValueError as e:
+            raise ValueError(f"tramo at position {i + 1}: practice model: "
+                             f"{re.sub(r'^tramo at position 0: ', '', str(e))}") from None
+
+
+def _new_tramos(path):
+    """Tramos nuevos: un .xlsx o una carpeta con la plantilla del histórico (solo la hoja Tramos es obligatoria), o
+    un .csv que es la hoja Tramos. Los errores no llevan la ruta."""
+    from .history import load_history
+
+    p = Path(path)
+    if p.suffix.lower() != ".csv":
+        return load_history(p).tramos
+    from .csv_io import _CsvSource
+    from .history import _read_tramos
+
+    if not p.is_file():
+        raise FileNotFoundError("tramos file not found")
+    try:
+        return _read_tramos(_CsvSource({"Tramos": p}), None)
+    except OSError:
+        raise OSError("tramos file could not be read (in use or no permission)") from None
+
+
+def _recommend(a) -> int:
+    if not 0 < a.threshold < 1:  # antes de leer: el umbral lo fija el ingeniero y no tiene valor por defecto
+        raise ValueError("--threshold must be a probability strictly between 0 and 1")
+    if not a.exposure_days > 0:
+        raise ValueError("--exposure-days must be greater than 0")
+    if a.output and Path(a.output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--output must end in .csv or .xlsx")
+    if a.output and not Path(a.output).resolve().parent.is_dir():
+        raise ValueError("--output: its folder does not exist")
+    from . import predictive
+
+    try:
+        model = predictive.load_model(a.model)
+    except OSError:  # el OSError de Python trae la ruta completa
+        raise OSError("model file could not be read (missing, in use or no permission)") from None
+    except (KeyError, TypeError, AttributeError):
+        raise ValueError("model file is not a valid performance model") from None
+    tramos = _new_tramos(a.tramos)
+    if not tramos:
+        raise ValueError("no tramos in the input")
+    practice = None
+    if a.practice_from:
+        from .history import load_history
+
+        practice = _PositionedPractice(predictive.audit_practice(load_history(a.practice_from)))
+    recs = predictive.recommend(model, tramos, threshold=a.threshold, exposure_days=a.exposure_days,
+                                practice=practice)
+    print(f"model: calibration {model.calibration}, threshold {a.threshold:g}, exposure {a.exposure_days:g} days, "
+          f"interval {recs[0].level:g}")
+    print(f"tramos: {len(recs)}")
+    for i, r in enumerate(recs, 1):  # la posición, nunca el id_tramo (va solo en el archivo)
+        why = r.reason if r.reason is None or isinstance(r.reason, str) else "; ".join(r.reason)
+        what = r.chosen if r.chosen else f"no recommendation: {why}"
+        alerts = "; ".join(r.extrapolation_notes) or "none"
+        cset = "" if r.conformal_set is None else f"; practice set {', '.join(r.conformal_set) or 'none'}"
+        print(f"tramo {i}: {what}; alerts: {alerts}; calibration {r.calibration}{cset}")
+    n_chosen = sum(r.chosen is not None for r in recs)
+    n_alert = sum(r.extrapolation for r in recs)
+    print(f"recommended: {n_chosen} of {len(recs)}; with alerts: {n_alert}")
+    if a.output:
+        try:
+            print(f"results: {predictive.save_recommendations(recs, a.output).name}")
+        except OSError:
+            raise OSError("results could not be written (in use or no permission)") from None
+    print("the library recommends, the engineer decides")
+    return 2 if n_chosen < len(recs) or n_alert else 0
 
 
 class _Parser(argparse.ArgumentParser):
@@ -837,12 +1037,34 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--group-by", default="litologia", metavar="COL", help="domain column (default litologia; "
                    "none = whole mine only)")
     c.add_argument("--deming-ratio", type=float, metavar="R", help="error-variance ratio for the Deming line")
-    c.add_argument("-o", "--output", metavar="DIR", help="folder for history_findings.csv, site_correlations.csv "
-                   "and site_correlations.json")
+    c.add_argument("--practice", action="store_true", help="level 2: audit the support practice (describes, "
+                   "never recommends; needs the ml extra)")
+    c.add_argument("--performance", action="store_true", help="level 3: fit and validate the P(failure) model "
+                   "(needs the ml extra)")
+    c.add_argument("--quality", choices=QUALITY_CHOICES, help="rock quality of the level 3 model (default q; needs "
+                   "--performance)")
+    c.add_argument("--model-output", metavar="MODELO.json", help="save the level 3 model (no rows, no ids)")
+    c.add_argument("-o", "--output", metavar="DIR", help="folder for history_findings.csv, site_correlations.csv, "
+                   "site_correlations.json, practice_results.csv and validation_summary.csv")
     c.add_argument("--report", metavar="OUT.docx|.html")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.set_defaults(fn=_history)
+    c = sub.add_parser("recommend", help="level 3: P(failure) of every support type and the lightest one under the "
+                       "engineer's threshold")
+    c.add_argument("tramos", metavar="TRAMOS.xlsx|.csv|CARPETA", help="new tramos with the columns of sheet Tramos")
+    c.add_argument("--model", required=True, metavar="MODELO.json", help="model saved by history --model-output")
+    c.add_argument("--threshold", type=float, required=True, metavar="P", help="acceptable P(failure), set by the "
+                   "engineer (no default)")
+    c.add_argument("--exposure-days", type=float, required=True, metavar="D", help="exposure horizon in days, "
+                   "set by the engineer (no default)")
+    c.add_argument("--practice-from", metavar="HISTORICO.xlsx", help="history for the level 2 conformal set")
+    c.add_argument("-o", "--output", metavar="RECOMENDACIONES.csv|.xlsx", help="one row per tramo and type, with "
+                   "the id_tramo and the empty columns decision_ingeniero and motivo")
+    c.set_defaults(fn=_recommend)
     return p
+
+
+QUALITY_CHOICES = ("q", "rmr")  # los de predictive.performance.QUALITIES; aquí sin numpy
 
 
 def _criteria_inputs(c) -> None:
