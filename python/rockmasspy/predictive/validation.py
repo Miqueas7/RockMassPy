@@ -152,6 +152,15 @@ def tramo_groups(tramos) -> tuple[list, list, list]:
             [None if t.fecha_evaluacion is None else int(t.fecha_evaluacion[:4]) for t in tramos])
 
 
+def _tramo_number(t, col: str, *, allow_zero: bool = False) -> float | None:
+    """El valor de `col` de un tramo (objeto o dict) si es un número finito > 0 (≥ 0 con `allow_zero`); si no,
+    None. Validación común de las entradas de los niveles 2 y 3."""
+    v = t.get(col) if isinstance(t, Mapping) else getattr(t, col, None)
+    if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)) or not math.isfinite(v):
+        return None
+    return float(v) if v > 0 or (allow_zero and v == 0) else None
+
+
 def ngi_category(tramo) -> int:
     """Categoría de la carta Q NGI de un tramo, `read_q_chart(Q, luz/ESR)`: la variable de la línea base de nivel 0
     (niveles 2 y 3). El tramo necesita Q, luz y ESR > 0."""
@@ -284,6 +293,11 @@ class Comparison:
         todas las referencias."""
         return not self.blockers
 
+    @property
+    def noninferior(self) -> bool:
+        """Mejora puntual ≥ 0 contra todas las referencias (la regla de la partición temporal)."""
+        return all(i.value >= 0 for i in self.improvements.values())
+
 
 def _main_and_refs(models: Mapping, reference) -> tuple[str, tuple[str, ...]]:
     refs = (reference,) if isinstance(reference, str) else tuple(reference)
@@ -405,7 +419,7 @@ class ValidationReport:
         en `skipped`, no bloquea y lo dice `warnings`."""
         temporal = self.results.get("temporal")
         return all(p in self.results and self.results[p].recommend for p in ("labor", "zone")) \
-            and (temporal is None or not any(i.value < 0 for i in temporal.improvements.values()))
+            and (temporal is None or temporal.noninferior)
 
     @property
     def warnings(self) -> tuple[str, ...]:
