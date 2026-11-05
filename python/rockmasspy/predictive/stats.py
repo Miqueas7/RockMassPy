@@ -178,7 +178,7 @@ def group_bootstrap(groups: Sequence[Hashable], statistic: Callable[[np.ndarray]
 
     `groups[i]` es el grupo de la fila i. Cada réplica sortea tantos grupos como hay, concatena los índices de sus
     filas (un grupo repetido aparece repetido) y llama `statistic(indices)`. Si la estadística lanza ValueError,
-    FloatingPointError o LinAlgError, o devuelve algo no finito (p. ej. x constante en la réplica), la réplica se
+    ArithmeticError o LinAlgError, o devuelve algo no finito (p. ej. x constante en la réplica), la réplica se
     descarta y se cuenta. Misma semilla → mismas réplicas (`numpy.random.default_rng`).
     """
     if isinstance(n_boot, bool) or not isinstance(n_boot, (int, np.integer)) or n_boot < 1:
@@ -202,7 +202,7 @@ def group_bootstrap(groups: Sequence[Hashable], statistic: Callable[[np.ndarray]
         idx = np.concatenate([members[k] for k in pick])
         try:
             value = np.asarray(statistic(idx), dtype=float)
-        except (ValueError, FloatingPointError, np.linalg.LinAlgError) as e:
+        except (ValueError, ArithmeticError, np.linalg.LinAlgError) as e:
             discarded, last_error = discarded + 1, e
             continue
         if not np.all(np.isfinite(value)):

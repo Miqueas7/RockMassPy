@@ -8,9 +8,12 @@ np = pytest.importorskip("numpy")
 optimize = pytest.importorskip("scipy.optimize")
 
 from rockmasspy.history import tramo_outcomes  # noqa: E402
-from rockmasspy.predictive import (SyntheticTruth, compare_models, dummy_class_fit_predict,  # noqa: E402
-                                   dummy_proba_fit_predict, group_kfold, leave_one_group_out, out_of_fold,
-                                   random_kfold, synthetic_history, temporal_split, tramo_groups, validate)
+from rockmasspy.predictive import (Comparison, Fold, Improvement, SyntheticTruth, ValidationReport,  # noqa: E402
+                                   compare_models,
+                                   dummy_class_fit_predict, dummy_proba_fit_predict, group_bootstrap, group_kfold,
+                                   leave_one_group_out, out_of_fold, random_kfold, synthetic_history, temporal_split,
+                                   tramo_groups, validate)
+from rockmasspy.predictive.validation import MAX_DISCARDED_FRACTION_DECISION  # noqa: E402
 from rockmasspy.q_support import read_q_chart  # noqa: E402
 
 
@@ -110,19 +113,54 @@ def test_un_pliegue_fallido_se_registra_y_la_validacion_sigue():
     folds = group_kfold(groups, k=5)
     bad = folds[2].name
 
-    def fit_predict(train, test):
+    def fit_predict(train, test):  # perfecto salvo en un pliegue, que falla
         if np.array_equal(test, folds[2].test):
-            raise ValueError("class 1 missing from train")
-        return np.full(len(test), 0.5)
+            raise ValueError("class 1 missing from train in labor ZZSENT")
+        return y[test].astype(float)
 
     oof = out_of_fold(folds, fit_predict, 20, kind="proba")
     assert oof.n_failed == 1 and oof.failures[0].fold == bad
-    assert "class 1 missing" in oof.failures[0].reason
+    assert oof.failures[0].reason == "ValueError"  # sin el texto: podría traer etiquetas (R13)
     assert not oof.covered[folds[2].test].any() and oof.covered.sum() == 16
     assert (oof.fold_of[folds[2].test] == -1).all()
-    cmp = compare_models(y, {"site": oof, "dummy": out_of_fold(folds, dummy_proba_fit_predict(y), 20, kind="proba")},
-                         metric=_brier, higher_is_better=False, groups=groups, reference="dummy", n_boot=50)
+    dummy = out_of_fold(folds, dummy_proba_fit_predict(y), 20, kind="proba")
+    cmp = compare_models(y, {"site": oof, "dummy": dummy}, metric=_brier, higher_is_better=False, groups=groups,
+                         reference="dummy", n_boot=50)
     assert cmp.n_rows == 16 and cmp.failed_folds == {"site": 1, "dummy": 0}
+    # gana con holgura en los pliegues que quedaron, pero un pliegue fallido bloquea la recomendación
+    assert cmp.beats("dummy") and not cmp.recommend
+    assert cmp.blockers == ("site failed 1 fold(s)",)
+    # lo mismo si el que falla es la referencia
+    def coin(train, test):
+        if np.array_equal(test, folds[0].test):
+            raise ZeroDivisionError
+        return np.full(len(test), 0.5)
+    ok = out_of_fold(folds, lambda tr, te: y[te].astype(float), 20, kind="proba")
+    bad_ref = out_of_fold(folds, coin, 20, kind="proba")
+    cmp = compare_models(y, {"site": ok, "dummy": bad_ref}, metric=_brier, higher_is_better=False, groups=groups,
+                         reference="dummy", n_boot=50)
+    assert cmp.beats("dummy") and not cmp.recommend and cmp.blockers == ("dummy failed 1 fold(s)",)
+
+
+def test_validate_no_recomienda_si_el_principal_falla_pliegues():
+    rng = np.random.default_rng(2)
+    labors = np.repeat(np.arange(10), 6)
+    zones = labors // 5
+    years = np.where(np.arange(60) % 2, 2021, 2020)
+    y = rng.integers(0, 2, 60).astype(float)
+
+    def site(train, test):
+        if 0 in test:
+            raise ValueError("boom")
+        return y[test]
+    models = {"site": site, "dummy": dummy_proba_fit_predict(y)}
+    rep = validate(y, models, kind="proba", labors=labors, zones=zones, years=years, metric=_brier,
+                   higher_is_better=False, reference="dummy", n_boot=50)
+    assert not rep.recommend
+    assert rep.results["labor"].beats("dummy") and rep.results["labor"].failed_folds["site"] == 1
+    models["site"] = lambda tr, te: y[te]
+    assert validate(y, models, kind="proba", labors=labors, zones=zones, years=years, metric=_brier,
+                    higher_is_better=False, reference="dummy", n_boot=50).recommend
 
 
 def test_probabilidades_invalidas_fallan_el_pliegue_y_formas_malas_son_error():
@@ -133,6 +171,12 @@ def test_probabilidades_invalidas_fallan_el_pliegue_y_formas_malas_son_error():
         out_of_fold(folds, lambda tr, te: np.zeros(len(te) + 1), 12, kind="proba")
     with pytest.raises(ValueError, match="more than one test"):
         out_of_fold(folds + folds[:1], lambda tr, te: np.zeros(len(te)), 12, kind="class")
+    with pytest.raises(ValueError, match="train indices out of range"):
+        out_of_fold([Fold("f", np.array([-1, 1]), np.array([2]))], lambda tr, te: np.zeros(len(te)), 12, kind="class")
+    with pytest.raises(ValueError, match="test indices out of range"):
+        out_of_fold([Fold("f", np.array([1]), np.array([12]))], lambda tr, te: np.zeros(len(te)), 12, kind="class")
+    with pytest.raises(ValueError, match="train and test share rows"):
+        out_of_fold([Fold("f", np.array([1, 2]), np.array([2]))], lambda tr, te: np.zeros(len(te)), 12, kind="class")
     with pytest.raises(TypeError):  # un error de código no se esconde como pliegue fallido
         out_of_fold(folds, lambda tr, te: None + 1, 12, kind="class")
 
@@ -273,8 +317,12 @@ def test_sin_efecto_del_sitio_no_recomienda_en_al_menos_90_por_ciento_de_semilla
 def test_con_efecto_del_sitio_el_modelo_correcto_gana_al_ficticio():
     for seed in range(3):
         # el efecto de labor y zona pesa: con 240 tramos el IC de la mejora aún toca el cero
-        cmp = _decision(seed, True, n_boot=150, n_zones=6, labors_per_zone=8, tramos_per_labor=15).results["labor"]
-        assert cmp.beats("dummy") and cmp.recommend, cmp.improvements
+        rep = _decision(seed, True, n_boot=150, n_zones=6, labors_per_zone=8, tramos_per_labor=15)
+        for part in ("labor", "zone"):
+            cmp = rep.results[part]
+            assert cmp.beats("dummy") and cmp.recommend, (part, cmp.improvements)
+        # la temporal (solo el último año) es chica y a menudo no alcanza: con ella decidiendo, rep.recommend
+        # sale falso en la mayoría de semillas aunque el efecto exista (lo mide R11)
 
 
 def test_validate_omite_particiones_imposibles_y_decide_por_labor():
@@ -285,6 +333,64 @@ def test_validate_omite_particiones_imposibles_y_decide_por_labor():
                    higher_is_better=False, reference="dummy", n_boot=20, random_split=True)
     assert set(rep.skipped) == {"zone", "temporal"} and set(rep.results) == {"labor", "random"}
     assert rep.results["random"].optimistic and not rep.recommend
+    assert len(rep.warnings) == 2 and "temporal validation not run" in rep.warnings[0]
     with pytest.raises(ValueError, match="not in preds"):
         validate(y, models, kind="proba", labors=labors, zones=labors, years=[2020] * 16, metric=_brier,
                  higher_is_better=False, reference="ngi")
+    with pytest.raises(ValueError, match="k must be"):
+        validate(y, models, kind="proba", labors=labors, zones=labors, years=[2020] * 16, metric=_brier,
+                 higher_is_better=False, reference="dummy", k=1)
+
+
+def test_temporal_exige_dos_grupos_en_el_ultimo_ano():
+    years, labors = [2020, 2020, 2021, 2021], ["a", "b", "c", "c"]
+    with pytest.raises(ValueError, match="at least 2 groups in the last year, got 1"):
+        temporal_split(years, groups=labors)
+    assert temporal_split(years, groups=["a", "b", "c", "d"])[0].test.tolist() == [2, 3]
+    y = np.array([0, 1, 0, 1] * 3, dtype=float)
+    labors = np.repeat(np.arange(6), 2)
+    years = [2020] * 10 + [2021] * 2  # el último año tiene una sola labor
+    models = {"site": lambda tr, te: y[te], "dummy": dummy_proba_fit_predict(y)}
+    rep = validate(y, models, kind="proba", labors=labors, zones=labors // 3, years=years, metric=_brier,
+                   higher_is_better=False, reference="dummy", n_boot=50)
+    assert "got 1" in rep.skipped["temporal"] and rep.warnings
+    assert rep.recommend  # la temporal omitida no bloquea; labor y zona deciden
+
+
+def _cmp(**over):
+    base = dict(main="site", metrics={}, improvements={}, higher_is_better=False, n_rows=10, n_groups=5, n_boot=100,
+                n_discarded=0, failed_folds={"site": 0}, optimistic=False)
+    base["improvements"] = {"dummy": Improvement(0.1, over.pop("lo", 0.05), 0.2)}
+    return Comparison(**{**base, **over})
+
+
+def test_replicas_degeneradas_bloquean_sobre_el_1_por_ciento():
+    assert MAX_DISCARDED_FRACTION_DECISION == 0.01
+    assert _cmp(n_discarded=1).recommend  # 1 de 100: en el límite
+    c = _cmp(n_discarded=2)
+    assert c.beats("dummy") and not c.recommend and "2 of 100 bootstrap replicates" in c.blockers[0]
+    assert _cmp(lo=0.0).blockers == ("site does not beat dummy (95% CI of the improvement reaches 0)",)
+
+
+def test_reporte_exige_labor_y_zona_y_la_temporal_si_existe():
+    yes, no = _cmp(), _cmp(lo=-0.1)
+    R = ValidationReport
+    assert R({"labor": yes, "zone": yes, "temporal": yes}, {}).recommend
+    assert not R({"labor": yes, "zone": no, "temporal": yes}, {}).recommend
+    assert not R({"labor": no, "zone": yes, "temporal": yes}, {}).recommend
+    assert not R({"labor": yes, "zone": yes, "temporal": no}, {}).recommend
+    assert not R({"labor": yes, "temporal": yes}, {"zone": "x"}).recommend  # sin zona fuera no se recomienda
+    skipped_t = R({"labor": yes, "zone": yes, "random": no}, {"temporal": "x"})
+    assert skipped_t.recommend and len(skipped_t.warnings) == 2
+    assert R({"labor": yes, "zone": yes}, {}).warnings == ()
+
+
+def test_group_bootstrap_descarta_division_por_cero():
+    calls = iter(range(10))
+
+    def stat(idx):
+        if next(calls) % 2:
+            raise ZeroDivisionError
+        return float(len(idx))
+    res = group_bootstrap(["a", "b", "c"], stat, n_boot=10)
+    assert res.n_discarded == 5 and len(res.replicates) == 5

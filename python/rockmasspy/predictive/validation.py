@@ -23,6 +23,13 @@ from .stats import group_bootstrap
 _EMPTY = np.empty(0, dtype=np.intp)
 # errores que dejan un pliegue como fallido (p. ej. falta una clase en train); cualquier otro es un error de código
 _FOLD_ERRORS = (ValueError, ArithmeticError, np.linalg.LinAlgError)
+# decisión de diseño (por confirmar): con más del 1 % de réplicas degeneradas el IC no es confiable: no se recomienda
+MAX_DISCARDED_FRACTION_DECISION = 0.01
+
+
+class _DataError(ValueError):
+    """Faltan datos para una partición o una comparación (una zona, un año, un grupo en test). Su mensaje lleva
+    solo conteos, nunca etiquetas: `validate` lo copia en `skipped`."""
 
 
 @dataclass(frozen=True)
@@ -54,7 +61,7 @@ def _codes(groups: Sequence[Hashable]) -> tuple[np.ndarray, int]:
 
 def _at_least_two(n_groups: int) -> None:
     if n_groups < 2:
-        raise ValueError(f"groups needs at least 2 distinct groups, got {n_groups}")
+        raise _DataError(f"groups needs at least 2 distinct groups, got {n_groups}")
 
 
 def group_kfold(groups: Sequence[Hashable], *, k: int = 5, seed: int = 0) -> tuple[Fold, ...]:
@@ -91,10 +98,13 @@ def leave_one_group_out(groups: Sequence[Hashable]) -> tuple[Fold, ...]:
                  for g in range(n_groups))
 
 
-def temporal_split(years: Sequence[int | None]) -> tuple[Fold, ...]:
+def temporal_split(years: Sequence[int | None], *, groups: Sequence[Hashable] | None = None) -> tuple[Fold, ...]:
     """Entrena con los años anteriores al último y prueba con el último. Exige ≥ 2 años distintos.
 
-    Las filas sin año (None o NaN) van a `excluded`: no entran ni en train ni en test.
+    Las filas sin año (None o NaN) van a `excluded`: no entran ni en train ni en test. Ojo: una misma labor puede
+    quedar en train y en test (sus tramos de años distintos), así que el efecto de labor se filtra en parte; por eso
+    esta partición complementa a la agrupada y no la reemplaza. Con `groups` (labores) exige ≥ 2 grupos en el test,
+    porque el bootstrap de la mejora remuestrea grupos.
     """
     vals = []
     for y in years:
@@ -102,17 +112,24 @@ def temporal_split(years: Sequence[int | None]) -> tuple[Fold, ...]:
             vals.append(None)
         elif isinstance(y, bool) or not isinstance(y, (int, np.integer, float, np.floating)) \
                 or not math.isfinite(y) or y != int(y):
-            raise ValueError("years must be integers or None")
+            raise _DataError("years must be integers or None")
         else:
             vals.append(int(y))
     known = {v for v in vals if v is not None}
     if len(known) < 2:
-        raise ValueError(f"temporal split needs at least 2 distinct years, got {len(known)}")
+        raise _DataError(f"temporal split needs at least 2 distinct years, got {len(known)}")
     last = max(known)
     arr = np.array([-1 if v is None else v for v in vals])
     missing = np.array([v is None for v in vals], dtype=bool)
-    return (Fold("temporal", np.flatnonzero(~missing & (arr < last)), np.flatnonzero(~missing & (arr == last)),
-                 np.flatnonzero(missing)),)
+    test = np.flatnonzero(~missing & (arr == last))
+    if groups is not None:
+        codes, _ = _codes(groups)
+        if codes.size != arr.size:
+            raise ValueError("years and groups must have the same number of rows")
+        n_test_groups = np.unique(codes[test]).size
+        if n_test_groups < 2:
+            raise _DataError(f"temporal split needs at least 2 groups in the last year, got {n_test_groups}")
+    return (Fold("temporal", np.flatnonzero(~missing & (arr < last)), test, np.flatnonzero(missing)),)
 
 
 def random_kfold(n: int, *, k: int = 5, seed: int = 0) -> tuple[Fold, ...]:
@@ -140,7 +157,7 @@ def tramo_groups(tramos) -> tuple[list, list, list]:
 @dataclass(frozen=True)
 class FoldFailure:
     fold: str
-    reason: str  # tipo y mensaje de la excepción del ajuste
+    reason: str  # solo el tipo de la excepción: su texto podría traer etiquetas de labor o zona (R13)
 
 
 @dataclass(frozen=True)
@@ -165,8 +182,9 @@ def out_of_fold(folds: Sequence[Fold], fit_predict: Callable[[np.ndarray, np.nda
 
     `kind` = "proba" (vector de probabilidades o matriz n×K) o "class" (etiquetas). Todo el preprocesamiento va
     dentro de `fit_predict`. Si un pliegue lanza ValueError, ArithmeticError o LinAlgError, o devuelve
-    probabilidades no finitas o fuera de [0, 1], queda en `failures` con el motivo y la validación sigue; sus filas
-    quedan sin cubrir y no entran en las métricas. Una salida de largo o forma equivocada es un error de código.
+    probabilidades no finitas o fuera de [0, 1], queda en `failures` con el tipo del error y la validación sigue;
+    sus filas quedan sin cubrir y no entran en las métricas (y la comparación ya no recomienda). Índices fuera de
+    [0, n), train y test que se cruzan, un test repetido o una salida de forma equivocada son errores de código.
     """
     if kind not in ("proba", "class"):
         raise ValueError('kind must be "proba" or "class"')
@@ -174,15 +192,18 @@ def out_of_fold(folds: Sequence[Fold], fit_predict: Callable[[np.ndarray, np.nda
     parts, failures = [], []
     fold_of = np.full(n, -1, dtype=np.intp)
     for f, fold in enumerate(folds):
-        test = np.asarray(fold.test, dtype=np.intp)
-        if test.size and (test.min() < 0 or test.max() >= n):
-            raise ValueError(f"fold {fold.name}: test indices out of range for n={n}")
+        test, train = np.asarray(fold.test, dtype=np.intp), np.asarray(fold.train, dtype=np.intp)
+        for part, idx in (("test", test), ("train", train)):
+            if idx.size and (idx.min() < 0 or idx.max() >= n):  # un índice negativo tomaría otra fila en silencio
+                raise ValueError(f"fold {fold.name}: {part} indices out of range for n={n}")
+        if np.intersect1d(train, test).size:
+            raise ValueError(f"fold {fold.name}: train and test share rows")
         if np.any(fold_of[test] >= 0) or np.unique(test).size != test.size:
             raise ValueError(f"fold {fold.name}: a row is in more than one test set")
         try:
-            out = np.asarray(fit_predict(np.asarray(fold.train, dtype=np.intp), test))
+            out = np.asarray(fit_predict(train, test))
         except _FOLD_ERRORS as e:
-            failures.append(FoldFailure(fold.name, f"{type(e).__name__}: {e}"))
+            failures.append(FoldFailure(fold.name, type(e).__name__))
             continue
         if out.ndim == 0 or out.shape[0] != test.size or out.ndim > (2 if kind == "proba" else 1):
             raise ValueError(f"fold {fold.name}: fit_predict returned shape {out.shape} for {test.size} test rows")
@@ -240,8 +261,21 @@ class Comparison:
         return bool(lo > 0)  # NaN > 0 es falso
 
     @property
+    def blockers(self) -> tuple[str, ...]:
+        """Motivos por los que no se recomienda; vacío si se recomienda. Solo nombres de modelo y conteos."""
+        out = [f"{m} failed {k} fold(s)" for m, k in self.failed_folds.items() if k]
+        if self.n_discarded > MAX_DISCARDED_FRACTION_DECISION * self.n_boot:
+            out.append(f"{self.n_discarded} of {self.n_boot} bootstrap replicates were degenerate "
+                       f"(more than {MAX_DISCARDED_FRACTION_DECISION:.0%})")
+        out += [f"{self.main} does not beat {r} (95% CI of the improvement reaches 0)"
+                for r in self.improvements if not self.beats(r)]
+        return tuple(out)
+
+    @property
     def recommend(self) -> bool:
-        return all(self.beats(r) for r in self.improvements)
+        """Cero pliegues fallidos en todos los modelos, ≤ 1 % de réplicas degeneradas y límite inferior > 0 contra
+        todas las referencias."""
+        return not self.blockers
 
 
 def _main_and_refs(models: Mapping, reference) -> tuple[str, tuple[str, ...]]:
@@ -274,10 +308,11 @@ def compare_models(y, preds: Mapping[str, OofPredictions], *, metric: Callable[[
         raise ValueError("y, groups and every prediction must have the same number of rows")
     common = np.flatnonzero(np.logical_and.reduce([p.covered for p in preds.values()]))
     if common.size == 0:
-        raise ValueError("no row is covered by every model (did every fold fail?)")
+        raise _DataError("no row is covered by every model (did every fold fail?)")
     names = (main,) + refs
     yc, pc = ya[common], {m: preds[m].pred[common] for m in names}
     sub_groups = [g[i] for i in common]
+    _at_least_two(len(set(sub_groups)))
     sign = 1.0 if higher_is_better else -1.0
 
     def scores(idx):
@@ -346,8 +381,7 @@ def dummy_proba_fit_predict(y, n_classes: int | None = None) -> Callable[[np.nda
 class ValidationReport:
     """Un resultado por partición (`labor`, `zone`, `temporal` y, si se pidió, `random`) y la decisión.
 
-    Se recomienda solo si la partición agrupada por labor recomienda; las demás se informan. Una partición que no
-    se pudo armar o comparar (p. ej. una sola zona, un solo año) va a `skipped` con el motivo.
+    Una partición que no se pudo armar o comparar (p. ej. una sola zona, un solo año) va a `skipped` con el motivo.
     """
 
     results: dict[str, Comparison]
@@ -355,8 +389,20 @@ class ValidationReport:
 
     @property
     def recommend(self) -> bool:
-        r = self.results.get("labor")
-        return r is not None and r.recommend
+        """Recomiendan la partición por labor Y la de zona fuera (si falta alguna, no se recomienda); la temporal
+        también, si se pudo armar (si quedó en `skipped` no bloquea: lo dice `warnings`). La aleatoria no cuenta."""
+        return all(p in self.results and self.results[p].recommend for p in ("labor", "zone")) \
+            and ("temporal" not in self.results or self.results["temporal"].recommend)
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        out = []
+        if "temporal" in self.skipped:
+            out.append(f"temporal validation not run ({self.skipped['temporal']}): the decision rests on the "
+                       f"labor and zone partitions only")
+        if "random" in self.results:
+            out.append("the random row split is optimistic and does not count in the decision")
+        return tuple(out)
 
 
 def validate(y, models: Mapping[str, Callable[[np.ndarray, np.ndarray], object]], *, kind: str,
@@ -367,20 +413,25 @@ def validate(y, models: Mapping[str, Callable[[np.ndarray, np.ndarray], object]]
     """Arma las particiones por labor (k pliegues), zona fuera y temporal; corre `out_of_fold` y `compare_models`
     en cada una con bootstrap por labor. `random_split=True` agrega la partición aleatoria, marcada optimista y
     sin peso en la decisión. `models` = {nombre: fit_predict}, con las referencias incluidas.
+
+    Decisión (`ValidationReport.recommend`, §7.3): tienen que recomendar la partición por labor y la de zona fuera;
+    si alguna no se pudo armar, no se recomienda. La temporal decide si se pudo armar; si no (un solo año, un solo
+    grupo en el último año), no bloquea y el reporte lo avisa en `warnings`.
     """
     n = len(labors)
     if not (len(zones) == len(years) == n == np.asarray(y).shape[0]):
         raise ValueError("y, labors, zones and years must have the same number of rows")
     _main_and_refs(models, reference)  # un error de llamada no se esconde como partición omitida
+    _int("k", k, 2)
     makers = {"labor": lambda: group_kfold(labors, k=k, seed=seed), "zone": lambda: leave_one_group_out(zones),
-              "temporal": lambda: temporal_split(years)}
+              "temporal": lambda: temporal_split(years, groups=labors)}
     if random_split:
         makers["random"] = lambda: random_kfold(n, k=k, seed=seed)
     results, skipped = {}, {}
     for name, make in makers.items():
         try:
             folds = make()
-        except ValueError as e:  # una sola zona, un solo año…
+        except _DataError as e:  # una sola zona, un solo año…
             skipped[name] = str(e)
             continue
         # fuera del try: una salida de forma equivocada es un error de código, no una partición omitida
@@ -388,6 +439,8 @@ def validate(y, models: Mapping[str, Callable[[np.ndarray, np.ndarray], object]]
         try:
             results[name] = compare_models(y, preds, metric=metric, higher_is_better=higher_is_better,
                                            groups=labors, reference=reference, n_boot=n_boot, seed=seed)
-        except ValueError as e:  # sin filas comunes, un solo grupo en test, métrica sin definir…
+        except _DataError as e:  # sin filas comunes, un solo grupo en las filas comunes…
             skipped[name] = str(e)
+        except ValueError as e:  # p. ej. la métrica sin definir en ese test; su texto no se copia (R13)
+            skipped[name] = f"comparison failed ({type(e).__name__})"
     return ValidationReport(results=results, skipped=skipped)
