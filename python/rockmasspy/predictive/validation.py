@@ -152,6 +152,13 @@ def tramo_groups(tramos) -> tuple[list, list, list]:
             [None if t.fecha_evaluacion is None else int(t.fecha_evaluacion[:4]) for t in tramos])
 
 
+def ngi_category(tramo) -> int:
+    """Categoría de la carta Q NGI de un tramo, `read_q_chart(Q, luz/ESR)`: la variable de la línea base de nivel 0
+    (niveles 2 y 3). El tramo necesita Q, luz y ESR > 0."""
+    from ..q_support import read_q_chart
+    return read_q_chart(tramo.q_valor, tramo.luz_m / tramo.esr).category
+
+
 # ---------- predicciones fuera de pliegue ----------
 
 @dataclass(frozen=True)

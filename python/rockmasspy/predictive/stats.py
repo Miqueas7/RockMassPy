@@ -488,6 +488,31 @@ def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
                            message=message)
 
 
+def _eta_interval(fit, X, level):
+    """(η, inferior, superior) del predictor lineal de un ajuste MAP (logística o tasa de falla): método delta con
+    el factor de normal truncada en las columnas con cota de signo (ver `LogisticMapFit.predict_interval`)."""
+    lv = _level(level)
+    Xa, eta = fit._eta(X)
+    p = fit.coef.size
+    u = 0.5 + lv / 2
+    z = norm.ppf(u)
+    # a la escala estandarizada, donde vive la cota: γ = β·escala, α = b + Σ β·media
+    Ainv = np.eye(p + 1)
+    Ainv[:p, :p] = np.diag(fit.x_scale)
+    Ainv[p, :p] = fit.x_mean
+    cov_w = Ainv @ fit.cov @ Ainv.T
+    factor = np.ones(p + 1)
+    for j, s in enumerate(fit.signs):
+        if s != 0:
+            sd = math.sqrt(cov_w[j, j])
+            r = abs(fit.coef[j] * fit.x_scale[j]) / sd  # distancia a la cota, en desviaciones
+            # cuantil u de N(r, 1) truncada en 0, medido desde r: Φ⁻¹(1 − (1 − u)·Φ(r))
+            factor[j] = max(1.0, norm.ppf(1.0 - (1.0 - u) * norm.cdf(r)) / z)
+    Zt = np.column_stack([(Xa - fit.x_mean) / fit.x_scale, np.ones(Xa.shape[0])]) * factor
+    half = z * np.sqrt(np.einsum("ij,jk,ik->i", Zt, cov_w, Zt))
+    return eta, eta - half, eta + half
+
+
 @dataclass(frozen=True)
 class LogisticMapFit:
     """Logística bayesiana por MAP con *prior* Cauchy (Gelman et al. 2008) y covarianza de Laplace.
@@ -533,44 +558,14 @@ class LogisticMapFit:
         óptimo sin cota cae del lado prohibido y la truncada real es más angosta que la seminormal: conservador.
         El límite del lado prohibido también se ensancha (no importa para elegir con el superior).
         """
-        lv = _level(level)
-        Xa, eta = self._eta(X)
-        p = self.coef.size
-        u = 0.5 + lv / 2
-        z = norm.ppf(u)
-        # a la escala estandarizada, donde vive la cota: γ = β·escala, α = b + Σ β·media
-        Ainv = np.eye(p + 1)
-        Ainv[:p, :p] = np.diag(self.x_scale)
-        Ainv[p, :p] = self.x_mean
-        cov_w = Ainv @ self.cov @ Ainv.T
-        factor = np.ones(p + 1)
-        for j, s in enumerate(self.signs):
-            if s != 0:
-                sd = math.sqrt(cov_w[j, j])
-                r = abs(self.coef[j] * self.x_scale[j]) / sd  # distancia a la cota, en desviaciones
-                # cuantil u de N(r, 1) truncada en 0, medido desde r: Φ⁻¹(1 − (1 − u)·Φ(r))
-                factor[j] = max(1.0, norm.ppf(1.0 - (1.0 - u) * norm.cdf(r)) / z)
-        Zt = np.column_stack([(Xa - self.x_mean) / self.x_scale, np.ones(Xa.shape[0])]) * factor
-        half = z * np.sqrt(np.einsum("ij,jk,ik->i", Zt, cov_w, Zt))
-        return expit(eta), expit(eta - half), expit(eta + half)
+        eta, lo, hi = _eta_interval(self, X, level)
+        return expit(eta), expit(lo), expit(hi)
 
 
-def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float = 10.0,
-                     signs: Sequence[int] | None = None) -> LogisticMapFit:
-    """Logística MAP: cada columna continua de X se estandariza a media 0 y desviación 0.5, y cada binaria (dos
-    valores distintos) solo se centra, con escala = máximo − mínimo (Gelman et al. 2008). Cauchy(0, prior_scale)
-    en los coeficientes estandarizados y Cauchy(0, intercept_scale) en el intercepto.
-
-    `signs[j]` = +1 impone β_j ≥ 0, −1 impone β_j ≤ 0 y 0 lo deja libre (cotas de L-BFGS-B; la escala positiva
-    conserva el signo). Con separación completa el MAP es finito porque el prior es propio. `y` necesita al menos
-    un 0 y un 1: es solo una guarda, el mínimo real de fallas lo aplica la preparación del nivel 3.
-    """
-    Xa = _matrix("X", X)
+def _map_design(Xa, signs, prior_scale, intercept_scale):
+    """Signos, estandarización (continuas a desviación 0.5; binarias solo centradas, escala = rango) y escalas²
+    del prior Cauchy; comunes a `logistic_map_fit` y `exponential_hazard_map_fit`."""
     n, p = Xa.shape
-    ya = _binary("y", y)
-    if ya.size != n:
-        raise ValueError(f"X and y must have the same number of rows ({n} != {ya.size})")
-    _both_classes(ya, "logistic_map_fit")
     s, s0 = _positive("prior_scale", prior_scale), _positive("intercept_scale", intercept_scale)
     sg = np.zeros(p, dtype=int)
     if signs is not None:
@@ -590,18 +585,25 @@ def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float =
     scale = np.where(binary, Xa.max(axis=0, initial=-np.inf) - Xa.min(axis=0, initial=np.inf), 2.0 * sd)
     Z = np.column_stack([(Xa - mean) / scale, np.ones(n)])
     scales2 = np.concatenate([np.full(p, s), [s0]]) ** 2
+    return sg, mean, scale, Z, scales2
+
+
+def _map_solve(Z, sg, scales2, nll, nll_hessian, w0, n):
+    """MAP con prior Cauchy y cotas de signo (L-BFGS-B) y covarianza de Laplace en la escala estandarizada.
+
+    `nll(w)` = (−log verosimilitud, gradiente); `nll_hessian(w)` su hessiano. Devuelve (w, cov_w, at_bound,
+    converged, message)."""
+    p = sg.size
 
     def objective(w):  # −log posterior (sin constantes) y su gradiente
-        eta = Z @ w
-        value = float(np.sum(np.logaddexp(0.0, eta) - ya * eta) + np.sum(np.log1p(w * w / scales2)))
-        return value, Z.T @ (expit(eta) - ya) + 2.0 * w / (scales2 + w * w)
+        v, g = nll(w)
+        return float(v + np.sum(np.log1p(w * w / scales2))), g + 2.0 * w / (scales2 + w * w)
 
     def neg_hessian(w):
-        pr = expit(Z @ w)
-        return Z.T @ ((pr * (1.0 - pr))[:, None] * Z) + np.diag(2.0 * (scales2 - w * w) / (scales2 + w * w) ** 2)
+        return nll_hessian(w) + np.diag(2.0 * (scales2 - w * w) / (scales2 + w * w) ** 2)
 
     bounds = [(0.0, None) if g > 0 else (None, 0.0) if g < 0 else (None, None) for g in sg] + [(None, None)]
-    res = minimize(objective, np.zeros(p + 1), jac=True, method="L-BFGS-B", bounds=bounds,
+    res = minimize(objective, w0, jac=True, method="L-BFGS-B", bounds=bounds,
                    options={"maxiter": 5000, "ftol": 1e-15, "gtol": 1e-10})
     w = res.x
     grad = objective(w)[1]
@@ -616,16 +618,139 @@ def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float =
     if converged:
         cov_w, message = _information_cov(neg_hessian(w))
         converged = not message
-    # escala original: β = γ/escala y b = α − Σ γ·media/escala; la covarianza se transforma con ese jacobiano
+    return w, cov_w, at_bound, converged, message
+
+
+def _map_original(w, cov_w, mean, scale):
+    """A la escala original: β = γ/escala y b = α − Σ γ·media/escala; la covarianza con ese jacobiano."""
+    p = mean.size
     A = np.eye(p + 1)
     A[:p, :p] = np.diag(1.0 / scale)
     A[p, :p] = -mean / scale
     orig = A @ w
-    eta = Z @ w
-    return LogisticMapFit(coef=orig[:p], intercept=float(orig[p]), cov=A @ cov_w @ A.T,
+    return orig[:p], float(orig[p]), A @ cov_w @ A.T
+
+
+def logistic_map_fit(X, y, *, prior_scale: float = 2.5, intercept_scale: float = 10.0,
+                     signs: Sequence[int] | None = None) -> LogisticMapFit:
+    """Logística MAP: cada columna continua de X se estandariza a media 0 y desviación 0.5, y cada binaria (dos
+    valores distintos) solo se centra, con escala = máximo − mínimo (Gelman et al. 2008). Cauchy(0, prior_scale)
+    en los coeficientes estandarizados y Cauchy(0, intercept_scale) en el intercepto.
+
+    `signs[j]` = +1 impone β_j ≥ 0, −1 impone β_j ≤ 0 y 0 lo deja libre (cotas de L-BFGS-B; la escala positiva
+    conserva el signo). Con separación completa el MAP es finito porque el prior es propio. `y` necesita al menos
+    un 0 y un 1: es solo una guarda, el mínimo real de fallas lo aplica la preparación del nivel 3.
+    """
+    Xa = _matrix("X", X)
+    n, p = Xa.shape
+    ya = _binary("y", y)
+    if ya.size != n:
+        raise ValueError(f"X and y must have the same number of rows ({n} != {ya.size})")
+    _both_classes(ya, "logistic_map_fit")
+    sg, mean, scale, Z, scales2 = _map_design(Xa, signs, prior_scale, intercept_scale)
+
+    def nll(w):  # −log verosimilitud (sin constantes) y su gradiente
+        eta = Z @ w
+        return np.sum(np.logaddexp(0.0, eta) - ya * eta), Z.T @ (expit(eta) - ya)
+
+    def nll_hessian(w):
+        pr = expit(Z @ w)
+        return Z.T @ ((pr * (1.0 - pr))[:, None] * Z)
+
+    w, cov_w, at_bound, converged, message = _map_solve(Z, sg, scales2, nll, nll_hessian, np.zeros(p + 1), n)
+    coef, intercept, cov = _map_original(w, cov_w, mean, scale)
+    return LogisticMapFit(coef=coef, intercept=intercept, cov=cov,
                           active_bounds=tuple(int(j) for j in np.nonzero(at_bound[:p])[0]), converged=converged,
-                          n=n, loglik=-float(np.sum(np.logaddexp(0.0, eta) - ya * eta)), x_mean=mean,
-                          x_scale=scale, message=message, signs=tuple(int(g) for g in sg))
+                          n=n, loglik=-float(nll(w)[0]), x_mean=mean, x_scale=scale, message=message,
+                          signs=tuple(int(g) for g in sg))
+
+
+@dataclass(frozen=True)
+class ExponentialHazardFit:
+    """Tasa de falla constante (exponencial) por MAP: evento_i ~ Poisson(λ_i·t_i), log λ = intercepto + X·β, con λ
+    por día si t va en días. Mismos campos y misma estandarización que `LogisticMapFit`; `loglik` es la
+    log-verosimilitud de Poisson sin el término constante Σ d·log t ni el prior. El intervalo usa el mismo factor
+    de normal truncada con cota activa (`_eta_interval`).
+    """
+
+    coef: np.ndarray
+    intercept: float
+    cov: np.ndarray
+    active_bounds: tuple[int, ...]
+    converged: bool
+    n: int
+    loglik: float
+    x_mean: np.ndarray
+    x_scale: np.ndarray
+    message: str = ""
+    signs: tuple[int, ...] = ()
+    n_events: int = 0
+
+    def _eta(self, X):
+        Xa = _matrix("X", X, self.coef.size)
+        return Xa, Xa @ self.coef + self.intercept
+
+    def rate(self, X) -> np.ndarray:
+        """λ de cada fila (eventos por unidad de exposición)."""
+        return np.exp(self._eta(X)[1])
+
+    def prob_within(self, X, days) -> np.ndarray:
+        """P(falla dentro de `days`) = 1 − exp(−λ·days); `days` escalar o uno por fila."""
+        return -np.expm1(-self.rate(X) * _exposure_days(days))
+
+    def prob_interval(self, X, days, level: float = 0.9):
+        """(central, inferior, superior) de P(falla dentro de `days`): método delta en η y luego la transformación
+        monótona 1 − exp(−e^η·days)."""
+        d = _exposure_days(days)
+        return tuple(-np.expm1(-np.exp(e) * d) for e in _eta_interval(self, X, level))
+
+
+def _exposure_days(days) -> np.ndarray:
+    d = np.asarray(days, dtype=float)
+    if not np.all(np.isfinite(d)) or np.any(d <= 0):
+        raise ValueError("days must be positive finite numbers")
+    return d
+
+
+def exponential_hazard_map_fit(X, events, exposure, *, prior_scale: float = 2.5, intercept_scale: float = 10.0,
+                               signs: Sequence[int] | None = None) -> ExponentialHazardFit:
+    """Tasa de falla constante por MAP: −log L = Σ (λ_i·t_i − d_i·η_i) (Poisson con offset log t; equivale a la
+    exponencial con censura a la derecha). Misma maquinaria que `logistic_map_fit`: estandarización (binarias
+    solo centradas), Cauchy(0, prior_scale) en los coeficientes estandarizados, Cauchy(0, intercept_scale) en el
+    intercepto, cotas de signo por L-BFGS-B y covarianza de Laplace. `events` es 0/1 por fila (a lo más una falla
+    por tramo) y necesita al menos un evento y un no evento; `exposure` > 0.
+    """
+    Xa = _matrix("X", X)
+    n, p = Xa.shape
+    d = _binary("events", events)
+    t = _vector("exposure", exposure, 1)
+    if d.size != n or t.size != n:
+        raise ValueError(f"X, events and exposure must have the same number of rows ({n}, {d.size}, {t.size})")
+    if np.any(t <= 0):
+        raise ValueError("exposure must be positive")
+    if d.min() == d.max():
+        raise ValueError("exponential_hazard_map_fit needs at least one event and one non-event")
+    sg, mean, scale, Z, scales2 = _map_design(Xa, signs, prior_scale, intercept_scale)
+    log_t = np.log(t)
+
+    def mu(w):  # λ·t, con η recortado para que una línea de búsqueda lejana no desborde
+        return np.exp(np.minimum(Z @ w + log_t, 700.0))
+
+    def nll(w):
+        m = mu(w)
+        return np.sum(m - d * (Z @ w)), Z.T @ (m - d)
+
+    def nll_hessian(w):
+        return Z.T @ (mu(w)[:, None] * Z)
+
+    w0 = np.zeros(p + 1)
+    w0[p] = math.log(d.sum() / t.sum())  # arranca en la tasa global: el intercepto de un λ por día es ~ −7
+    w, cov_w, at_bound, converged, message = _map_solve(Z, sg, scales2, nll, nll_hessian, w0, n)
+    coef, intercept, cov = _map_original(w, cov_w, mean, scale)
+    return ExponentialHazardFit(coef=coef, intercept=intercept, cov=cov,
+                                active_bounds=tuple(int(j) for j in np.nonzero(at_bound[:p])[0]),
+                                converged=converged, n=n, loglik=-float(nll(w)[0]), x_mean=mean, x_scale=scale,
+                                message=message, signs=tuple(int(g) for g in sg), n_events=int(d.sum()))
 
 
 # ---------- métricas de clasificación (R7) ----------

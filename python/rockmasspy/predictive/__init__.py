@@ -17,6 +17,8 @@ from .stats import (BayesLinearFit, BootstrapResult, DemingFit, OlsFit, bayes_li
 from .stats import (LogisticMapFit, OrdinalLogitFit, average_precision, balanced_accuracy, brier,  # noqa: E402
                     calibration_curve, calibration_intercept_slope, f1_macro, logistic_map_fit, ordinal_logit_fit,
                     quadratic_weighted_kappa, recall_per_class, roc_auc)
+from .stats import ExponentialHazardFit, exponential_hazard_map_fit  # noqa: E402
+from .validation import ngi_category  # noqa: E402
 # reexportada: vive en history porque no necesita numpy
 from ..history import save_history_xlsx  # noqa: E402
 from .synthetic import SyntheticTruth, synthetic_history  # noqa: E402
@@ -44,3 +46,4 @@ __all__ += ["CALIBRATION_LEVELS", "RECOMMENDATION_COLUMNS", "IsoprobabilityGrid"
 __all__ += ["Comparison", "Fold", "FoldFailure", "Improvement", "OofPredictions", "ValidationReport",
             "compare_models", "dummy_class_fit_predict", "dummy_proba_fit_predict", "group_kfold",
             "leave_one_group_out", "out_of_fold", "random_kfold", "temporal_split", "tramo_groups", "validate"]
+__all__ += ["ExponentialHazardFit", "exponential_hazard_map_fit", "ngi_category"]
