@@ -7,12 +7,14 @@ pruebas: no entrena ningún modelo que se entregue ni da coeficientes por defect
 
 - Script: [`scripts/banco_mina_sintetica.py`](scripts/banco_mina_sintetica.py).
 - Resultados:
-  - [`banco_mina_sintetica.csv`](banco_mina_sintetica.csv): **desde la Fase 5B, la corrida del §10** (13 escenarios,
-    2412 filas, 151 columnas; el nivel 3 en tres variantes: `antes_*`, `sz_*` y las de siempre). La corrida de los
-    §2 a §9 (2124 filas, 100 columnas) es la del commit c575d12: `git show c575d12:docs/investigacion/banco_mina_sintetica.csv`.
+  - [`banco_mina_sintetica.csv`](banco_mina_sintetica.csv): **desde la revisión final, la corrida del §11** (13
+    escenarios, 2412 filas, 153 columnas; el nivel 3 en tres variantes: `antes_*`, `sz_*` y las de siempre). La del
+    §10 (151 columnas) es `git show 07c3a6c:docs/investigacion/banco_mina_sintetica.csv`; la de los §2 a §9 (2124
+    filas, 100 columnas), `git show c575d12:docs/investigacion/banco_mina_sintetica.csv`.
   - [`banco_mina_sintetica_sin_minimo_l3.csv`](banco_mina_sintetica_sin_minimo_l3.csv): sensibilidad del §6, con el
     mínimo de eventos por parámetro del nivel 3 bajado a 1 dentro del proceso (la librería no cambia).
-- **Los §1 a §9 son la corrida de la Fase 5 (c575d12); el §10 es la de la 5B.**
+- **Los §1 a §9 son la corrida de la Fase 5 (c575d12); el §10 es la de la 5B (07c3a6c) y el §11, la de la revisión
+  final (8830a9f).**
 - Versión: rama `fase-5` en **fa0a8f5** (la verdad ya corregida: cada tipo contrafactual usa sus propias horas sin
   sostener). Una vista previa anterior, con la verdad vieja, se descartó.
 - Comandos, desde la raíz del repo:
@@ -70,9 +72,13 @@ Corrida con defectos, una por escenario (11 minas, 10201 tramos):
 | Falsos hallazgos | 0 (y 0 en las 520 corridas limpias) |
 
 - El Q que se escapó es de un tramo con Q muy bajo: `Q_ABS_TOL` = 0.005 es mayor que |Q − Q/3| cuando Q < 0.0075.
+  **Corregido** en la revisión I3 de la 5B (commit 3933087): la regla `Q_MAX_RATIO` = 2 atrapa el ×3 (y el ×1/3)
+  aunque el Q sea bajo.
 - **La celda vacía no se informa.** `audit_history` no tiene un hallazgo de dato faltante: los 20 detectados son
   celdas que dejaron un recálculo imposible y salen por otra vía. La fila simplemente sale de los niveles que la
-  necesitan; solo se ve en los conteos de preparación.
+  necesitan; solo se ve en los conteos de preparación. **Desde la 5B (tarea 8)** `audit_history` tiene el hallazgo
+  `missing_values`, uno por columna con conteos y sin `id_tramo`. En la corrida del §10 el script lo contaba como
+  falso hallazgo (130 «falsos» en las gemelas con defectos); desde la revisión final se cuenta aparte (§11).
 - Los defectos no se excluyen de los ajustes (la auditoría avisa, no bloquea): con los Q multiplicados por 3 o por
   1/3, la pendiente RMR–ln Q del nivel 1 se movió de 0 a −0.12 puntos. Los estados de los tres niveles no cambiaron en
   ninguna de las 11 gemelas.
@@ -144,7 +150,7 @@ exposición, no por elegir mal. El resto de las columnas está en el CSV.
 ## 4. Lo que funciona
 
 1. **La auditoría es exacta en lo que revisa:** 99.5–100 % de los defectos con hallazgo propio y 0 falsos en 531
-   minas.
+   minas (corrida c575d12; los `missing_values` de la 5B no son falsos y van aparte, §11).
 2. **El nivel 1 recupera la recta de la mina.** «site» en 50/50 en los escenarios de ≈ 600 tramos y en 35/50 en
    `small_mine` (80 tramos). El IC de la pendiente cubre la verdadera en 49–50 de 50, el intervalo de predicción
    cubre 93.9–95.7 % de los RMR verdaderos (medianas) (nominal 95 %) y el sesgo de la pendiente es despreciable. Sigue a la mina
@@ -215,6 +221,11 @@ Mismas semillas, mínimo de eventos por parámetro bajado a 1 dentro del proceso
 La regla de validación sola deja pasar 7 modelos «site» más en `base`, y esos eligen peor: el mínimo vigente de 10
 eventos por parámetro sí está protegiendo. Confirma la lectura de `SIMULACION_MINIMOS.md` §5 con otro generador.
 
+**Ojo al repetirla después de la 5B:** `--min-events-l3` cambia `history.MIN_EVENTS_PER_PARAMETER_LEVEL3` y también
+`performance.MIN_EVENTS_PER_PARAMETER_LEVEL3`, y este último es el corte de la compuerta (d) (fallas por tipo de
+labor). Con `--min-events-l3 1` la sensibilidad también apaga la compuerta (d): no mide solo el mínimo de eventos.
+Esta tabla es de c575d12, cuando la compuerta (d) no existía, así que no la afecta.
+
 ## 7. Recomendaciones
 
 Para el módulo:
@@ -259,8 +270,9 @@ No se corrigió nada (este banco no toca `python/` ni `tests/`):
    estimable» y sin conjuntos conformes en 6 de 20 minas grandes. Arreglo probable: optimizar la log-verosimilitud
    media o una tolerancia relativa.
 2. **`audit_history` y Q muy bajos:** la tolerancia absoluta `Q_ABS_TOL` = 0.005 esconde un Q registrado 3 veces
-   mayor (o menor) cuando Q < 0.0075 (1 de 184 en el banco).
-3. Hueco, no error: no hay hallazgo de celda vacía (7 % de detección, solo indirecta).
+   mayor (o menor) cuando Q < 0.0075 (1 de 184 en el banco). **Corregido** (3933087): `Q_MAX_RATIO` = 2 lo atrapa.
+3. Hueco, no error: no hay hallazgo de celda vacía (7 % de detección, solo indirecta). **Corregido** en la 5B:
+   `missing_values` por columna.
 
 ## 9. Limitaciones
 
@@ -368,6 +380,7 @@ Las cuatro son decisiones de diseño con el valor por confirmar.
 |---|---|
 | «Demasiado liviano» < 5 % en `large_mine` | **Cumple** con H = 365 (1.1 % y 1.3 %) y con H = 1095 (2.7 % y 1.3 %) |
 | … en `worse_site` | **Casi:** 5.3 % (10/189) con 0.10; con 0.05 ya no elige |
+| … en `shifted_correlation` (agregado en la revisión final) | **No cumple** con 0.05 y H = 365: 6.4 % (33/517), peor que antes (2.1 %, 53/2477); con 0.10 cumple (2.3 %) |
 | … en el mecanismo alternativo | **Cumple:** `saturating_large` 1.3 % / 1.5 %, `saturating_worse` 3.4 % / 2.6 % (H = 365); con H = 1095 `saturating_worse` 0.10 queda en 6.9 % (10/145) |
 | `ngi_site`, `small_mine`, `better_site` sin recomendar | **Cumple:** 0 elecciones en todas las variantes |
 | Sin subir el sobrecosto | **No cumple.** El sobrecosto mediano sube en todos los escenarios: `large_mine` +59 % → +133 % (0.10) y +114 % → +260 % (0.05); `saturating_large` +65 % → +97 %; `worse_site` +119 % → +126 %. También baja la fracción de tramos con elección (`large_mine` 60.7 % → 50.8 %) |
@@ -375,3 +388,115 @@ Las cuatro son decisiones de diseño con el valor por confirmar.
 La seguridad se compró con sostenimiento: el modelo no es más fino, es más prudente donde no sabe (zonas nuevas,
 tipos de labor y clases de Q con poca historia). Bajar el sobrecosto pide que la media mejore (efecto de zona o
 de nivel cuando la zona es conocida, las horas sin sostener) y no más compuertas.
+
+## 11. Después de la revisión final
+
+Revisión final de la 5B (6-nov). Mismas semillas y configuración que el §10 (`--reps 50 --reps-large 20 --n-boot
+500`, mínimos de la librería sin tocar), commit **8830a9f** de `fase-5`. Tomó 1074 s de reloj con 28 procesos.
+«Antes» es la corrida del §10 (07c3a6c) y «después», esta. Cambios medidos:
+
+- **σ_z en su cota superior (I1).** σ̂_z = C·Var(η en la media) es una sola estimación con C − 1 grados de libertad:
+  en `large_mine` va de 0.21 a 0.62 (verdad 0.40, 8 zonas) y la mina de σ̂_z = 0.21 ponía 297 de sus 3670
+  elecciones sobre el umbral (8.1 %, H = 365, 0.10). `recommend` usa ahora σ̂_z·sqrt((C − 1)/χ²_{1−u}(C − 1)) con
+  u = 0.5 + level/2, el mismo cuantil que la cota de η: ×1.80 con 8 zonas y ×2.37 con 5 (level 0.9).
+  `fit_performance` avisa con menos de 10 zonas.
+- **Forma (M2, M3):** se elige con pliegues por labor de otra semilla que la validación, y si la interacción queda
+  en su cota en el ajuste final vuelve la aditiva. La interacción quedó en 7/20 `large_mine` (igual), 0/20
+  `saturating_large` (antes 11/20), 1/50 `saturating_worse` (antes 20/50), 16/50 `worse_site` (antes 18/50) y
+  0–8 de 50 en los demás: con el mecanismo que se satura casi deja de entrar. Los estados del
+  nivel 3 no cambiaron en ningún escenario.
+- **Auditoría (M5 del banco):** `missing_values` va aparte. En las gemelas con defectos: 0 falsos y 130 hallazgos
+  `missing_values` (uno por columna con celdas vacías); 0 hallazgos en las corridas limpias. Los defectos con
+  hallazgo propio salen 100 % (Q que no cuadra 288/288, con la regla `Q_MAX_RATIO` de 3933087).
+- **Nivel 2:** la consistencia nueva (1 − tanh(w/4), corte 0.66) marca «poorly consistent» en 50/50
+  `incoherent_practice` (mediana 0.705), en 21/50 `shifted_correlation` (0.656) y en 0–2 de 50 en los demás
+  (`ngi_site` 0.008, `mine_practice` 0.358).
+
+### Cómo se eligió la cota de σ_z
+
+Experimento aparte, con las mismas minas del banco (escenarios que eligen, nivel 3 con ln Q y, en `worse_site`,
+`large_mine` y `saturating_worse`, también con RMR; H = 30, 365 y 1095 días; umbrales 0.01, 0.05 y 0.10). Para cada
+variante se midió «demasiado liviano» por mina (p90 y máximo entre las minas que eligen) y la fracción de tramos con
+elección:
+
+| Variante | Peor p90 por mina, ln Q | Peor máximo, ln Q | Peor p90, RMR | `large_mine` H = 365, 0.10: elige / sobrecosto |
+|---|---:|---:|---:|---|
+| σ̂_z (la del §10) | 24.5 % | 24.5 % | 94 % | 50.8 % / +133 % |
+| Momentos (DerSimonian–Laird) con O/E por zona fuera de pliegue | 24.6 % | 33.3 % | 91 % | 52.7 % / +124 % |
+| Piso 0.3 | 15.3 % | 18.2 % | 96 % | 50.7 % / +133 % |
+| χ² al 90 % | 5.8 % | 9.7 % | 56 % | 37.8 % / +223 % |
+| Cota Q-profile al 90 % de los momentos | 9.4 % | 11.1 % | 56 % | 38.8 % / +211 % |
+| **χ² al cuantil de η (95 % unilateral con level 0.9)** | **3.7 %** | 7.3 % (H 30) | 7.6 % | **30.8 % / +261 %** |
+
+Las peores celdas son de pocas elecciones (decenas a cientos en 2 a 6 minas; los 56–96 % de RMR son celdas de
+9–110 elecciones con umbral 0.01). Con RMR la χ² baja `worse_site` (H 30, 0.05) de p90 17.3 % a 0.8 %.
+
+- La estimación por momentos sola sale más baja que σ̂_z y no ayuda; el piso casi no actúa (σ̂_z rara vez baja de
+  0.3) y su valor solo lo respaldaría el generador (DE 0.4), igual que un prior: se descartaron.
+- La Q-profile se parece a la χ² al 90 % y pide guardar los O/E por zona en el JSON; la χ² sale de lo que ya se
+  guarda (`zone_sd` y las zonas del ajuste).
+- Quedó la χ² al mismo cuantil que η: es la única que deja el p90 por mina bajo ~5 % en todas las celdas con ln Q.
+
+### Recomendación, H = 365 días
+
+Elige % de los tramos / demasiado liviano agrupado (conteo) / **por mina: p90 y máximo** entre las minas que eligen /
+sobrecosto mediano frente al óptimo de verdad.
+
+| Escenario | Umbral | Antes (§10) | Después |
+|---|---:|---|---|
+| `base` | 0.05 | 0.8 % / 3.4 % (11/321) / p90 5.2 %, máx 7.4 % (6 minas) / +144 % | 0.0 % / 0.0 % (0/2) / p90 0.0 %, máx 0.0 % (1 minas) / +195 % |
+| `base` | 0.1 | 3.1 % / 2.2 % (28/1254) / p90 4.5 %, máx 5.0 % (8 minas) / +156 % | 0.3 % / 0.0 % (0/103) / p90 0.0 %, máx 0.0 % (4 minas) / +201 % |
+| `worse_site` | 0.1 | 0.6 % / 5.3 % (10/189) / p90 6.5 %, máx 9.8 % (5 minas) / +126 % | 0 / sin elecciones |
+| `shifted_correlation` | 0.05 | 1.7 % / 6.4 % (33/517) / p90 11.9 %, máx 17.2 % (5 minas) / +149 % | 0.3 % / 1.3 % (1/76) / p90 2.0 %, máx 2.4 % (3 minas) / +226 % |
+| `shifted_correlation` | 0.1 | 4.1 % / 2.3 % (29/1237) / p90 3.6 %, máx 10.0 % (8 minas) / +134 % | 1.8 % / 1.1 % (6/527) / p90 1.9 %, máx 3.2 % (5 minas) / +220 % |
+| `incoherent_practice` | 0.05 | 3.0 % / 1.9 % (17/898) / p90 1.4 %, máx 6.9 % (14 minas) / +285 % | 0.8 % / 4.1 % (10/245) / p90 3.7 %, máx 4.6 % (3 minas) / +445 % |
+| `incoherent_practice` | 0.1 | 7.3 % / 0.1 % (2/2214) / p90 0.1 %, máx 1.0 % (17 minas) / +249 % | 1.9 % / 0.2 % (1/582) / p90 0.1 %, máx 0.3 % (9 minas) / +431 % |
+| `mine_practice` | 0.05 | 0.5 % / 0.7 % (1/144) / p90 0.9 %, máx 1.1 % (3 minas) / +148 % | 0.1 % / 0.0 % (0/25) / p90 0.0 %, máx 0.0 % (2 minas) / +232 % |
+| `mine_practice` | 0.1 | 2.2 % / 0.1 % (1/677) / p90 0.2 %, máx 0.3 % (4 minas) / +135 % | 1.2 % / 0.0 % (0/348) / p90 0.0 %, máx 0.0 % (2 minas) / +182 % |
+| `noisy_mapping` | 0.05 | 0.9 % / 1.1 % (3/275) / p90 1.6 %, máx 1.8 % (2 minas) / +229 % | 0.2 % / 1.6 % (1/64) / p90 1.6 %, máx 1.6 % (1 minas) / +167 % |
+| `noisy_mapping` | 0.1 | 1.7 % / 0.2 % (1/526) / p90 0.3 %, máx 0.4 % (3 minas) / +187 % | 0.7 % / 0.0 % (0/220) / p90 0.0 %, máx 0.0 % (2 minas) / +347 % |
+| `large_mine` | 0.05 | 26.5 % / 1.1 % (283/25435) / p90 1.9 %, máx 4.4 % (19 minas) / +260 % | 9.5 % / 0.5 % (48/9115) / p90 0.8 %, máx 1.3 % (14 minas) / +334 % |
+| `large_mine` | 0.1 | 50.8 % / 1.3 % (646/48735) / p90 2.1 %, máx 8.1 % (19 minas) / +133 % | 30.8 % / 0.7 % (204/29520) / p90 0.5 %, máx 4.6 % (19 minas) / +261 % |
+| `saturating_large` | 0.05 | 39.0 % / 1.3 % (467/37349) / p90 2.7 %, máx 3.9 % (18 minas) / +114 % | 26.3 % / 0.6 % (142/25199) / p90 1.4 %, máx 2.2 % (18 minas) / +187 % |
+| `saturating_large` | 0.1 | 53.7 % / 1.5 % (772/51356) / p90 3.5 %, máx 4.8 % (18 minas) / +97 % | 41.8 % / 0.5 % (218/40009) / p90 1.3 %, máx 2.6 % (18 minas) / +146 % |
+| `saturating_worse` | 0.05 | 0.9 % / 3.4 % (9/267) / p90 5.5 %, máx 6.7 % (7 minas) / +132 % | 0.3 % / 0.0 % (0/82) / p90 0.0 %, máx 0.0 % (5 minas) / +200 % |
+| `saturating_worse` | 0.1 | 2.7 % / 2.6 % (21/805) / p90 6.0 %, máx 7.5 % (9 minas) / +123 % | 1.1 % / 0.6 % (2/343) / p90 0.8 %, máx 1.6 % (6 minas) / +184 % |
+
+### Recomendación, H = 1095 días
+
+| Escenario | Umbral | Antes (§10) | Después |
+|---|---:|---|---|
+| `base` | 0.05 | 0.0 % / 0.0 % (0/6) / p90 0.0 %, máx 0.0 % (1 minas) / +81 % | 0 / sin elecciones |
+| `base` | 0.1 | 0.3 % / 6.2 % (8/128) / p90 12.4 %, máx 14.6 % (3 minas) / +125 % | 0 / sin elecciones |
+| `shifted_correlation` | 0.1 | 0.6 % / 2.6 % (5/193) / p90 5.5 %, máx 7.0 % (5 minas) / +190 % | 0.0 % / 0.0 % (0/1) / p90 0.0 %, máx 0.0 % (1 minas) / +500 % |
+| `incoherent_practice` | 0.05 | 0.2 % / 0.0 % (0/46) / p90 0.0 %, máx 0.0 % (4 minas) / +350 % | 0.2 % / 2.0 % (1/50) / p90 2.0 %, máx 2.0 % (1 minas) / +147 % |
+| `incoherent_practice` | 0.1 | 1.6 % / 1.9 % (9/481) / p90 0.0 %, máx 5.1 % (12 minas) / +287 % | 0.5 % / 2.8 % (4/144) / p90 2.3 %, máx 2.8 % (3 minas) / +500 % |
+| `mine_practice` | 0.1 | 0.1 % / 0.0 % (0/26) / p90 0.0 %, máx 0.0 % (2 minas) / +150 % | 0 / sin elecciones |
+| `noisy_mapping` | 0.05 | 0.0 % / 0.0 % (0/10) / p90 0.0 %, máx 0.0 % (1 minas) / +109 % | 0 / sin elecciones |
+| `noisy_mapping` | 0.1 | 0.5 % / 0.7 % (1/151) / p90 0.9 %, máx 1.0 % (2 minas) / +252 % | 0.0 % / 0.0 % (0/13) / p90 0.0 %, máx 0.0 % (1 minas) / +162 % |
+| `large_mine` | 0.05 | 1.6 % / 2.7 % (41/1514) / p90 15.3 %, máx 18.2 % (6 minas) / +108 % | 0.3 % / 0.7 % (2/300) / p90 0.7 %, máx 0.7 % (1 minas) / +133 % |
+| `large_mine` | 0.1 | 12.9 % / 1.3 % (155/12371) / p90 1.8 %, máx 4.4 % (19 minas) / +310 % | 4.1 % / 0.6 % (24/3941) / p90 1.7 %, máx 2.0 % (8 minas) / +283 % |
+| `saturating_large` | 0.05 | 15.1 % / 0.7 % (105/14434) / p90 1.3 %, máx 1.7 % (18 minas) / +156 % | 7.9 % / 0.5 % (36/7552) / p90 0.7 %, máx 1.1 % (11 minas) / +168 % |
+| `saturating_large` | 0.1 | 30.3 % / 1.1 % (316/29002) / p90 2.3 %, máx 3.4 % (18 minas) / +130 % | 19.2 % / 0.4 % (82/18406) / p90 0.8 %, máx 1.3 % (17 minas) / +193 % |
+| `saturating_worse` | 0.05 | 0.2 % / 0.0 % (0/58) / p90 0.0 %, máx 0.0 % (3 minas) / +119 % | 0.0 % / 0.0 % (0/15) / p90 0.0 %, máx 0.0 % (1 minas) / +83 % |
+| `saturating_worse` | 0.1 | 0.5 % / 6.9 % (10/145) / p90 9.4 %, máx 9.6 % (5 minas) / +106 % | 0.2 % / 0.0 % (0/63) / p90 0.0 %, máx 0.0 % (1 minas) / +93 % |
+
+`ngi_site`, `better_site`, `conservative_practice` y `small_mine` siguen sin ninguna elección.
+
+### Contra la meta
+
+| Meta | Antes (§10) | Después |
+|---|---|---|
+| Por mina, p90 de «demasiado liviano» ≤ ~5 % | No: 11.9 % `shifted_correlation` (0.05), 6.5 % `worse_site`, 6.0 % `saturating_worse`, 15.3 % `large_mine` H 1095 | **Cumple** en todas las celdas: el peor p90 es 3.7 % (`incoherent_practice`, 0.05, H 365) |
+| Máximo por mina | 17.2 % | 4.6 % (la mina de `large_mine` con σ̂_z = 0.21: 154/3354, antes 297/3670) |
+| Agrupado < 5 % | No en `worse_site` (5.3 %), `shifted_correlation` 0.05 (6.4 %), `base` y `saturating_worse` con H 1095 (6.2 % y 6.9 %) | **Cumple** en todas: el mayor es 4.1 % (`incoherent_practice`, 0.05, H 365, 10/245) |
+| Sin subir el sobrecosto ni bajar la elección | — | **No cumple.** `large_mine` (0.10, H 365) elige en el 30.8 % de los tramos (antes 50.8 %) con sobrecosto +261 % (antes +133 %); `saturating_large` 41.8 % (53.7 %) y +146 % (+97 %); `worse_site` ya no elige; en las minas de 600–800 tramos la elección cae a 0–2 % |
+
+**El costo:** la seguridad se compró otra vez con sostenimiento y con menos elecciones. Con 5 zonas la cota es
+2.4 veces σ̂_z, así que las minas de ≈ 600 tramos casi no eligen: en ese tamaño el módulo dice «ningún tipo cumple»
+en vez de arriesgar.
+
+**Límite de fondo:** con pocas zonas σ_z no se conoce. La cota lo cubre con más sostenimiento, no con más
+información, y una mina cuyas zonas de entrenamiento salieron muy parecidas entre sí todavía puede quedar corta (la
+de σ̂_z = 0.21 baja de 8.1 % a 4.6 %, no a cero). La salida de fondo es más zonas en el histórico o un efecto de zona
+en la media cuando la zona del tramo nuevo es conocida.

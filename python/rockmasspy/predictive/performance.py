@@ -44,7 +44,7 @@ Fase 5B (banco de la mina sintética, `docs/investigacion/BANCO_MINA_SINTETICA.m
   demasiado liviano (8 % con H = 365 y umbral 0.10). Por eso `recommend` usa su cota superior unilateral,
   σ_z,sup = σ̂_z·sqrt((C − 1)/χ²_{1−u}(C − 1)) con u = 0.5 + level/2, el mismo cuantil que la cota de η (×1.80 con
   8 zonas, ×2.37 con 5, con level 0.9). En el banco baja el p90 por mina de «demasiado liviano» a ≤ 3.7 %, y cuesta
-  elecciones: `large_mine` (H = 365, 0.10) pasa de elegir en el 51 % al 31 % de los tramos (§10 del banco). Límite
+  elecciones: `large_mine` (H = 365, 0.10) pasa de elegir en el 51 % al 31 % de los tramos (§11 del banco). Límite
   de fondo: con pocas zonas σ_z no se conoce; la cota lo cubre con más sostenimiento, no con más información, y una
   mina cuyas zonas de entrenamiento salieron muy parecidas entre sí todavía puede quedar corta. Ni un piso ni un
   prior para σ_z: el único valor que los respaldaría es el del generador del banco.
