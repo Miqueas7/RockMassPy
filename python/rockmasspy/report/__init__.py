@@ -1240,7 +1240,7 @@ def _dd_table(rows, lang) -> Table:
 
 def _practice_section(number, a, lang) -> Section:
     from ..history import MIN_LABORS_PER_TYPE_LEVEL2, MIN_TRAMOS_PER_TYPE_LEVEL2
-    from ..predictive.practice import MAX_PRACTICE_ENTROPY
+    from ..predictive.practice import MAX_PRACTICE_INCONSISTENCY
     from ..predictive.validation import MAX_DISCARDED_FRACTION_DECISION
 
     none = t("none", lang)
@@ -1283,7 +1283,7 @@ def _practice_section(number, a, lang) -> Section:
         (t("dd_l2_min", lang), t("dd_l2_min_v", lang).format(t=MIN_TRAMOS_PER_TYPE_LEVEL2,
                                                               l=MIN_LABORS_PER_TYPE_LEVEL2)),
         (t("dd_conformal", lang), f"{a.conformal_level:.0%}"),
-        (t("dd_consistency", lang), f"{MAX_PRACTICE_ENTROPY:g}"),
+        (t("dd_consistency", lang), f"{MAX_PRACTICE_INCONSISTENCY:g}"),
         (t("dd_gain_ci", lang), t("dd_gain_ci_v", lang)),
         (t("dd_discarded", lang), f"≤ {MAX_DISCARDED_FRACTION_DECISION:.0%}")), lang))
     blocks += _warnings_table(a.warnings, a.validation, lang)
@@ -1324,9 +1324,46 @@ def _iso_blocks(m, history, exposure_days, lang, figures) -> list:
     return out
 
 
+def _l3_design_rows(m, lang) -> list:
+    """Filas de la tabla de decisiones de diseño con lo que quedó en ESTE modelo: forma, σ_z y las compuertas."""
+    from ..history import MIN_EVENTS_PER_PARAMETER_LEVEL3
+    from ..predictive.performance import MIN_TRAMOS_PER_CLASS, POOR_ROCK_MAX_OE, POOR_ROCK_MIN_EVENTS
+
+    q = m.features[0]
+    if m.form == "interaction":
+        qr, kr = m.interaction_ref
+        form = t("dd_form_interaction", lang).format(q=q, qr=f"{qr:.4g}", kr=f"{kr:g}")
+    else:
+        form = t("dd_form_additive", lang)
+    dev = {f: m.metrics[f"oof_deviance_{f}"] for f in ("additive", "interaction") if f"oof_deviance_{f}" in m.metrics}
+    dev_txt = (t("dd_dev", lang).format(d=", ".join(f"{t('dd_form_' + f, lang) if f == 'additive' else f} "
+                                                    f"{v:.4f}" for f, v in dev.items())) if len(dev) > 1 else "")
+    if m.metrics.get("interaction_at_bound"):
+        dev_txt += t("dd_at_bound", lang)
+    rows = [(t("dd_form", lang), t("dd_form_v", lang).format(form=form, e=MIN_EVENTS_PER_PARAMETER_LEVEL3,
+                                                              dev=dev_txt))]
+    if m.fit is not None:
+        rows.append((t("dd_zone", lang), t("dd_zone_v", lang).format(s=m.zone_sd, c=m.fit.n_clusters,
+                                                                      u=m.zone_sd_upper(0.9))))
+    if m.poor_rock is None:
+        poor = t("dd_poor_none", lang)
+    else:
+        cut, obs, exp = m.poor_rock
+        poor = t("dd_poor_v", lang).format(q=q, cut=cut, o=obs, e=exp, oe=_f(obs / exp if exp > 0 else None),
+                                           mx=POOR_ROCK_MAX_OE, ev=POOR_ROCK_MIN_EVENTS,
+                                           res=t("dd_pass" if m.poor_rock_problem is None else "dd_fail_gate", lang))
+    rows += [(t("dd_poor", lang), poor), (t("dd_class", lang), t("dd_class_v", lang).format(cls=MIN_TRAMOS_PER_CLASS))]
+    if m.labor_types:
+        counts = ", ".join(f"{lt} {n}" for lt, n in zip(m.labor_types, m.labor_type_failures))
+        rows.append((t("dd_labor", lang), t("dd_labor_v", lang).format(counts=counts,
+                                                                       lab=MIN_EVENTS_PER_PARAMETER_LEVEL3)))
+    return rows
+
+
 def _performance_section(number, m, history, threshold, exposure_days, lang, figures) -> Section:
     from ..history import MIN_EVENTS_PER_PARAMETER_LEVEL3, MIN_ZONES_LEVEL3
-    from ..predictive.performance import MAHALANOBIS_PERCENTILE
+    from ..predictive.performance import (MAHALANOBIS_PERCENTILE, MIN_TRAMOS_PER_CLASS, POOR_ROCK_MAX_OE,
+                                          POOR_ROCK_MIN_EVENTS)
     from ..predictive.validation import MAX_DISCARDED_FRACTION_DECISION
     from ..viz.style import Style
 
@@ -1367,7 +1404,8 @@ def _performance_section(number, m, history, threshold, exposure_days, lang, fig
                                                                            style=Style(lang=lang)), lang, figures))
     if m.coefficients:
         blocks += _iso_blocks(m, history, exposure_days, lang, figures)
-    blocks += [Paragraph(t("l3_rule", lang)),
+    blocks += [Paragraph(t("l3_rule", lang).format(oe=POOR_ROCK_MAX_OE, ev=POOR_ROCK_MIN_EVENTS,
+                                                   cls=MIN_TRAMOS_PER_CLASS, lab=MIN_EVENTS_PER_PARAMETER_LEVEL3)),
                Paragraph(t("l3_threshold_none", lang) if threshold is None
                          else t("l3_threshold", lang).format(thr=threshold)),
                _dd_table((
@@ -1377,6 +1415,7 @@ def _performance_section(number, m, history, threshold, exposure_days, lang, fig
                    (t("dd_gain_ci", lang), t("dd_gain_ci_v", lang)), (t("dd_temporal", lang), t("dd_temporal_v", lang)),
                    (t("dd_discarded", lang), f"≤ {MAX_DISCARDED_FRACTION_DECISION:.0%}"),
                    (t("dd_interval", lang), t("dd_interval_v", lang)),
+                   *_l3_design_rows(m, lang),
                    (t("dd_maha", lang), t("dd_maha_v", lang).format(p=MAHALANOBIS_PERCENTILE)),
                    (t("dd_threshold", lang), t("dd_threshold_v", lang))), lang)]
     blocks += _warnings_table(m.warnings, m.validation, lang)

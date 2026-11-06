@@ -109,7 +109,9 @@ def run_audit(h, truth):
         if fk:
             explained |= {(fk, tid) for tid in inj}
         out[f"aud_iny_{kind}"], out[f"aud_det_{kind}"] = len(inj), len(det)
-    out["aud_falsos"] = sum((f.kind, f.id_tramo) not in explained for f in a.findings)
+    # «missing_values» (celdas vacías por columna, sin id_tramo) va aparte: no es un falso hallazgo (revisión final, M5)
+    out["aud_faltantes"] = sum(f.kind == "missing_values" for f in a.findings)
+    out["aud_falsos"] = sum((f.kind, f.id_tramo) not in explained and f.kind != "missing_values" for f in a.findings)
     return out
 
 
@@ -176,6 +178,7 @@ def run_level2(h, truth, n_boot, seed):
     v = a.verdicts
     return dict(l2_estado=a.status, l2_converge=int(a.converged), l2_ver_lnq=v["ln_q"], l2_ver_lnde=v["ln_de"],
                 l2_incoherente=int(any(x.startswith("practice incoherent") for x in v.values())),
+                l2_consistencia=a.consistency, l2_consist_veredicto=a.consistency_verdict,
                 l2_supera_carta=int(a.beyond_chart),
                 l2_kappa_conc=math.nan if a.concordance is None or a.concordance.kappa is None
                 else a.concordance.kappa,
@@ -298,6 +301,14 @@ def _med(xs):
     return f"{np.median(xs):.3g} [{min(xs):.3g}, {max(xs):.3g}]"
 
 
+def _per_mine(rows, pre):
+    """Tasa de «demasiado liviano» POR MINA (solo las minas que eligieron): p90 y máximo, y cuántas eligieron."""
+    rates = [r[pre + "rec_liviana"] / r[pre + "rec_n"] for r in rows if r.get(pre + "rec_n")]
+    if not rates:
+        return "por mina: sin elecciones"
+    return f"por mina p90 {np.percentile(rates, 90):.3f} máx {max(rates):.3f} ({len(rates)} minas eligen)"
+
+
 def _ratio(rows, num, den):
     n, d = sum(r.get(num, 0) or 0 for r in rows), sum(r.get(den, 0) or 0 for r in rows)
     return f"{n / d:.3f} ({n}/{d})" if d else "sin casos"
@@ -314,9 +325,12 @@ def summary(rows):
                 tot["iny_" + k] += r[f"aud_iny_{k}"]
                 tot["det_" + k] += r[f"aud_det_{k}"]
             tot["falsos"] += r["aud_falsos"]
-    print(" | ".join(f"{k}: {tot['det_' + k]}/{tot['iny_' + k]}" for k in DEFECT_KINDS), "| falsos:", tot["falsos"])
+            tot["faltantes"] += r["aud_faltantes"]
+    print(" | ".join(f"{k}: {tot['det_' + k]}/{tot['iny_' + k]}" for k in DEFECT_KINDS), "| falsos:", tot["falsos"],
+          "| missing_values (por columna, aparte):", tot["faltantes"])
     first = [r for r in clean if r["umbral"] == THRESHOLDS[0] and r["horizonte_dias"] == HORIZONS[0]]
-    print("hallazgos en corridas limpias:", sum(r["aud_hallazgos"] for r in first))
+    print("hallazgos en corridas limpias:", sum(r["aud_hallazgos"] for r in first), "de ellos missing_values:",
+          sum(r["aud_faltantes"] for r in first))
     print("\n## Niveles 1 y 2 por escenario (corridas limpias; mediana [mín, máx] y conteos)")
     for s in scen:
         rs = [r for r in first if r["escenario"] == s]
@@ -331,7 +345,9 @@ def summary(rows):
               f"{sum(r.get('l1_gr_cubre_ic', 0) == 1 for r in rs)}/{len(rs)} cobPI {_med([r.get('l1_gr_cob_pi') for r in rs])}")
         print(f"    L2 converge {sum(r.get('l2_converge', 0) for r in rs)}/{len(rs)} lnQ "
               f"{dict(Counter(r.get('l2_ver_lnq') for r in rs))} lnDe {dict(Counter(r.get('l2_ver_lnde') for r in rs))}"
-              f" incoherente {sum(r.get('l2_incoherente', 0) for r in rs)} supera carta "
+              f" incoherente {sum(r.get('l2_incoherente', 0) for r in rs)} consistencia "
+              f"{_med([r.get('l2_consistencia') for r in rs])} "
+              f"{dict(Counter(r.get('l2_consist_veredicto') for r in rs))} supera carta "
               f"{sum(r.get('l2_supera_carta', 0) for r in rs)} kappa {_med([r.get('l2_kappa_conc') for r in rs])} "
               f"conjunto {_med([r.get('l2_tam_conjunto') for r in rs])} precisión {_ratio(rs, 'l2_aciertos', 'l2_fuera')}"
               f" sensibilidad {_ratio(rs, 'l2_aciertos', 'l2_desvios')} errores "
@@ -355,7 +371,8 @@ def summary(rows):
                     print(f"    H={H:g} umbral={thr} {name}: elige {_ratio(rs, pre + 'rec_n', 'rec_tramos')} liviana "
                           f"{_ratio(rs, pre + 'rec_liviana', pre + 'rec_n')} sobrecosto "
                           f"{_med([r.get(pre + 'rec_sobrecosto_rel') for r in rs])} carta liviana en elegidos "
-                          f"{_ratio(rs, pre + 'carta_liviana_en_elegidos', pre + 'rec_n')} motivos {why}")
+                          f"{_ratio(rs, pre + 'carta_liviana_en_elegidos', pre + 'rec_n')} {_per_mine(rs, pre)} "
+                          f"motivos {why}")
                 print(f"    H={H:g} umbral={thr}: elige {_ratio(rs, 'rec_n', 'rec_tramos')} liviana "
                       f"{_ratio(rs, 'rec_liviana', 'rec_n')} sobrecosto {_med([r.get('rec_sobrecosto_rel') for r in rs])}"
                       f" vs carta {_med([r.get('rec_costo_vs_carta') for r in rs])} igual carta {_ratio(rs, 'rec_igual_carta', 'rec_n')}"

@@ -292,7 +292,7 @@ def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_
     rb = rp.recommendation_blockers(pred.load_model(modelo))
     assert code == (2 if rb else 0), out  # «site» pero recommend no elegiría: hay que revisar
     assert "practice ln_q: coherent (beta " in out and "practice ln_de: coherent (beta " in out
-    assert "practice consistency: consistent (mean out-of-fold entropy " in out
+    assert "practice consistency: consistent (share of tramos given another type at the centre of a " in out
     assert "practice kappa labor: practice " in out and "over ngi " in out and "blockers 0" in out
     assert "practice outside the conformal set: " in out and "practice concordance: n " in out
     assert ("performance: calibration site, but recommend will not choose: " if rb
@@ -302,6 +302,13 @@ def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_
     assert "performance poisson_deviance labor: site " in out and "over baseline_ngi " in out
     assert "performance poisson_deviance temporal: " in out and "non-inferiority" in out
     assert "performance coefficient ln_q: " in out and "performance coefficient support_rank: " in out
+    # revisión final (I4): la regla vigente, la forma, σ_z con su cota y las compuertas (a) y (d)
+    assert "the decision bound is 1 - exp(-lambda_up*H*Z_q), with lambda_up = exp(eta + q*sqrt(se^2 + " \
+           "sigma_z_up^2))" in out
+    assert "performance form: " in out and "performance new zone: sigma_z estimate " in out
+    assert "one-sided upper bound used " in out and "(8 zones)" in out
+    assert "performance worst third of rock quality (ln_q <= " in out and "out-of-fold observed/expected " in out
+    assert "performance failures by tipo_labor: " in out and "(no choice with fewer than 10)" in out
     assert not any(w.startswith("T0") for w in out.split())  # ningún id_tramo
     assert [x for x in out.splitlines() if x.startswith(("results: ", "model: "))] == [
         "results: history_findings.csv", "results: practice_results.csv", "results: validation_summary.csv",

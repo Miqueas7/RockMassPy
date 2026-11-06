@@ -22,7 +22,8 @@ train) y la línea base de nivel 0, el modelo exponencial con una sola variable,
 
 La recomendación (R10, §4 punto 7) es para una labor NUEVA: muestra P(falla en H días) para CADA tipo de la mina
 (central = la media marginal 1 − (1 + θλH)^(−1/θ)); elige el más liviano elegible cuyo límite superior
-1 − exp(−λ_sup·H·Z_q) queda bajo el umbral del ingeniero (umbral y H obligatorios), con λ_sup la cota de η al nivel y
+1 − exp(−λ_sup·H·Z_q) queda bajo el umbral del ingeniero (umbral y H obligatorios), con λ_sup la cota de η al nivel
+(que desde la 5B suma la cota de σ_z de una zona nueva, ver abajo) y
 Z_q el cuantil `level` de la fragilidad evaluado con la cota superior de θ, exp(log θ̂ + z·sd(log θ)): conservador
 por diseño (con pocas labores θ̂ puede salir bajo). Solo elige si el modelo está calibrado al sitio,
 el efecto del sostenimiento está identificado y el tramo no extrapola. La decisión final queda en las columnas
@@ -37,8 +38,16 @@ Fase 5B (banco de la mina sintética, `docs/investigacion/BANCO_MINA_SINTETICA.m
   déficit frente a la carta NGI se probó en el banco y no ayudó; además la librería no tiene la equivalencia entre
   los tipos de la mina y las categorías de la carta.
 - Zona nueva: el modelo no tiene efecto de zona en la media, así que la cota superior suma en cuadratura la
-  varianza entre zonas, σ_z² = C·Var(η en la media) con la covarianza agrupada por zona (C zonas). Es una cota por
-  exceso (incluye el ruido propio de cada zona), decisión de diseño: en el banco recupera σ_z con 8 zonas.
+  varianza entre zonas, σ̂_z² = C·Var(η en la media) con la covarianza agrupada por zona (C zonas), decisión de
+  diseño: en el banco su mediana recupera σ_z con 8 zonas. Revisión final (I1): σ̂_z es UNA estimación con C − 1
+  grados de libertad; en el banco va de 0.2 a 0.6 con σ_z = 0.4 y 8 zonas, y la mina que la subestima elige
+  demasiado liviano (8 % con H = 365 y umbral 0.10). Por eso `recommend` usa su cota superior unilateral,
+  σ_z,sup = σ̂_z·sqrt((C − 1)/χ²_{1−u}(C − 1)) con u = 0.5 + level/2, el mismo cuantil que la cota de η (×1.80 con
+  8 zonas, ×2.37 con 5, con level 0.9). En el banco baja el p90 por mina de «demasiado liviano» a ≤ 3.7 %, y cuesta
+  elecciones: `large_mine` (H = 365, 0.10) pasa de elegir en el 51 % al 31 % de los tramos (§10 del banco). Límite
+  de fondo: con pocas zonas σ_z no se conoce; la cota lo cubre con más sostenimiento, no con más información, y una
+  mina cuyas zonas de entrenamiento salieron muy parecidas entre sí todavía puede quedar corta. Ni un piso ni un
+  prior para σ_z: el único valor que los respaldaría es el del generador del banco.
 - Compuertas de `recommend`: (a) observados/esperados fuera de pliegue en el tercio peor de la calidad; si pasa de
   `POOR_ROCK_MAX_OE` o hay menos de `POOR_ROCK_MIN_EVENTS` fallas para verlo, no elige en ese estrato; (b) soporte:
   un tipo no es elegible en una clase de Q (Barton et al. 1974; RMR de Bieniawski 1989 con quality="rmr") donde el
@@ -64,7 +73,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-from scipy.stats import norm
+from scipy.stats import chi2, norm
 from scipy.stats import t as student_t
 
 from .. import __version__
@@ -99,6 +108,7 @@ POOR_ROCK_MIN_EVENTS = 10
 Q_CLASS_EDGES = (0.01, 0.1, 1.0, 4.0, 10.0, 40.0, 100.0, 400.0)
 RMR_CLASS_EDGES = (21.0, 41.0, 61.0, 81.0)
 MIN_TRAMOS_PER_CLASS = 10
+FEW_ZONES = 10  # con menos zonas, aviso: σ_z se conoce mal y su cota superior es mucho mayor que σ̂_z (decisión de diseño)
 
 
 # ---------- datos del nivel 3 ----------
@@ -180,7 +190,7 @@ class PerformanceModel:
     afuera a 3 cifras), `maha_mean`, `maha_inv` (pseudoinversa de la covarianza) y `maha_p99` son el dominio de
     aplicabilidad.
 
-    Fase 5B: `zone_sd` = DE entre zonas que suma la cota superior de una zona nueva; `poor_rock` = (corte de la
+    Fase 5B: `zone_sd` = σ̂_z, la DE entre zonas estimada (la cota de una zona nueva usa `zone_sd_upper`); `poor_rock` = (corte de la
     calidad del tercio peor, fallas observadas, esperadas) fuera de pliegue, o None si no hubo predicciones fuera
     de pliegue; `class_counts[c][k]` = tramos del tipo k en la clase de calidad c (`_quality_class`).
     """
@@ -240,6 +250,16 @@ class PerformanceModel:
         z = norm.ppf(0.5 + COEF_LEVEL / 2) if self.fit.df is None else float(
             student_t.ppf(0.5 + COEF_LEVEL / 2, self.fit.df))
         return float(c[:-1] @ self.fit.coef + z * math.sqrt(max(c @ self.fit.cov @ c, 0.0)))
+
+    def zone_sd_upper(self, level: float = 0.9) -> float:
+        """Cota superior unilateral de σ_z al cuantil u = 0.5 + level/2 (el de la cota de η):
+        σ̂_z·sqrt((C − 1)/χ²_{1−u}(C − 1)), C = zonas del ajuste. σ̂_z = C·Var(η en la media) tiene C − 1 grados de
+        libertad (covarianza agrupada por zona); con pocas zonas la cota es mucho mayor que σ̂_z."""
+        c = 0 if self.fit is None else self.fit.n_clusters
+        if self.zone_sd == 0 or c < 2:
+            return float(self.zone_sd)
+        u = 0.5 + _rec_level(level) / 2
+        return float(self.zone_sd * math.sqrt((c - 1) / chi2.ppf(1 - u, c - 1)))
 
     @property
     def poor_rock_cut(self) -> float:
@@ -417,9 +437,11 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
             return f.prob_within(design(test, lt, ref), days[test])  # μ = λ·t, la media marginal de eventos
         return site_fp
 
-    # la forma: la interacción entra solo con eventos para su parámetro y si baja la devianza fuera de pliegue
+    # la forma: la interacción entra solo con eventos para su parámetro y si baja la devianza fuera de pliegue.
+    # Pliegues con otra semilla (seed + 1) que los de `validate`: la forma no se elige con la misma partición que
+    # luego decide «site» (M2 de la revisión final)
     try:
-        folds = group_kfold(labors, k=k, seed=seed)
+        folds = group_kfold(labors, k=k, seed=seed + 1)
     except ValueError:  # una sola labor: no hay partición agrupada
         folds = None
     minority = min(int(y.sum()), int(y.size - y.sum()))
@@ -435,6 +457,21 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
             dev = {f_name: poisson_deviance(y[common], o.pred[common]) for f_name, o in oofs.items()}
             form_metrics = {f"oof_deviance_{f_name}": v for f_name, v in dev.items()}
             form = min(dev, key=lambda f_name: (dev[f_name], CANDIDATE_FORMS.index(f_name)))  # empate: la primera
+
+    def final_fit(form):  # sin fallas o sin tramos estables no hay tasa que ajustar (la guarda de stats): sin modelo
+        X = design(range(y.size), labor_types, ref_of(range(y.size), form))
+        f = (frailty_hazard_map_fit(X, y, days, frail, clusters=clusters, signs=_signs(use_depth, labor_types, form),
+                                    min_clusters=MIN_CLUSTERS) if 0 < y.sum() < y.size else None)
+        return X, f
+
+    X, fit = final_fit(form)
+    if form == "interaction" and fit is not None and _INT in fit.active_bounds:
+        # la interacción quedó en su cota en el ajuste final: un parámetro en el mínimo sin aporte, vuelve la aditiva
+        form = "additive"
+        X, fit = final_fit(form)
+        form_metrics["interaction_at_bound"] = 1.0
+        if form not in oofs:  # el banco o una prueba pueden haber dejado solo la interacción como candidata
+            oofs[form] = None if folds is None else out_of_fold(folds, site_fp_of(form), y.size, kind="proba")
     site_fp = site_fp_of(form)
 
     X0 = np.array([[ngi_category(t)] for t in ts], dtype=float)
@@ -463,13 +500,8 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
         metrics, curve = {"n": 0}, ()
     metrics |= form_metrics
 
-    ref_full = ref_of(range(y.size), form)
-    X = design(range(y.size), labor_types, ref_full)
     signs = _signs(use_depth, labor_types, form)
     names = _feature_names(quality, use_depth, labor_types, form)
-    # sin fallas o sin tramos estables no hay tasa que ajustar (la guarda de stats): sin modelo
-    fit = (frailty_hazard_map_fit(X, y, days, frail, clusters=clusters, signs=signs, min_clusters=MIN_CLUSTERS)
-           if 0 < y.sum() < y.size else None)
     coef_ci, active = (), ()
     if fit is None:
         warns.append("no events / no non-events: every usable tramo has the same outcome; no model is fitted")
@@ -500,6 +532,10 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
         c = np.append(fit.x_mean, 1.0)
         v = float(c @ fit.cov @ c)
         zone_sd = math.sqrt(fit.n_clusters * v) if math.isfinite(v) and v > 0 else 0.0
+        if zone_sd > 0 and fit.n_clusters < FEW_ZONES:
+            factor = math.sqrt((fit.n_clusters - 1) / chi2.ppf(0.05, fit.n_clusters - 1))
+            warns.append(f"only {fit.n_clusters} zones: the between-zone SD (sigma_z) is poorly known; recommend uses "
+                         f"its one-sided upper bound, {factor:.2f} times the estimate at level 0.9")
     n_cls = _n_classes(quality)
     cls = Counter((_quality_class(quality, qual[i]), int(rank[i])) for i in range(y.size))
     class_counts = tuple(tuple(cls.get((c, j), 0) for j in range(len(support))) for c in range(n_cls))
@@ -552,7 +588,7 @@ class SupportOption:
     order: int
     p_failure: float  # P(falla dentro del horizonte) para una labor nueva (media marginal)
     p_low: float
-    p_high: float  # cota conservadora: 1 − exp(−λ_sup·H·Z_q)
+    p_high: float  # cota conservadora: 1 − exp(−λ_sup·H·Z_q), λ_sup con la cota de σ_z de una zona nueva
     meets_threshold: bool  # límite superior ≤ umbral
     mahalanobis: float
     extrapolated: bool  # el tramo extrapola, o este tipo (rango fuera del entrenamiento o Mahalanobis > p99)
@@ -636,13 +672,14 @@ def _model_row(model, qual, lnde, rank, depth, tipo):
 
 def _p_high(model: PerformanceModel, X, exposure: float, level: float) -> np.ndarray:
     """Cota superior de P(falla en H) para una labor nueva en una zona nueva: 1 − exp(−e^η_sup·H·Z_q), con
-    η_sup = η + q·sqrt(se² + σ_z²) (se = el error de η de `prob_interval`, q su cuantil) y Z_q el cuantil de la
-    fragilidad. Con σ_z = 0 es exactamente el límite superior de `FrailtyHazardFit.prob_interval`."""
+    η_sup = η + q·sqrt(se² + σ_z,sup²) (se = el error de η de `prob_interval`, q su cuantil, σ_z,sup =
+    `model.zone_sd_upper(level)`) y Z_q el cuantil de la fragilidad. Con σ̂_z = 0 es exactamente el límite superior
+    de `FrailtyHazardFit.prob_interval`."""
     f = model.fit
     eta, _, hi = _eta_interval(f, X, level)
     u = 0.5 + level / 2
     q = norm.ppf(u) if f.df is None else float(student_t.ppf(u, f.df))
-    eta_up = eta + np.sqrt((hi - eta) ** 2 + (q * model.zone_sd) ** 2)
+    eta_up = eta + np.sqrt((hi - eta) ** 2 + (q * model.zone_sd_upper(level)) ** 2)
     return -np.expm1(-np.exp(eta_up) * exposure * f.frailty_quantile(level))
 
 
@@ -655,7 +692,7 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
     - `threshold` (P(falla) aceptable) y `exposure_days` (horizonte H en días) son OBLIGATORIOS: los fija el
       ingeniero.
     - Se elige el tipo más liviano ELEGIBLE cuyo límite SUPERIOR, 1 − exp(−λ_sup·H·Z_q), queda ≤ el umbral;
-      λ_sup suma la varianza entre zonas (`_p_high`). Elegible: con al menos `MIN_TRAMOS_PER_TYPE_LEVEL2` tramos
+      λ_sup suma la cota superior de la varianza entre zonas (`_p_high`, `PerformanceModel.zone_sd_upper`). Elegible: con al menos `MIN_TRAMOS_PER_TYPE_LEVEL2` tramos
       en el entrenamiento, con al menos `MIN_TRAMOS_PER_CLASS` de ese tipo en la clase de calidad del tramo y sin
       extrapolar ese tipo (rango del tipo fuera del entrenamiento o Mahalanobis sobre el p99). No se elige en
       ningún tipo si `model.recommendation_blockers` no está vacío, si el tramo extrapola (Q, De, profundidad o H
@@ -979,7 +1016,8 @@ def load_model(path) -> PerformanceModel:
     if not isinstance(d, dict):
         raise ValueError("the performance model file must hold a JSON object")
     if d.get("schema_version") != SCHEMA_VERSION or isinstance(d.get("schema_version"), bool):
-        raise ValueError(f"unsupported performance model schema_version (this version reads {SCHEMA_VERSION})")
+        raise ValueError(f"unsupported performance model schema_version (this version reads {SCHEMA_VERSION}); "
+                         "refit with `rockmass history --performance --model-output`")
     _check_keys("performance model", d, PerformanceModel.__dataclass_fields__)
     for k, chk in _TOP_CHECKS.items():
         if not chk(d[k]):

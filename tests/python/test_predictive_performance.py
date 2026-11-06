@@ -50,9 +50,14 @@ def big(big_history):
 
 
 @pytest.fixture(scope="module")
-def big_auto(big_history):
-    """Con las dos formas candidatas: en este histórico la validación elige la interacción."""
-    return big_history, fit_performance(big_history, n_boot=N_BOOT)
+def big_auto():
+    """Con las dos formas candidatas, en una mina sintética con déficit frente a la carta (`worse_site`, semilla 5):
+    la validación elige la interacción y no queda en su cota. En `big_history` (verdad aditiva) las dos formas
+    empatan a 1e-9 y la interacción queda en la cota (ver `test_interaccion_en_su_cota_vuelve_a_la_aditiva`)."""
+    from rockmasspy.predictive import synthetic_mine
+
+    h, _ = synthetic_mine("worse_site", seed=5)
+    return h, fit_performance(h, n_boot=N_BOOT)
 
 
 @pytest.fixture(scope="module")
@@ -373,7 +378,8 @@ def test_json_validado_al_cargar(big, tmp_path):
     base = json.loads(save_model(m, tmp_path / "ok.json").read_text(encoding="utf-8"))
     fit_bad_sign = {**base["fit"], "coef": [abs(c) + 0.1 for c in base["fit"]["coef"]]}
     cases = {
-        "schema": ({**base, "schema_version": 2}, "unsupported performance model schema_version"),
+        "schema": ({**base, "schema_version": 2}, "unsupported performance model schema_version .*refit with "
+                   "`rockmass history --performance --model-output`"),
         "unknown": ({**base, "rows": []}, "1 unknown key"),
         "named": ({**base, "theta": 0.5}, r"unexpected keys \['theta'\]"),
         "missing": ({k: v for k, v in base.items() if k != "maha_p99"}, r"missing keys \['maha_p99'\]"),
@@ -536,15 +542,17 @@ def test_calidad_rmr_y_errores():
 
 # ---------- Fase 5B: forma, zona nueva y compuertas ----------
 
-def test_forma_elegida_por_validacion_y_con_su_parametro(big_auto, big):
+def test_forma_elegida_por_validacion_y_con_su_parametro(big_auto):
     h, m = big_auto
     assert set(m.metrics) >= {"oof_deviance_additive", "oof_deviance_interaction"}
     best = min(("additive", "interaction"), key=lambda f: m.metrics[f"oof_deviance_{f}"])
     assert m.form == best == "interaction"
     assert m.features[:4] == ("ln_q", "ln_de", "support_rank", "ln_q:support_rank") and m.signs[:4] == (-1, 1, -1, 1)
     assert m.interaction_ref == (m.train_max[0], 4.0)
+    assert "ln_q:support_rank" not in m.active_bounds and m.coefficients["ln_q:support_rank"] > 0
     # la interacción cuenta en el mínimo de eventos: un parámetro más que la aditiva
-    assert m.counts["minority_class_minimum"] == big[1].counts["minority_class_minimum"] + 10
+    from rockmasspy.history import level3_parameters, level3_rows
+    assert m.counts["minority_class_minimum"] == 10 * (level3_parameters(level3_rows(h)) + 1)
     # monotonía dentro del dominio: más sostenimiento no sube la P; peor macizo no la baja
     t = h.tramos[0]
     for q in (0.05, 0.5, 5.0, 50.0):
@@ -561,6 +569,23 @@ def test_interaccion_solo_con_eventos_para_su_parametro():
     m = fit_performance(h, n_boot=50)
     assert 60 <= m.counts["minority_class"] < 70 and m.counts["minority_class_minimum"] == 60
     assert m.form == "additive" and "oof_deviance_interaction" not in m.metrics
+
+
+def test_interaccion_en_su_cota_vuelve_a_la_aditiva(big_history, monkeypatch):
+    # verdad aditiva: forzada como única candidata, la interacción queda en su cota en el ajuste final (M3)
+    monkeypatch.setattr(perf, "CANDIDATE_FORMS", ("interaction",))
+    m = fit_performance(big_history, n_boot=50)
+    assert m.form == "additive" and m.metrics["interaction_at_bound"] == 1.0
+    assert "ln_q:support_rank" not in m.features and m.metrics["n"] > 0 and m.poor_rock is not None
+
+
+def test_pliegues_de_la_forma_distintos_de_la_validacion(big_history, monkeypatch):
+    # M2: la forma se elige con pliegues por labor de otra semilla que los de `validate`
+    seeds = []
+    real = perf.group_kfold
+    monkeypatch.setattr(perf, "group_kfold", lambda g, k, seed: seeds.append(seed) or real(g, k=k, seed=seed))
+    fit_performance(big_history, n_boot=20, seed=7)
+    assert seeds == [8]
 
 
 def test_json_ida_y_vuelta_con_interaccion(big_auto, tmp_path):
@@ -586,6 +611,28 @@ def test_zona_nueva_en_la_cota_superior(big):
     b = recommend(m, [t], **REC)[0]
     assert all(y.p_high > x.p_high and y.p_failure == x.p_failure for x, y in zip(a.options, b.options))
     assert _order(b) >= _order(a)  # la zona nueva pide igual o más sostenimiento
+
+
+def test_cota_superior_de_sigma_z_con_pocas_zonas(big):
+    # I1: σ̂_z tiene C − 1 grados de libertad; recommend usa su cota unilateral al cuantil de η (0.95 con level 0.9)
+    from scipy.stats import chi2
+
+    h, m = big
+    c = m.fit.n_clusters
+    assert c == 8
+    up = m.zone_sd_upper(0.9)
+    assert up == pytest.approx(m.zone_sd * math.sqrt((c - 1) / chi2.ppf(0.05, c - 1)))
+    assert up / m.zone_sd == pytest.approx(1.80, abs=0.01)
+    assert m.zone_sd_upper(0.95) > up > m.zone_sd_upper(0.5) > m.zone_sd
+    assert dataclasses.replace(m, zone_sd=0.0).zone_sd_upper(0.9) == 0.0
+    assert any("only 8 zones: the between-zone SD (sigma_z) is poorly known" in w for w in m.warnings)
+    t = _ok(big)
+    X = np.array([perf._model_row(m, math.log(t.q_valor), math.log(t.luz_m / t.esr), i, t.profundidad_m,
+                                  t.tipo_labor) for i in range(5)])
+    eta, _, hi = perf._eta_interval(m.fit, X, 0.9)
+    q = float(perf.student_t.ppf(0.95, m.fit.df))
+    want = -np.expm1(-np.exp(eta + np.sqrt((hi - eta) ** 2 + (q * up) ** 2)) * 365.0 * m.fit.frailty_quantile(0.9))
+    np.testing.assert_allclose(perf._p_high(m, X, 365.0, 0.9), want)
 
 
 def test_compuerta_calibracion_en_el_tercio_peor(big):

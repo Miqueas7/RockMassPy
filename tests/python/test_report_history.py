@@ -186,7 +186,7 @@ def test_level2_describes_and_lists_outside(niveles):
     assert "decisión de diseño" in dd.caption and len(dd.rows) == 5
     # Fase 5B: la consistencia va con su veredicto y su corte; «fuera del conjunto» no es un desvío
     assert dict(data.rows)[rp.t("l2_consistency", "es")].endswith(f"({rp.t('consistency_ok', 'es')})")
-    assert dict(dd.rows)[rp.t("dd_consistency", "es")] == "0.76"
+    assert dict(dd.rows)[rp.t("dd_consistency", "es")] == "0.66"
     assert "no equivale a un desvío" in texto
 
 
@@ -204,7 +204,19 @@ def test_level3_state_validation_figures_and_rule(niveles):
     assert "obligatorio y no tiene valor por defecto" in texto and "P(falla) ≤ 0.3" in texto
     assert "no inferioridad" in texto and "zona fuera" in texto
     dd = [x for x in tablas(s) if "decisión de diseño" in x.caption]
-    assert dd and len(dd[0].rows) == 9
+    assert dd and len(dd[0].rows) == 14
+    # revisión final (I4): la regla y la tabla dicen la forma, σ_z con su cota, las compuertas y sus cortes
+    assert "σ_z,sup" in texto and "χ²(C − 1)" in texto and "(a) en el tercio peor" in texto and "(d) un" in texto
+    filas = dict(dd[0].rows)
+    assert filas[rp.t("dd_form", "es")].startswith(rp.t("dd_form_additive", "es") if perf.form == "additive"
+                                                   else "interacción (ln_q − ")
+    assert filas[rp.t("dd_zone", "es")].startswith(f"σ̂_z = {perf.zone_sd:.3f} con 8 zonas; cota superior usada "
+                                                   f"al nivel 0.9: {perf.zone_sd_upper(0.9):.3f}")
+    cut, obs, exp = perf.poor_rock
+    assert filas[rp.t("dd_poor", "es")].startswith(f"ln_q ≤ {cut:.4g}: observados/esperados fuera de pliegue {obs}/")
+    assert filas[rp.t("dd_labor", "es")].startswith(", ".join(f"{lt} {n}" for lt, n in zip(perf.labor_types,
+                                                                                         perf.labor_type_failures)))
+    assert SENT not in " ".join(v for _, v in dd[0].rows)
     sin_umbral = _rep(niveles).sections[5]
     assert any(isinstance(b, rp.Paragraph) and b.text == rp.t("l3_threshold_none", "es") for b in sin_umbral.blocks)
     with pytest.raises(ValueError, match="threshold"):

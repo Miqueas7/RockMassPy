@@ -73,8 +73,6 @@ CONSISTENCY_VERDICTS = ("consistent", "practice poorly consistent", "not estimab
 # [0.626; 0.694], 11/20 (ver el docstring). La entropía / ln K con 0.76 marcaba 0/20 incoherentes en worse y better;
 # dividida entre la entropía de la marginal, better consistente daba 0.72–0.84 y base incoherente 0.80–0.84
 MAX_PRACTICE_INCONSISTENCY = 0.66
-# shortcut: alias para cli.py y report/, que aún importan el nombre viejo; borrarlo cuando usen el nuevo
-MAX_PRACTICE_ENTROPY = MAX_PRACTICE_INCONSISTENCY
 _EXPECTED_SIGN = {"ln_q": -1.0, "ln_de": 1.0}  # peor macizo (ln Q menor) o más luz → tipo más pesado
 _INCOHERENT = {"ln_q": VERDICTS[2], "ln_de": VERDICTS[3]}
 _Z95 = 1.959963984540054
