@@ -325,22 +325,51 @@ def test_q_edicion_sin_mayusculas_y_desconocida():
     assert m[3].endswith("(NGI2025)")
 
 
-def test_q_tolerancia_relativa_en_q_bajo():
-    # Fase 5B: la tolerancia absoluta de 0.005 escondía un Q ×3 con Q < 0.0075; ahora manda |ln Q − ln Q′| ≤ ln 1.01
-    # con un piso que solo cubre un Q escrito con 4 decimales
+def test_q_tolerancia_en_q_bajo():
+    # Fase 5B: el piso absoluto de 0.005 escondía un Q ×3 con Q < 0.0075; el piso se queda (cubre un Q escrito con 2
+    # decimales) y una razón > 2 entre el registrado y el recalculado es hallazgo aunque la diferencia sea chica
     comp = dict(rqd_pct=10, jn=20, jr=0.5, ja=8, jw=0.5, srf=10)  # Q = 0.0015625
     q = 10 / 20 * 0.5 / 8 * 0.5 / 10
     ts = (tramo("T1", 2, q_valor=round(q, 4), **comp),  # 0.0016: redondeo a 4 decimales, sin hallazgo
           tramo("T2", 3, q_valor=float(f"{q:.4g}"), **comp),  # 4 cifras significativas, sin hallazgo
           tramo("T3", 4, q_valor=3 * q, **comp), tramo("T4", 5, q_valor=q / 3, **comp),  # ×3 y ÷3 sí
-          tramo("T5", 6, q_valor=0.004, **comp),  # ×2.6: antes pasaba con la tolerancia de 0.005
-          tramo("T6", 7, q_valor=0.0, **comp))  # Q registrado 0: sin logaritmo, siempre hallazgo
+          tramo("T5", 6, q_valor=0.004, **comp),  # ×2.6: pasaba con el piso de 0.005 solo
+          tramo("T6", 7, q_valor=0.0, **comp),  # Q registrado 0: sin logaritmo, siempre hallazgo
+          tramo("T7", 8, q_valor=0.002, **comp))  # 0.0016 escrito con 3 decimales: ×1.28, sin hallazgo
     a = rm.audit_history(rm.History(ts, (), ()))
     assert kinds(a) == [("q_mismatch", "T3"), ("q_mismatch", "T4"), ("q_mismatch", "T5"), ("q_mismatch", "T6")]
+    # ×3 en todo el rango bajo del piso (Q < 0.0075): la diferencia 2·Q es menor que 0.005, la razón lo atrapa
+    low = dict(rqd_pct=20, jn=20, jr=1, ja=8, jw=0.5, srf=10)  # Q = 0.00625
+    ql = 20 / 20 * 1 / 8 * 0.5 / 10
+    a = rm.audit_history(rm.History((tramo("T1", q_valor=float(f"{3 * ql:.4g}"), **low),
+                                     tramo("T2", 3, q_valor=float(f"{ql / 3:.4g}"), **low),
+                                     tramo("T3", 4, q_valor=round(ql, 2), **low)), (), ()))  # 0.01: ×1.6, sin hallazgo
+    assert ql < 0.0075 and kinds(a) == [("q_mismatch", "T1"), ("q_mismatch", "T2")]
+    # bordes exactos del redondeo: 0.125 escrito 0.12 (diferencia 0.005) y 0.005 escrito 0.01 (×2) no son hallazgo
+    half = dict(rqd_pct=10, jn=20, jr=1, ja=4, jw=1, srf=1)  # Q = 0.125
+    edge = dict(rqd_pct=10, jn=20, jr=1, ja=4, jw=0.4, srf=10)  # Q = 0.005
+    a = rm.audit_history(rm.History((tramo("T1", q_valor=0.12, **half), tramo("T2", 3, q_valor=0.01, **edge)), (), ()))
+    assert kinds(a) == []
     # Q alto: el 1 % relativo manda igual que antes
     big = dict(rqd_pct=100, jn=1, jr=4, ja=0.75, jw=1, srf=1)  # Q = 533.33
     a = rm.audit_history(rm.History((tramo("T1", q_valor=538.0, **big), tramo("T2", 3, q_valor=540.0, **big)), (), ()))
     assert kinds(a) == [("q_mismatch", "T2")]
+
+
+@pytest.mark.parametrize("decimals", [2, 3])
+@pytest.mark.parametrize("scenario", ["base", "worse_site"])
+def test_q_redondeado_sin_hallazgos_en_mina_limpia(scenario, decimals):
+    # revisión de la Fase 5B: con la tolerancia solo relativa, un Q escrito con 2 decimales daba q_mismatch en 26 %
+    # de los tramos de base y 72 % de worse_site (3 decimales: 3 % y 28 %). Sin defectos, ninguno
+    pytest.importorskip("scipy")
+    import dataclasses
+
+    from rockmasspy.predictive import synthetic_mine
+    hist, _ = synthetic_mine(scenario, seed=3000)
+    ts = tuple(dataclasses.replace(t, q_valor=round(t.q_valor, decimals)) for t in hist.tramos)
+    assert sum(t.q_valor < 0.0075 for t in hist.tramos) or scenario == "base"  # worse_site sí pasa por Q bajos
+    a = rm.audit_history(rm.History(ts, hist.support_types, hist.inspections))
+    assert not [f for f in a.findings if f.kind == "q_mismatch"]
 
 
 def test_celdas_vacias_por_columna_solo_conteos():

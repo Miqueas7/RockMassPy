@@ -37,11 +37,13 @@ MIN_EVENTS_PER_PARAMETER_LEVEL3 = 10  # se aplica a la clase menor: min(fallas, 
 LEVEL3_BASE_PARAMETERS = 3  # ln Q, ln De y rango del sostenimiento; la exposición entra como offset (R9); decisión de diseño
 MIN_ZONES_LEVEL3 = 3
 
-# Tolerancias de la auditoría (R3). Q en escala logarítmica: |ln Q registrado − ln Q recalculado| > ln(1 + Q_REL_TOL)
-# y además |diferencia| > Q_ABS_TOL. El piso absoluto solo cubre el redondeo de un Q escrito con 4 decimales
-# (Fase 5B: el piso anterior de 0.005 escondía un Q ×3 con Q < 0.0075)
-Q_ABS_TOL = 0.00005
+# Tolerancias de la auditoría (R3). Q: hallazgo si |diferencia| > max(Q_ABS_TOL, Q_REL_TOL·Q recalculado) o si la
+# razón Q registrado / Q recalculado pasa de Q_MAX_RATIO (o de su inversa), y siempre con Q registrado ≤ 0. El piso
+# de 0.005 cubre un Q escrito con 2 decimales; la razón atrapa el ×3 con Q < 0.0075 que el piso escondía
+# (Fase 5B). Decisión de diseño: un Q de 0.005 escrito 0.01 es ×2 exacto y no es hallazgo
+Q_ABS_TOL = 0.005
 Q_REL_TOL = 0.01
+Q_MAX_RATIO = 2.0
 RMR_TOL_POINTS = 1.0
 
 FINDING_KINDS = ("q_mismatch", "rmr_mismatch", "not_recomputed", "overlapping_chainage", "repeated_components",
@@ -410,7 +412,9 @@ def _audit_q(t):
         q = rm.q_value(rm.QInput(*params), ed).q
     except ValueError as e:  # parámetros fuera de dominio: el mensaje solo trae nombres y números
         return _finding("not_recomputed", f"Q not recomputed: {e}", t)
-    if t.q_valor <= 0 or (abs(math.log(t.q_valor / q)) > math.log1p(Q_REL_TOL) and abs(t.q_valor - q) > Q_ABS_TOL):
+    # el 1e-9 deja pasar los bordes exactos (0.125 escrito 0.12, 0.005 escrito 0.01) aunque la coma flotante los corra
+    if t.q_valor <= 0 or abs(t.q_valor - q) > max(Q_ABS_TOL, Q_REL_TOL * q) * (1 + 1e-9) \
+            or abs(math.log(t.q_valor / q)) > math.log(Q_MAX_RATIO) + 1e-9:
         return _finding("q_mismatch", f"recorded Q {t.q_valor:g} differs from Q {q:.4g} recomputed from "
                                       f"RQD, Jn, Jr, Ja, Jw and SRF ({ed.name}{note})", t)
     return None
