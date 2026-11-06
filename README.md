@@ -567,7 +567,9 @@ save_model(model, "model.json")               # coefficients, ranges and counts;
 
 - **Level 2** fits a cumulative logit of the installed support type on ln Q, ln De (span/ESR), service life and
   excavation type. It says whether the practice is coherent with rock quality and span, whether it is more
-  predictable than the NGI Q chart, and which tramos have an installed type outside their 90 % conformal set.
+  predictable than the NGI Q chart, and which tramos have an installed type outside their 90 % conformal set
+  (≈ 10 % by construction: it is not a detector of deviations). A consistency indicator, 1 − tanh(w/4) with w the
+  mean width of the inner logit bands, flags a `practice poorly consistent` practice above 0.66.
 - **Level 3** models the failure rate with a constant hazard and a gamma frailty per excavation (exposure as offset),
   with sign constraints (worse rock or a larger span never lowers the risk; more support never raises it) and a
   zone-clustered robust covariance. P(failure within H days) for a new excavation is 1 − (1 + θλH)^(−1/θ).
@@ -575,11 +577,23 @@ save_model(model, "model.json")               # coefficients, ranges and counts;
   NGI-category baseline, with a bootstrap over excavations. The model is `site` only if the excavation and zone
   partitions beat both references (95 % CI of the Poisson-deviance gain above zero, no failed folds) and the
   temporal one is not worse.
-- **Recommendation:** the lightest type whose upper bound (upper λ and the frailty quantile, for a new excavation)
-  stays under the threshold. The threshold and the horizon are set by the engineer: there are no defaults. Nothing
-  is chosen when the model is not `site`, the tramo extrapolates, a type has too little history, the support effect
-  is not identified, or a sign constraint on rock quality or span is active; the options are still shown, with the
-  reason.
+- **Form:** additive in quality and support rank, or with the interaction (quality − max)·(rank − max) bounded
+  ≥ 0 (risk stays monotone in both). The interaction enters only with 10 events per parameter counting it and a
+  lower out-of-fold Poisson deviance (folds by excavation, another seed than the validation); if it ends at its
+  bound, the additive form comes back.
+- **Recommendation:** the lightest eligible type whose upper bound, 1 − exp(−λ_up·H·Z_q), stays under the
+  threshold. λ_up adds the frailty quantile with upper θ and a **new zone**: σ_z² = C·Var(η at the mean) with the
+  zone-clustered covariance, taken at its one-sided χ² upper bound σ̂_z·sqrt((C − 1)/χ²₁₋ᵤ(C − 1)), u = 0.5 + level/2
+  (`PerformanceModel.zone_sd_upper`; ×1.80 with 8 zones and ×2.37 with 5 at level 0.9). With fewer than 10 zones
+  `fit_performance` warns. The threshold and the horizon are set by the engineer: there are no defaults.
+- **Nothing is chosen** when the model is not `site`, the tramo extrapolates, the support effect is not
+  identified, or a sign constraint on rock quality or span is active, and also when (gates, design decisions):
+  (a) the tramo is in the worst third of quality and the out-of-fold observed/expected there exceeds 1.2 or has
+  fewer than 10 failures; (b) a type has fewer than 10 training tramos in the tramo's Q class (Barton et al. 1974;
+  RMR classes of Bieniawski 1989 with `quality="rmr"`) — such a type is not eligible; (d) the tramo's excavation
+  type had fewer than 10 failures in training. (c) When no type meets the threshold it says so (`no support type
+  meets the threshold`), and so it does when the types that meet it are not eligible. The options are always
+  shown, with the reason.
 
 ```bash
 rockmass history historico.xlsx --practice --performance --model-output model.json --output results/ \
@@ -592,6 +606,71 @@ rockmass recommend new_tramos.xlsx --model model.json --threshold 0.10 --exposur
 `decision_ingeniero` and `motivo`, where the engineer records what was decided. The minimum data per level were
 checked by simulation (`docs/investigacion/SIMULACION_MINIMOS.md` in the repository). The library recommends, the
 engineer decides.
+
+## Synthetic mine and test bench
+
+`synthetic_mine` builds a **synthetic mine calibrated with the literature** to test the predictive module end to end
+against a known truth. It is a test bench: it never trains a model that is shipped, gives no priors or default
+coefficients and never replaces a mine's own history.
+
+```python
+from rockmasspy.predictive import SCENARIOS, synthetic_mine
+
+h, truth = synthetic_mine("base", seed=0)         # History (Tramos, Tipos_sostenimiento, Desempeno) and MineTruth
+h_bad, truth_bad = synthetic_mine("base", seed=0, defects=True)   # same mine plus injected data defects
+truth.rmr_lnq_slope                               # the RMR–ln Q line of the mine (it emerges; it is not fixed)
+truth.p_fail("T0001", "III", 365)                 # true P(failure within 365 days) with type III, new excavation
+```
+
+- **Mechanism:** the true rock mass comes from geology (quality per lithology and zone, an AR(1) process along each
+  excavation plus nugget, Poisson fault zones); joint parameters come from that quality and Q, RMR89 and GSI are
+  computed with the library, so the RMR–ln Q relation and its scatter emerge. Each excavation is mapped by a
+  geologist with bias and noise; the mine installs support from its own GSI table with deviations, a table change
+  and unsupported hours; failure is a constant hazard with gamma frailty driven by the deficit against the Q chart
+  read with Q·exp(−δ) (δ = 0.5 in `base`, a site somewhat worse than NGI). `failure_mechanism="saturating"` is an
+  alternative without chart or deficit, so the module is not tuned to one recipe.
+- **Truth:** `MineTruth.tramos` keeps the true values, geologist, installed and table types, frailty and, for
+  each tramo, the true rate of every support type (with the unsupported hours that type would have had);
+  `p_fail(id, type, H)` is closed form, marginal over the frailty of a new excavation in the same zone
+  (`conditional=True` for the tramo's own excavation). `truth.defects` lists the injected defects.
+- **Scenarios** (`SCENARIOS`): `base` (≈ 800 tramos, 5 zones), `ngi_site` (the site equals the NGI chart),
+  `worse_site`, `better_site`, `shifted_correlation`, `conservative_practice`, `incoherent_practice`,
+  `mine_practice`, `noisy_mapping`, `small_mine` (≈ 80 tramos), `large_mine` (≈ 4800 tramos, 8 zones),
+  `saturating_large` and `saturating_worse` (the alternative mechanism). A `MineScenario` can be built or changed
+  with `dataclasses.replace`.
+
+**Bench results** (`docs/investigacion/BANCO_MINA_SINTETICA.md` in the repository; 50 seeds per scenario, 20 in the
+large ones; recommendation applied to a second mine of the same scenario, with zones and excavations the fit did
+not see; threshold 0.10, H = 365 days):
+
+| Scenario | Chooses | Too light, pooled | Too light per mine, p90 / max | Overcost vs true optimum (median) |
+|---|---:|---:|---:|---:|
+| `large_mine` | 30.8 % | 0.7 % | 0.5 % / 4.6 % | +261 % |
+| `saturating_large` | 41.8 % | 0.5 % | 1.3 % / 2.6 % | +146 % |
+| `shifted_correlation` | 1.8 % | 1.1 % | 1.9 % / 3.2 % | +220 % |
+| `incoherent_practice` | 1.9 % | 0.2 % | 0.1 % / 0.3 % | +431 % |
+| `base` | 0.3 % | 0.0 % | 0.0 % / 0.0 % | +201 % |
+| `worse_site`, `ngi_site`, `better_site`, `conservative_practice`, `small_mine` | 0 | — | — | — |
+
+Before the 5B corrections, `large_mine` chose in 60.7 % with 5.0 % too light and `worse_site` reached 23.4 %. Now
+the per-mine p90 stays at or under 3.7 % in every cell with ln Q. Safety was bought with support and fewer
+choices: with few zones σ_z is poorly known and its upper bound covers it with more support, not with more
+information. Where the model chooses it is much safer than the Q chart alone in the same tramos.
+
+**Module changes from the bench (Phase 5B):**
+
+- Level 2: the consistency indicator above (cut 0.66); the ordinal logit converges with large n (mean gradient
+  criterion).
+- Audit: `missing_values`, one finding per column with empty cells (counts only, no `id_tramo`); the Q rule is
+  |Q recorded − Q recomputed| > max(0.005, 1 % of Q) or a ratio over 2 (`Q_MAX_RATIO`), and Q recorded ≤ 0 is
+  always a finding.
+- Level 1: `gsi_from_rmr` warns that GSI and RMR share joint condition and RQD (correlated mapping errors).
+- Level 3: the interaction form, the χ² upper bound of σ_z, the gates (a)–(d) and the warning with fewer than 10
+  zones (above). The model JSON goes to **schema 4** (`zone_sd`, `poor_rock`, `class_counts`,
+  `labor_type_failures`); an older schema is rejected with a hint to refit with
+  `rockmass history --performance --model-output`.
+
+See `examples/13-mina-sintetica/`: one mine through the audit and levels 1–3, measured against its truth.
 
 ## Methods
 
