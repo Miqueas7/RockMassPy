@@ -4,14 +4,25 @@ Open-source rock mass engineering library for mining: rock mass classifications 
 Hoek-Brown strength, site-customizable classification tables, charts, ground support recommendation, per-country
 regulatory profiles, open-pit slope analysis and data-driven support prediction. C++20 core with a Python API.
 
-**Status:** phases 1 to 4 done (calculation core and per-labor tables, support and the Peru profile, open pit, predictive module) plus phase 5 (synthetic mine and test bench); no release on PyPI yet. The library recommends, the engineer decides.
+**Documentation: <https://miqueas.dev/rockmasspy>** (guide, methods, worked examples and API reference, in English
+and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md).
 
-## Install (from source)
+**Status:** version 0.1.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench). The library recommends, the engineer decides.
 
-Needs Python >= 3.10 and a C++20 compiler.
+## Install
+
+Once 0.1.0 is on PyPI, with all the optional extras (Excel/YAML, charts, Word report, predictive module):
 
 ```bash
-pip install .
+pip install "rockmasspy[io,viz,report,ml]"
+```
+
+Until then, from source (needs Python >= 3.10 and a C++20 compiler):
+
+```bash
+git clone https://github.com/Miqueas7/RockMassPy.git
+cd RockMassPy
+pip install ".[io,viz,report,ml]"
 ```
 
 ## Minimal example
@@ -714,5 +725,15 @@ Some C++ names are reserved words in Python, so they get a trailing underscore:
 - `CorrelationResult.from_` and `CustomCorrelation.from_` (the `from_` argument of its constructor).
 
 Results print readably (`QResult(q=4.5, ...)`) and the package ships type stubs (`py.typed`).
+
+## How to cite
+
+If RockMassPy helps your work, please cite it. GitHub shows a "Cite this repository" button built from
+[CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
+
+> Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
+> geomechanics* (version 0.1.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
+
+Each result also records the method and edition it follows (`result.info`); cite that original source as well.
 
 License: MIT.

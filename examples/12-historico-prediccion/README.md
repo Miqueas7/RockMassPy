@@ -18,7 +18,7 @@ python prediccion.py salida2/
 
 ### Qué es sintético
 
-Todo. El histórico lo arma `rockmasspy.predictive.synthetic_history` (semilla 12): 4 zonas, 20 labores y unos 250
+Todo. El histórico lo arma `rockmasspy.predictive.synthetic_history` (semilla 12): 4 zonas, 20 labores y 232
 tramos con códigos inventados (`Z1`, `L001`, `T0001`) y litologías genéricas. Tiene un **mecanismo conocido**:
 RMR = 9 ln Q + 44 y GSI = RMR − 5, más un efecto aleatorio por labor y por zona y el ruido de cada tramo. Por eso el
 ejemplo puede comprobar que el ajuste **recupera** la pendiente verdadera dentro de su intervalo. Ningún número viene
@@ -33,7 +33,7 @@ de una mina, y nada de lo que el generador produce se entrega como modelo entren
    son una **decisión de diseño**, no un valor publicado, y así salen en el informe.
 3. Ajusta los tres pares (`rmr_from_q`, `gsi_from_rmr` y `gsi_from_q_prime`) por litología y para toda la mina con
    `fit_site_correlation`: OLS con intervalo de predicción, bootstrap por labor y el bayesiano con la correlación
-   global como *prior*. Cada ajuste queda «sitio», «inestable» o «no calibrada al sitio». Con esta semilla, el
+   global como *prior*. Cada ajuste queda «sitio», «inestable» o «no calibrada al sitio». Con esta semilla,
    los dominios D2 y D3 tienen menos de 5 labores y quedan «no calibradas al sitio».
 4. Escribe el informe `historico.html` (y `historico.docx` si tienes python-docx): datos, auditoría de ingesta,
    preparación por nivel, nivel 1 con sus figuras y limitaciones.
@@ -51,7 +51,7 @@ de una mina, y nada de lo que el generador produce se entrega como modelo entren
 
 ### Qué es sintético
 
-Otra vez todo. `synthetic_history` (semilla 0) arma un histórico más grande: 8 zonas, 96 labores y unos 1400 tramos,
+Otra vez todo. `synthetic_history` (semilla 0) arma un histórico más grande: 8 zonas, 96 labores y 1449 tramos,
 con un **efecto real del sitio** sobre la falla (peor macizo, más luz y más exposición fallan más; más sostenimiento
 falla menos) y una práctica coherente (peor macizo o más luz, sostenimiento más pesado). Con ese tamaño, el nivel 3
 queda «propio del sitio»: con 250 tramos, como en la parte 1, no alcanza. Los tramos nuevos salen de otra semilla y
