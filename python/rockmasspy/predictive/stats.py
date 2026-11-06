@@ -445,9 +445,11 @@ def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
             J[p + m:, p + m] = np.exp(u[p + m])
         return J
 
+    # se minimiza −log L / n: con la suma, la precisión de máquina de log L (≈ n·ε) frena a trust-exact con un
+    # gradiente que crece con n («bad approximation» con n ≈ 5000 sin separación; banco de la Fase 5, §8)
     def objective(u):
         ll, g, _ = _ordinal_loglik(u[:p], theta_of(u), Xa, ya, K)
-        return -ll, jacobian(u).T @ -g
+        return -ll / n, jacobian(u).T @ -g / n
 
     def hess(u):
         _, g, h = _ordinal_loglik(u[:p], theta_of(u), Xa, ya, K, hessian=True)
@@ -457,14 +459,14 @@ def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
         tail = np.cumsum(-g[p:][::-1])[::-1]  # Σ_{k ≥ m} ∂(−ℓ)/∂θ_k
         for m in range(1, K - 1):
             hu[p + m, p + m] += np.exp(u[p + m]) * tail[m]
-        return hu
+        return hu / n
 
     cum = np.cumsum(counts)[:-1] / n
     start = np.log(cum / (1.0 - cum))
     u0 = np.concatenate([np.zeros(p), start[:1], np.log(np.diff(start))])
     with np.errstate(over="ignore"):  # con separación exp(δ) puede desbordar: se detecta abajo
         res = minimize(objective, u0, jac=True, hess=hess, method="trust-exact",
-                       options={"gtol": 1e-9, "maxiter": 500})
+                       options={"gtol": 1e-10, "maxiter": 500})
         beta, theta = res.x[:p].copy(), theta_of(res.x)
     cov = np.full((p + K - 1, p + K - 1), np.nan)
     ll, h = -math.inf, None
@@ -478,10 +480,10 @@ def ordinal_logit_fit(X, y, *, n_classes: int) -> OrdinalLogitFit:
         converged, message = False, f"the optimizer reached non-finite values: {res.message}"
     # trust-exact a veces termina con «bad approximation» ya en el óptimo (precisión de máquina): se juzga por el
     # gradiente y no por res.success
-    elif float(np.max(np.abs(res.jac), initial=0.0)) > 1e-6 * max(1.0, math.sqrt(n)):
-        # el MLE existe (no hay separación), pero una verosimilitud muy plana suele ser separación casi completa
-        converged, message = False, (f"optimizer did not converge: {res.message} (likely near separation: a class "
-                                     "is almost separated by X; merge classes or drop columns)")
+    elif (grad := float(np.max(np.abs(res.jac), initial=0.0))) > 1e-6:  # gradiente de −log L / n
+        # no hay separación (se probó arriba): el mensaje no la culpa
+        converged, message = False, (f"optimizer did not converge: {res.message} (largest gradient of the mean "
+                                     f"log-likelihood {grad:.1e}; try rescaling the columns of X)")
     else:
         cov, message = _information_cov(-h)
         converged = not message

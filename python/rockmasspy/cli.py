@@ -637,7 +637,10 @@ def _print_validation(level: str, metric: str, report, fmt: str) -> None:
 
 
 def _print_practice(a) -> bool:
-    """Líneas del nivel 2; True si hay que revisar (práctica incoherente, no significativa o datos insuficientes)."""
+    """Líneas del nivel 2; True si hay que revisar (práctica incoherente, no significativa, poco consistente o datos
+    insuficientes)."""
+    from .predictive.practice import MAX_PRACTICE_INCONSISTENCY
+
     ref = a.design.labor_levels[0] if a.design.labor_levels else None  # los tipo_labor=… son contrastes contra él
     print(f"practice: n {a.n}, labors {a.labors}, types {', '.join(a.types)}, {a.status}"
           + ("" if ref is None else f", reference tipo_labor {ref}"))
@@ -645,19 +648,53 @@ def _print_practice(a) -> bool:
         c = a.coefficients.get(name)
         coef = "" if c is None else f" (beta {c.value:.3f}, 95% CI {c.ci_low:.3f}; {c.ci_high:.3f})"
         print(f"practice {name}: {v}{coef}")
+    print(f"practice consistency: {a.consistency_verdict} (share of tramos given another type at the centre of a "
+          f"type's range {a.consistency:.3f}, design threshold {MAX_PRACTICE_INCONSISTENCY:g})")
     _print_validation("practice", "kappa", a.validation, ".3f")
     print(f"practice beyond the Q chart: {'yes' if a.beyond_chart else 'no'} (describes the practice, "
           "it does not recommend)")
     n_sets = sum(x.conformal_set is not None for x in a.tramos)
     print(f"practice outside the conformal set: {len(a.outside_set)} of {n_sets} tramos "
-          f"(level {a.conformal_level:g})")
+          f"(level {a.conformal_level:g}; about 1 - level fall outside by construction, it is not a deviation)")
     cc = a.concordance
     print("practice concordance: none" if cc is None else
           f"practice concordance: n {cc.n}, kappa {'-' if cc.kappa is None else f'{cc.kappa:.3f}'}")
     for w in a.warnings:
         if w not in a.validation.warnings:  # ya salieron como «validation warning»
             print(f"practice warning: {w}")
-    return a.status != "ready" or any(v != "coherent" for v in a.verdicts.values())
+    return (a.status != "ready" or any(v != "coherent" for v in a.verdicts.values())
+            or a.consistency_verdict != "consistent")
+
+
+def _print_performance_gates(m) -> None:
+    """Forma, σ_z y las compuertas (a) y (d) del nivel 3: solo conteos y valores agregados."""
+    from .history import MIN_EVENTS_PER_PARAMETER_LEVEL3
+    from .predictive.performance import POOR_ROCK_MAX_OE, POOR_ROCK_MIN_EVENTS
+
+    dev = {f: m.metrics[f"oof_deviance_{f}"] for f in ("additive", "interaction") if f"oof_deviance_{f}" in m.metrics}
+    extra = (f" (out-of-fold deviance {', '.join(f'{f} {v:.4f}' for f, v in dev.items())})" if len(dev) > 1 else "")
+    if m.metrics.get("interaction_at_bound"):
+        extra += "; the interaction was at its bound in the final fit, so the additive form is kept"
+    print(f"performance form: {m.form}{extra}")
+    if m.form == "interaction":
+        q_ref, k_ref = m.interaction_ref
+        print(f"performance interaction column: ({m.features[0]} - {q_ref:.4g}) * (support_rank - {k_ref:g}), "
+              "the training maxima, so it is >= 0 in the training domain")
+    if m.fit is not None:
+        print(f"performance new zone: sigma_z estimate {m.zone_sd:.3f}, one-sided upper bound used "
+              f"{m.zone_sd_upper(0.9):.3f} at level 0.9 ({m.fit.n_clusters} zones)")
+    if m.poor_rock is None:
+        print("performance worst third of rock quality: not checked (no out-of-fold predictions)")
+    else:
+        cut, obs, exp = m.poor_rock
+        oe = f"{obs / exp:.2f}" if exp > 0 else "-"
+        print(f"performance worst third of rock quality ({m.features[0]} <= {cut:.4g}): out-of-fold observed/expected "
+              f"{obs}/{exp:.1f} = {oe} (gate: at most {POOR_ROCK_MAX_OE:g} with at least {POOR_ROCK_MIN_EVENTS} "
+              f"failures): {'passes' if m.poor_rock_problem is None else 'no choice there'}")
+    if m.labor_types:
+        print("performance failures by tipo_labor: " + ", ".join(
+            f"{lt} {n}" for lt, n in zip(m.labor_types, m.labor_type_failures))
+            + f" (no choice with fewer than {MIN_EVENTS_PER_PARAMETER_LEVEL3})")
 
 
 def _print_performance(m) -> bool:
@@ -673,8 +710,10 @@ def _print_performance(m) -> bool:
     print(f"performance: n {c['tramos']}, failures {c['failures']}, labors {c['labors']}, zones {c['zones']}, "
           f"parameters {c['parameters']}, quality {m.quality}")
     print("performance model: constant failure rate with a gamma frailty per excavation; P(failure in H days) "
-          "for a new excavation = 1 - (1 + theta*lambda*H)^(-1/theta); the decision bound uses the upper lambda "
-          "and the frailty quantile")
+          "for a new excavation = 1 - (1 + theta*lambda*H)^(-1/theta); the decision bound is "
+          "1 - exp(-lambda_up*H*Z_q), with lambda_up = exp(eta + q*sqrt(se^2 + sigma_z_up^2)) for a new zone and "
+          "Z_q the frailty quantile at the upper theta")
+    _print_performance_gates(m)
     if m.validation is not None:
         _print_validation("performance", "poisson_deviance", m.validation, ".4f")
     coefs = m.coefficients  # {} sin ajuste

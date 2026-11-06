@@ -66,8 +66,13 @@ def tipo(code, orden):
     return rm.SupportTypeDef(code, orden, "", rm.SupportType(code, orden), orden + 1)
 
 
+def hallazgos(audit):
+    """Hallazgos por tramo: sin los de celdas vacías por columna, que tienen su propia prueba."""
+    return [f for f in audit.findings if f.kind != "missing_values"]
+
+
 def kinds(audit):
-    return [(f.kind, f.id_tramo) for f in audit.findings]
+    return [(f.kind, f.id_tramo) for f in hallazgos(audit)]
 
 
 # --- lectura ---
@@ -306,24 +311,81 @@ def test_q_recalculado():
           tramo("T5", 6, q_valor=5.0, rqd_pct=80))  # sin todos los componentes: no se revisa
     a = rm.audit_history(rm.History(ts, (), ()))
     assert kinds(a) == [("q_mismatch", "T2"), ("q_mismatch", "T3"), ("not_recomputed", "T4")]
-    assert "NGI2015" in a.findings[0].message and a.findings[0].fila == 3 and a.findings[0].sheet == "Tramos"
-    assert "(NGI2015; parameters taken from the 1974 tables)" in a.findings[1].message  # Q-1974 se recalcula
+    assert "NGI2015" in hallazgos(a)[0].message and hallazgos(a)[0].fila == 3 and hallazgos(a)[0].sheet == "Tramos"
+    assert "(NGI2015; parameters taken from the 1974 tables)" in hallazgos(a)[1].message  # Q-1974 se recalcula
 
 
 def test_q_edicion_sin_mayusculas_y_desconocida():
     comp = dict(rqd_pct=80, jn=9, jr=1.5, ja=1, jw=1, srf=1, q_valor=5.0)
     ts = (tramo("T1", 2, q_edicion=" q-ngi-2015 ", **comp), tramo("T2", 3, q_edicion="q-1974", **comp),
           tramo("T3", 4, q_edicion="ZZSENT-ED", **comp), tramo("T4", 5, **comp))
-    m = [f.message for f in rm.audit_history(rm.History(ts, (), ())).findings]
+    m = [f.message for f in hallazgos(rm.audit_history(rm.History(ts, (), ())))]
     assert m[0].endswith("(NGI2015)") and "1974 tables" in m[1]
     assert m[2].endswith("(NGI2025; unknown q_edicion, NGI2025 used)") and "ZZSENT" not in m[2]
     assert m[3].endswith("(NGI2025)")
 
 
-def test_q_tolerancia_absoluta_en_q_bajo():
-    comp = dict(rqd_pct=10, jn=20, jr=0.5, ja=8, jw=0.5, srf=10)  # Q ≈ 0.0016: manda la tolerancia de 0.005
-    a = rm.audit_history(rm.History((tramo("T1", q_valor=0.004, **comp),), (), ()))
-    assert a.findings == ()
+def test_q_tolerancia_en_q_bajo():
+    # Fase 5B: el piso absoluto de 0.005 escondía un Q ×3 con Q < 0.0075; el piso se queda (cubre un Q escrito con 2
+    # decimales) y una razón > 2 entre el registrado y el recalculado es hallazgo aunque la diferencia sea chica
+    comp = dict(rqd_pct=10, jn=20, jr=0.5, ja=8, jw=0.5, srf=10)  # Q = 0.0015625
+    q = 10 / 20 * 0.5 / 8 * 0.5 / 10
+    ts = (tramo("T1", 2, q_valor=round(q, 4), **comp),  # 0.0016: redondeo a 4 decimales, sin hallazgo
+          tramo("T2", 3, q_valor=float(f"{q:.4g}"), **comp),  # 4 cifras significativas, sin hallazgo
+          tramo("T3", 4, q_valor=3 * q, **comp), tramo("T4", 5, q_valor=q / 3, **comp),  # ×3 y ÷3 sí
+          tramo("T5", 6, q_valor=0.004, **comp),  # ×2.6: pasaba con el piso de 0.005 solo
+          tramo("T6", 7, q_valor=0.0, **comp),  # Q registrado 0: sin logaritmo, siempre hallazgo
+          tramo("T7", 8, q_valor=0.002, **comp))  # 0.0016 escrito con 3 decimales: ×1.28, sin hallazgo
+    a = rm.audit_history(rm.History(ts, (), ()))
+    assert kinds(a) == [("q_mismatch", "T3"), ("q_mismatch", "T4"), ("q_mismatch", "T5"), ("q_mismatch", "T6")]
+    # ×3 en todo el rango bajo del piso (Q < 0.0075): la diferencia 2·Q es menor que 0.005, la razón lo atrapa
+    low = dict(rqd_pct=20, jn=20, jr=1, ja=8, jw=0.5, srf=10)  # Q = 0.00625
+    ql = 20 / 20 * 1 / 8 * 0.5 / 10
+    a = rm.audit_history(rm.History((tramo("T1", q_valor=float(f"{3 * ql:.4g}"), **low),
+                                     tramo("T2", 3, q_valor=float(f"{ql / 3:.4g}"), **low),
+                                     tramo("T3", 4, q_valor=round(ql, 2), **low)), (), ()))  # 0.01: ×1.6, sin hallazgo
+    assert ql < 0.0075 and kinds(a) == [("q_mismatch", "T1"), ("q_mismatch", "T2")]
+    # bordes exactos del redondeo: 0.125 escrito 0.12 (diferencia 0.005) y 0.005 escrito 0.01 (×2) no son hallazgo
+    half = dict(rqd_pct=10, jn=20, jr=1, ja=4, jw=1, srf=1)  # Q = 0.125
+    edge = dict(rqd_pct=10, jn=20, jr=1, ja=4, jw=0.4, srf=10)  # Q = 0.005
+    a = rm.audit_history(rm.History((tramo("T1", q_valor=0.12, **half), tramo("T2", 3, q_valor=0.01, **edge)), (), ()))
+    assert kinds(a) == []
+    # Q alto: el 1 % relativo manda igual que antes
+    big = dict(rqd_pct=100, jn=1, jr=4, ja=0.75, jw=1, srf=1)  # Q = 533.33
+    a = rm.audit_history(rm.History((tramo("T1", q_valor=538.0, **big), tramo("T2", 3, q_valor=540.0, **big)), (), ()))
+    assert kinds(a) == [("q_mismatch", "T2")]
+
+
+@pytest.mark.parametrize("decimals", [2, 3])
+@pytest.mark.parametrize("scenario", ["base", "worse_site"])
+def test_q_redondeado_sin_hallazgos_en_mina_limpia(scenario, decimals):
+    # revisión de la Fase 5B: con la tolerancia solo relativa, un Q escrito con 2 decimales daba q_mismatch en 26 %
+    # de los tramos de base y 72 % de worse_site (3 decimales: 3 % y 28 %). Sin defectos, ninguno
+    pytest.importorskip("scipy")
+    import dataclasses
+
+    from rockmasspy.predictive import synthetic_mine
+    hist, _ = synthetic_mine(scenario, seed=3000)
+    ts = tuple(dataclasses.replace(t, q_valor=round(t.q_valor, decimals)) for t in hist.tramos)
+    assert sum(t.q_valor < 0.0075 for t in hist.tramos) or scenario == "base"  # worse_site sí pasa por Q bajos
+    a = rm.audit_history(rm.History(ts, hist.support_types, hist.inspections))
+    assert not [f for f in a.findings if f.kind == "q_mismatch"]
+
+
+def test_celdas_vacias_por_columna_solo_conteos():
+    ts = [_usable(k, rmr_valor=60, gsi_valor=50, rqd_pct=70, jn=6, jr=2, ja=1, profundidad_m=300) for k in range(10)]
+    ts[2] = _usable(2, rmr_valor=60, gsi_valor=None, rqd_pct=70, jn=6, jr=2, ja=1, profundidad_m=300)
+    ts[5] = _usable(5, rmr_valor=60, gsi_valor=None, rqd_pct=70, jn=6, jr=2, ja=1, profundidad_m=None, q_valor=None)
+    a = rm.audit_history(rm.History(tuple(ts), (tipo("I", 1), tipo("II", 2)), ()))
+    faltan = [f for f in a.findings if f.kind == "missing_values"]
+    assert [(f.sheet, f.fila, f.id_tramo) for f in faltan] == [("Tramos", None, None)] * 3
+    assert [f.message for f in faltan] == [
+        "column gsi_valor is empty in 2 of 10 tramos (used by level 1)",
+        "column q_valor is empty in 1 of 10 tramos (used by levels 1, 2 and 3)",
+        "column profundidad_m is empty in 1 of 10 tramos (used by level 3)"]
+    assert rm.history_audit_counts(a)["missing_values"] == 3
+    # columnas que nadie llena (jw, srf, coordenadas...) no son hallazgo: la preparación de cada nivel ya lo dice
+    assert not [f for f in faltan if "jw" in f.message or "este_m" in f.message]
 
 
 def test_rmr89_basico_recalculado():
@@ -336,8 +398,8 @@ def test_rmr89_basico_recalculado():
           tramo("T5", 6, rmr_valor=59, **{**base, "agua": "seco"}))  # 69 con Seco
     a = rm.audit_history(rm.History(ts, (), ()))
     assert kinds(a) == [("rmr_mismatch", "T2"), ("not_recomputed", "T4"), ("rmr_mismatch", "T5")]
-    assert "may include the orientation adjustment" in a.findings[0].message
-    assert "basic RMR89 64" in a.findings[0].message and "basic RMR89 69" in a.findings[2].message
+    assert "may include the orientation adjustment" in hallazgos(a)[0].message
+    assert "basic RMR89 64" in hallazgos(a)[0].message and "basic RMR89 69" in hallazgos(a)[2].message
 
 
 def test_rmr_edicion_normalizada():
@@ -359,7 +421,7 @@ def test_registros_no_independientes():
     a = rm.audit_history(rm.History(ts, (), ()))
     assert kinds(a) == [("overlapping_chainage", "T2"), ("overlapping_chainage", "T3"),
                         ("repeated_components", "T6")]
-    assert "row 2" in a.findings[1].message and "not independent" in a.findings[2].message
+    assert "row 2" in hallazgos(a)[1].message and "not independent" in hallazgos(a)[2].message
 
 
 def test_progresiva_al_reves_y_clave_de_labor():
@@ -369,7 +431,7 @@ def test_progresiva_al_reves_y_clave_de_labor():
           tramo("T4", 5, labor_codigo="L001", progresiva_inicio_m=60, progresiva_fin_m=70, rqd_pct=70),
           tramo("T5", 6, labor_codigo="L001", progresiva_inicio_m=70, progresiva_fin_m=80, rqd_pct=70))  # 1 componente
     a = rm.audit_history(rm.History(ts, (), ()))
-    assert kinds(a) == [("overlapping_chainage", "T2")] and "row 2" in a.findings[0].message
+    assert kinds(a) == [("overlapping_chainage", "T2")] and "row 2" in hallazgos(a)[0].message
     assert [rm.labor_key(t) for t in ts[2:4]] == [("Z2", "L001"), (None, "L001")]
     assert rm.labor_key(tramo("T9")) is None
 
@@ -385,18 +447,18 @@ def test_coherencia_entre_hojas():
     ins = (insp("T1", "2026-01-15", "Estable", 2), insp("T1", "2026-02-01", "Estable", 3), insp("T9", "2026-03-01",
                                                                                                 "Falla", 4))
     a = rm.audit_history(rm.History(ts, (tipo("I", 1), tipo("II", 2)), ins))
-    assert [(f.kind, f.sheet, f.fila, f.id_tramo) for f in a.findings] == [
+    assert [(f.kind, f.sheet, f.fila, f.id_tramo) for f in hallazgos(a)] == [
         ("unknown_support", "Tramos", 2, "T1"), ("unknown_support", "Tramos", 3, "T2"),
         ("inspection_before_installation", "Desempeno", 2, "T1"), ("unknown_tramo", "Desempeno", 4, "T9")]
-    assert "sost_recomendado 'IV'" in a.findings[0].message
+    assert "sost_recomendado 'IV'" in hallazgos(a)[0].message
 
 
 def test_sin_tipos_de_sostenimiento_un_solo_hallazgo():
     ts = tuple(tramo(f"T{k}", k + 2, sost_instalado="I") for k in range(5)) + (tramo("T9", 9),)
     a = rm.audit_history(rm.History(ts, (), ()))
-    assert [(f.kind, f.sheet, f.fila, f.id_tramo) for f in a.findings] == [
+    assert [(f.kind, f.sheet, f.fila, f.id_tramo) for f in hallazgos(a)] == [
         ("unknown_support", "Tipos_sostenimiento", None, None)]
-    assert "5 tramos" in a.findings[0].message
+    assert "5 tramos" in hallazgos(a)[0].message
 
 
 def test_inspeccion_despues_de_abandonado():
@@ -490,7 +552,7 @@ def test_q_prime_fuera_de_dominio_es_hallazgo_y_no_cuenta_en_el_nivel_1():
     h = rm.History(ts, (), ())
     a = rm.audit_history(h)
     assert kinds(a) == [("not_recomputed", "T1"), ("not_recomputed", "T2"), ("not_recomputed", "T3")]
-    assert [f.message.startswith("Q' not computable") for f in a.findings] == [True, True, False]
+    assert [f.message.startswith("Q' not computable") for f in hallazgos(a)] == [True, True, False]
     assert {r.item: r.counts["pairs"] for r in a.readiness if r.level == 1}["gsi_from_q_prime"] == 1
     sel = rm.level1_rows(h, "gsi_from_q_prime")
     assert [t.id_tramo for t in sel.tramos] == ["T4"] and sel.excluded_x == 3

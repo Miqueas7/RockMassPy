@@ -16,7 +16,7 @@ matplotlib dibuja la sección de cada análisis (`seccion_le_1.png`, `seccion_le
 `rockmass le` con los mismos CSV. **La CLI termina con 0**: ningún FS llega a 1 y no hay avisos. Como hay dos
 análisis, la CLI escribe el avance (`analysis 1 of 2...`) en stderr.
 
-Tarda unos 12 s, casi todo en la búsqueda circular con Hoek-Brown. Con Hoek-Brown, una búsqueda circular de 20×20×11
+Tarda de 12 a 40 s según la máquina, casi todo en la búsqueda circular con Hoek-Brown. Con Hoek-Brown, una búsqueda circular de 20×20×11
 tarda unos 10 a 15 s; con kh, ky por vueltas puede repetirla hasta 5 veces.
 
 ## Las dos secciones

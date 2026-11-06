@@ -692,6 +692,16 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l2_reference": {"es": "Tipo de labor de referencia (los tipo_labor=… son contrastes contra él)",
                      "en": "Reference excavation type (the tipo_labor=… terms are contrasts against it)"},
     "l2_ready": {"es": "listo", "en": "ready"},
+    "l2_consistency": {"es": "Consistencia: parte de los tramos que en el centro del rango de un tipo reciben otro, "
+                             "1 − tanh(w/4) con w el ancho medio de las bandas del logit (0 = siempre el mismo tipo "
+                             "en la misma condición, 1 = sin relación con la condición)",
+                       "en": "Consistency: share of tramos given another type at the centre of a type's range, "
+                             "1 − tanh(w/4) with w the mean logit band width (0 = always the same type in the same "
+                             "condition, 1 = unrelated to the condition)"},
+    "consistency_ok": {"es": "consistente", "en": "consistent"},
+    "consistency_poor": {"es": "práctica poco consistente", "en": "practice poorly consistent"},
+    "dd_consistency": {"es": "Inconsistencia máxima de una práctica consistente (banco sintético, por confirmar)",
+                       "en": "Maximum inconsistency of a consistent practice (synthetic bench, to be confirmed)"},
     "l2_insufficient": {"es": "datos insuficientes", "en": "insufficient data"},
     "cap_l2_coef": {"es": "Coeficientes del logit acumulado (ajuste final) y veredictos de signo",
                     "en": "Cumulative logit coefficients (final fit) and sign verdicts"},
@@ -733,12 +743,16 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l2_conformal": {
         "es": "Conjunto conforme agrupado al {level:.0%} (Angelopoulos y Bates 2023 [V2]): el umbral del puntaje "
               "({q}) sale de las probabilidades fuera de pliegue por labor. {k} de {n} tramos tienen un tipo "
-              "instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa condición. La "
-              "cobertura es aproximada y supone labores intercambiables; con zonas muy distintas no se cumple.",
+              "instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa condición. Por "
+              "construcción queda fuera ≈ 1 − nivel de los tramos con cualquier práctica: no equivale a un desvío, "
+              "solo marca los tramos menos típicos. La cobertura es aproximada y supone labores intercambiables; con "
+              "zonas muy distintas no se cumple.",
         "en": "Grouped conformal set at {level:.0%} (Angelopoulos and Bates 2023 [V2]): the score threshold ({q}) "
               "comes from the out-of-fold probabilities by excavation. {k} of {n} tramos have an installed type "
-              "outside their set: the mine does not usually install that in that condition. The coverage is "
-              "approximate and assumes exchangeable excavations; with very different zones it does not hold.",
+              "outside their set: the mine does not usually install that in that condition. By construction about "
+              "1 − level of the tramos fall outside with any practice: it is not a deviation, it only flags the "
+              "least typical tramos. The coverage is approximate and assumes exchangeable excavations; with very "
+              "different zones it does not hold.",
     },
     "cap_l2_outside": {"es": "Tramos con el tipo instalado fuera del conjunto conforme",
                        "en": "Tramos with the installed type outside the conformal set"},
@@ -791,11 +805,11 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
               "P(failure) and does not choose. \"Not calibrated to the site\": below the minimum.",
     },
     "l3_model": {"es": "Modelo: tasa de falla constante con fragilidad gamma por labor; P(falla en H días) de una "
-                       "labor nueva = 1 − (1 + θλH)^(−1/θ); la cota de decisión usa λ superior y el cuantil de la "
-                       "fragilidad.",
+                       "labor nueva = 1 − (1 + θλH)^(−1/θ); la cota de decisión usa λ superior con la DE entre zonas "
+                       "en su cota superior y el cuantil de la fragilidad.",
                  "en": "Model: constant failure rate with a gamma frailty per excavation; P(failure in H days) for "
-                       "a new excavation = 1 − (1 + θλH)^(−1/θ); the decision bound uses the upper λ and the frailty "
-                       "quantile."},
+                       "a new excavation = 1 − (1 + θλH)^(−1/θ); the decision bound uses the upper λ with the "
+                       "between-zone SD at its upper bound and the frailty quantile."},
     "cap_l3_state": {"es": "Estado y datos del nivel 3", "en": "Level 3 status and data"},
     "l3_calibration": {"es": "Nivel de calibración", "en": "Calibration level"},
     "l3_reason": {"es": "Motivo", "en": "Reason"},
@@ -851,26 +865,42 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
                    "en": "The model uses RMR: the Q–De contours do not apply."},
     "fig_l3_iso": {"es": "Isoprobabilidad de falla, tipo {code}", "en": "Probability of failure contours, type {code}"},
     "l3_rule": {
-        "es": "Regla de recomendación: para un tramo nuevo (en una labor nueva) se calcula P(falla) con su "
-              "intervalo al 90 % para cada tipo de la mina, del más liviano al más pesado, y se elige el más liviano "
-              "cuyo límite superior queda bajo el umbral. El límite superior es conservador por diseño: usa λ "
-              "superior y el cuantil de la fragilidad con θ superior. El umbral lo fija el ingeniero: es obligatorio y no tiene valor por defecto, igual "
-              "que el horizonte de exposición (rockmass recommend --threshold P --exposure-days D). Solo con el "
-              "nivel «propio del sitio» y sin motivo de bloqueo (extrapolación, tipos sin historia suficiente, "
-              "efecto del sostenimiento no significativo o cota activa) se elige un tipo; los motivos van con cada "
-              "recomendación. Cada recomendación trae las tres razones principales, la "
-              "alerta de extrapolación y las columnas vacías decision_ingeniero y motivo, donde el ingeniero "
-              "registra lo que decidió; con el desempeño posterior, alimentan el siguiente ajuste.",
-        "en": "Recommendation rule: for a new tramo (in a new excavation), P(failure) with its 90 % interval is "
-              "computed for every support type of the mine, lightest to heaviest, and the lightest type whose upper "
-              "bound stays below the threshold is chosen. The upper bound is conservative by design: it uses the "
-              "upper λ and the frailty quantile at the upper θ. The engineer sets the threshold: it is mandatory and has no default, like "
-              "the exposure horizon (rockmass recommend --threshold P --exposure-days D). A type is chosen only at "
-              "the \"site\" level and with no blocking reason (extrapolation, types without enough history, a "
-              "non-significant support effect or an active bound); the reasons go with each recommendation. Each "
-              "recommendation carries the three main reasons, the extrapolation alert and "
-              "the empty columns decision_ingeniero and motivo, where the engineer records the decision; with the "
-              "later performance, they feed the next fit.",
+        "es": "Regla de recomendación: para un tramo nuevo (en una labor nueva y en una zona nueva) se calcula "
+              "P(falla) con su intervalo al 90 % para cada tipo de la mina, del más liviano al más pesado, y se elige "
+              "el más liviano elegible cuyo límite superior queda bajo el umbral. El límite superior es "
+              "1 − exp(−λ_sup·H·Z_q), conservador por diseño: λ_sup = exp(η + q·√(se² + σ_z,sup²)) suma la "
+              "incertidumbre de η y la variabilidad entre zonas (el modelo no tiene efecto de zona en la media), "
+              "con σ_z,sup la cota superior unilateral de la DE entre zonas, σ̂_z·√((C − 1)/χ²(C − 1)) al mismo "
+              "cuantil que η, porque con C zonas σ̂_z es una sola estimación con C − 1 grados de libertad; Z_q es el "
+              "cuantil de la fragilidad con θ superior. El umbral lo fija el ingeniero: es obligatorio y no tiene "
+              "valor por defecto, igual que el horizonte de exposición (rockmass recommend --threshold P "
+              "--exposure-days D). Solo con el nivel «propio del sitio» y sin motivo de bloqueo se elige un tipo. "
+              "Bloquean: la extrapolación; un efecto del sostenimiento no significativo o una cota activa; (a) en el "
+              "tercio peor de la calidad, observados/esperados fuera de pliegue sobre {oe:g} o menos de {ev} fallas "
+              "para verlo; (b) un tipo con menos de {cls} tramos en la clase de Q (Barton et al. 1974) o de RMR "
+              "(Bieniawski 1989) del tramo no es elegible; (c) si ningún tipo queda bajo el umbral, se dice; (d) un "
+              "tipo de labor con menos de {lab} fallas en el entrenamiento. Los motivos van con cada recomendación. "
+              "Cada recomendación trae las tres razones principales, la alerta de extrapolación y las columnas vacías "
+              "decision_ingeniero y motivo, donde el ingeniero registra lo que decidió; con el desempeño posterior, "
+              "alimentan el siguiente ajuste.",
+        "en": "Recommendation rule: for a new tramo (in a new excavation and a new zone), P(failure) with its 90 % "
+              "interval is computed for every support type of the mine, lightest to heaviest, and the lightest "
+              "eligible type whose upper bound stays below the threshold is chosen. The upper bound is "
+              "1 − exp(−λ_up·H·Z_q), conservative by design: λ_up = exp(η + q·√(se² + σ_z,up²)) adds the "
+              "uncertainty of η and the variability between zones (the model has no zone effect in the mean), with "
+              "σ_z,up the one-sided upper bound of the between-zone SD, σ̂_z·√((C − 1)/χ²(C − 1)) at the same "
+              "quantile as η, because with C zones σ̂_z is a single estimate with C − 1 degrees of freedom; Z_q is "
+              "the frailty quantile at the upper θ. The engineer sets the threshold: it is mandatory and has no "
+              "default, like the exposure horizon (rockmass recommend --threshold P --exposure-days D). A type is "
+              "chosen only at the \"site\" level and with no blocking reason. Blocking: extrapolation; a "
+              "non-significant support effect or an active bound; (a) in the worst third of rock quality, "
+              "out-of-fold observed/expected above {oe:g} or fewer than {ev} failures to check it; (b) a type with "
+              "fewer than {cls} tramos in the tramo's Q class (Barton et al. 1974) or RMR class (Bieniawski 1989) is "
+              "not eligible; (c) if no type stays below the threshold, it says so; (d) an excavation type with "
+              "fewer than {lab} failures in training. The reasons go with each recommendation. Each recommendation "
+              "carries the three main reasons, the extrapolation alert and the empty columns decision_ingeniero and "
+              "motivo, where the engineer records the decision; with the later performance, they feed the next "
+              "fit.",
     },
     "l3_threshold": {"es": "Umbral de este informe, fijado por el ingeniero: P(falla) ≤ {thr:g}.",
                      "en": "Threshold of this report, set by the engineer: P(failure) ≤ {thr:g}."},
@@ -889,12 +919,48 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "dd_temporal": {"es": "Partición temporal", "en": "Temporal partition"},
     "dd_temporal_v": {"es": "no inferioridad (mejora puntual ≥ 0)", "en": "non-inferiority (point gain ≥ 0)"},
     "dd_interval": {"es": "Intervalo de P(falla) y límite usado", "en": "P(failure) interval and bound used"},
-    "dd_interval_v": {"es": "límite superior de P(falla) para una labor nueva, 1 − exp(−λ_sup·H·Z_q): incluye la "
-                            "incertidumbre de los coeficientes (covarianza robusta por zona) y la variabilidad entre "
-                            "labores (cuantil de la fragilidad gamma con la cota superior de θ)",
-                      "en": "upper bound of P(failure) for a new excavation, 1 − exp(−λ_sup·H·Z_q): it includes the "
-                            "uncertainty of the coefficients (zone-robust covariance) and the variability between "
-                            "excavations (gamma frailty quantile at the upper bound of θ)"},
+    "dd_interval_v": {"es": "límite superior de P(falla) para una labor nueva en una zona nueva, "
+                            "1 − exp(−λ_sup·H·Z_q): incluye la incertidumbre de los coeficientes (covarianza robusta "
+                            "por zona), la DE entre zonas en su cota superior unilateral χ²(C − 1) y la variabilidad "
+                            "entre labores (cuantil de la fragilidad gamma con la cota superior de θ)",
+                      "en": "upper bound of P(failure) for a new excavation in a new zone, 1 − exp(−λ_up·H·Z_q): it "
+                            "includes the uncertainty of the coefficients (zone-robust covariance), the between-zone "
+                            "SD at its one-sided χ²(C − 1) upper bound and the variability between excavations "
+                            "(gamma frailty quantile at the upper bound of θ)"},
+    "dd_form": {"es": "Forma del modelo", "en": "Model form"},
+    "dd_form_additive": {"es": "aditiva", "en": "additive"},
+    "dd_form_interaction": {"es": "interacción ({q} − {qr})·(rango − {kr}), con las máximas del entrenamiento: "
+                                  "≥ 0 en el dominio, cota ≥ 0",
+                            "en": "interaction ({q} − {qr})·(rank − {kr}), with the training maxima: ≥ 0 in the "
+                                  "domain, bound ≥ 0"},
+    "dd_form_v": {"es": "{form}; la interacción entra solo con {e} eventos por parámetro contándola, si baja la "
+                        "devianza de Poisson fuera de pliegue (pliegues por labor con otra semilla que la validación) "
+                        "y si no queda en su cota en el ajuste final{dev}",
+                  "en": "{form}; the interaction enters only with {e} events per parameter counting it, if it lowers "
+                        "the out-of-fold Poisson deviance (excavation folds with another seed than the validation) "
+                        "and if it is not at its bound in the final fit{dev}"},
+    "dd_zone": {"es": "DE entre zonas (zona nueva)", "en": "Between-zone SD (new zone)"},
+    "dd_zone_v": {"es": "σ̂_z = {s:.3f} con {c} zonas; cota superior usada al nivel 0.9: {u:.3f}. Con pocas zonas "
+                        "σ_z no se conoce: la cota lo cubre con más sostenimiento, no con más información",
+                  "en": "σ̂_z = {s:.3f} with {c} zones; upper bound used at level 0.9: {u:.3f}. With few zones σ_z is "
+                        "not known: the bound covers it with more support, not with more information"},
+    "dd_poor": {"es": "Compuerta (a): tercio peor de la calidad", "en": "Gate (a): worst third of rock quality"},
+    "dd_poor_v": {"es": "{q} ≤ {cut:.4g}: observados/esperados fuera de pliegue {o}/{e:.1f} = {oe}; corte {mx:g} con "
+                        "al menos {ev} fallas: {res}",
+                  "en": "{q} ≤ {cut:.4g}: out-of-fold observed/expected {o}/{e:.1f} = {oe}; cut {mx:g} with at "
+                        "least {ev} failures: {res}"},
+    "dd_poor_none": {"es": "no se pudo revisar (sin predicciones fuera de pliegue): no se elige",
+                     "en": "could not be checked (no out-of-fold predictions): no choice"},
+    "dd_pass": {"es": "pasa", "en": "passes"},
+    "dd_fail_gate": {"es": "no se elige ahí", "en": "no choice there"},
+    "dd_labor": {"es": "Compuerta (d): fallas por tipo de labor", "en": "Gate (d): failures by excavation type"},
+    "dd_labor_v": {"es": "{counts}; no se elige con menos de {lab}", "en": "{counts}; no choice with fewer than {lab}"},
+    "dd_class": {"es": "Compuerta (b): soporte por clase de calidad", "en": "Gate (b): support by quality class"},
+    "dd_class_v": {"es": "un tipo no es elegible con menos de {cls} tramos suyos en la clase del tramo",
+                   "en": "a type is not eligible with fewer than {cls} of its tramos in the tramo's class"},
+    "dd_dev": {"es": " (devianza fuera de pliegue: {d})", "en": " (out-of-fold deviance: {d})"},
+    "dd_at_bound": {"es": "; la interacción quedó en su cota y se volvió a la aditiva",
+                    "en": "; the interaction was at its bound and the additive form was kept"},
     "l3_rec_blocked": {"es": "Atención: recommend no elegirá ningún tipo con este modelo, aunque su nivel sea «propio "
                              "del sitio». Motivos: {reasons}.",
                        "en": "Attention: recommend will not choose any type with this model, even at the \"site\" "

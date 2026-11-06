@@ -4,7 +4,7 @@ Librería open source de ingeniería de macizo rocoso para minería: clasificaci
 resistencia de Hoek-Brown, tablas personalizables por labor, gráficos, recomendación de sostenimiento, perfiles
 normativos por país, tajo abierto y predicción de sostenimiento con datos históricos. Núcleo en C++20 con API en Python.
 
-**Estado:** fases 1A (núcleo de cálculo) y 1B (tablas por labor) terminadas en las ramas `fase-1a` y `fase-1b`; aún sin versión publicada.
+**Estado:** fases 1 a 4 terminadas (núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo) más la fase 5 (mina sintética y banco de pruebas); aún sin versión en PyPI.
 La librería recomienda, el ingeniero decide.
 
 ## Instalación (desde el código)
@@ -584,7 +584,10 @@ save_model(modelo, "modelo.json")             # coeficientes, rangos y conteos; 
     labor.
   - Dice si la práctica es coherente con la calidad del macizo y con la luz, y si es más predecible que la carta Q
     NGI.
-  - Marca los tramos cuyo tipo instalado queda fuera de su conjunto conforme al 90 %.
+  - Marca los tramos cuyo tipo instalado queda fuera de su conjunto conforme al 90 % (≈ 10 % por construcción: no
+    es un detector de desvíos).
+  - Mide la consistencia de la práctica con 1 − tanh(w/4), con w el ancho medio de las bandas internas del logit;
+    sobre 0.66 dice `practice poorly consistent`.
 - **Nivel 3:**
   - Modela la tasa de falla con un riesgo constante y una fragilidad gamma por labor; la exposición entra como
     *offset*.
@@ -596,12 +599,24 @@ save_model(modelo, "modelo.json")             # coeficientes, rangos y conteos; 
   - Referencias: un ficticio de tasa constante y la línea base de la categoría NGI, con bootstrap por labor.
   - El modelo queda `site` solo si las particiones por labor y por zona superan a las dos referencias (IC 95 % de la
     mejora de la devianza de Poisson sobre cero y sin pliegues fallidos), y la temporal no sale peor.
+- **Forma:** aditiva en la calidad y el rango del sostenimiento, o con la interacción (calidad − máx)·(rango − máx)
+  con cota ≥ 0 (el riesgo sigue monótono en las dos). La interacción entra solo con 10 eventos por parámetro
+  contándola y si baja la devianza de Poisson fuera de pliegue (pliegues por labor, de otra semilla que la
+  validación); si queda en su cota en el ajuste final, vuelve la aditiva.
 - **Recomendación:**
-  - Elige el tipo más liviano cuyo límite superior (λ superior y el cuantil de la fragilidad, para una labor nueva)
-    queda bajo el umbral.
+  - Elige el tipo más liviano elegible cuyo límite superior, 1 − exp(−λ_sup·H·Z_q), queda bajo el umbral.
+  - λ_sup suma el cuantil de la fragilidad con θ superior y una **zona nueva**: σ_z² = C·Var(η en la media) con la
+    covarianza agrupada por zona, tomada en su cota superior unilateral χ², σ̂_z·sqrt((C − 1)/χ²₁₋ᵤ(C − 1)) con
+    u = 0.5 + level/2 (`PerformanceModel.zone_sd_upper`; ×1.80 con 8 zonas y ×2.37 con 5, con level 0.9). Con
+    menos de 10 zonas, `fit_performance` avisa.
   - El umbral y el horizonte los fija el ingeniero: no hay valores por defecto.
-  - No se elige nada si el modelo no es `site`, si el tramo extrapola, si un tipo tiene poca historia, si el efecto
-    del sostenimiento no está identificado, o si queda activa una restricción de signo en la calidad o en la luz. Las
+  - No se elige nada si el modelo no es `site`, si el tramo extrapola, si el efecto del sostenimiento no está
+    identificado o si queda activa una restricción de signo en la calidad o en la luz. Tampoco con las compuertas
+    (decisiones de diseño): (a) el tramo está en el tercio peor de la calidad y ahí el observado/esperado fuera de
+    pliegue pasa de 1.2 o tiene menos de 10 fallas; (b) un tipo con menos de 10 tramos de entrenamiento en la clase
+    de Q del tramo (Barton et al. 1974; clases de RMR de Bieniawski 1989 con `quality="rmr"`) no es elegible;
+    (d) el tipo de labor del tramo tuvo menos de 10 fallas en el entrenamiento. (c) Si ningún tipo queda bajo el
+    umbral lo dice (`no support type meets the threshold`), y también si los que cumplen no son elegibles. Las
     opciones se muestran igual, con el motivo.
 
 ```bash
@@ -615,6 +630,73 @@ rockmass recommend tramos_nuevos.xlsx --model modelo.json --threshold 0.10 --exp
 `decision_ingeniero` y `motivo`, donde el ingeniero anota lo que decidió. Los mínimos de datos por nivel se
 comprobaron por simulación (`docs/investigacion/SIMULACION_MINIMOS.md` en el repositorio). La librería recomienda; el
 ingeniero decide.
+
+## Mina sintética y banco de pruebas
+
+`synthetic_mine` arma una **mina sintética calibrada con la literatura** para probar el módulo predictivo de punta a
+punta contra una verdad conocida. Es un banco de pruebas: nunca entrena un modelo que se entregue, no da *priors* ni
+coeficientes por defecto y nunca reemplaza el histórico de una mina.
+
+```python
+from rockmasspy.predictive import SCENARIOS, synthetic_mine
+
+h, verdad = synthetic_mine("base", seed=0)        # History (Tramos, Tipos_sostenimiento, Desempeno) y MineTruth
+h_mal, verdad_mal = synthetic_mine("base", seed=0, defects=True)  # la misma mina con defectos de datos inyectados
+verdad.rmr_lnq_slope                              # la recta RMR–ln Q de la mina (emerge; no se fija)
+verdad.p_fail("T0001", "III", 365)                # P verdadera de falla en 365 días con el tipo III, labor nueva
+```
+
+- **Mecanismo:** el macizo verdadero sale de la geología (calidad por litología y zona, un AR(1) a lo largo de cada
+  labor más pepita, zonas de falla de Poisson); los parámetros de juntas salen de esa calidad y Q, RMR89 y GSI se
+  calculan con la librería, así que la relación RMR–ln Q y su dispersión emergen. Cada labor la mapea un geólogo
+  con sesgo y ruido; la mina sostiene con su propia tabla por GSI, con desvíos, un cambio de tabla y horas sin
+  sostener; la falla es una tasa constante con fragilidad gamma que sube con el déficit frente a la carta Q leída
+  con Q·exp(−δ) (δ = 0.5 en `base`, un sitio algo peor que NGI). `failure_mechanism="saturating"` es un mecanismo
+  alternativo, sin carta ni déficit, para no ajustar el módulo a una sola receta.
+- **Verdad:** `MineTruth.tramos` guarda los valores verdaderos, el geólogo, el tipo de la tabla y el instalado, la
+  fragilidad y, por tramo, la tasa verdadera de cada tipo (con las horas sin sostener que habría tenido ese tipo);
+  `p_fail(id, tipo, H)` es cerrada, marginal sobre la fragilidad de una labor nueva en la misma zona
+  (`conditional=True` para la labor del tramo). `verdad.defects` lista los defectos inyectados.
+- **Escenarios** (`SCENARIOS`): `base` (≈ 800 tramos, 5 zonas), `ngi_site` (el sitio es igual a la carta NGI),
+  `worse_site`, `better_site`, `shifted_correlation`, `conservative_practice`, `incoherent_practice`,
+  `mine_practice`, `noisy_mapping`, `small_mine` (≈ 80 tramos), `large_mine` (≈ 4800 tramos, 8 zonas),
+  `saturating_large` y `saturating_worse` (el mecanismo alternativo). Un `MineScenario` se arma o se cambia con
+  `dataclasses.replace`.
+
+**Resultados del banco** (`docs/investigacion/BANCO_MINA_SINTETICA.md` en el repositorio; 50 semillas por escenario,
+20 en los grandes; la recomendación se aplica a una segunda mina del mismo escenario, con zonas y labores que el
+ajuste no vio; umbral 0.10, H = 365 días):
+
+| Escenario | Elige | Demasiado liviano, agrupado | Por mina, p90 / máx | Sobrecosto frente al óptimo de verdad (mediana) |
+|---|---:|---:|---:|---:|
+| `large_mine` | 30.8 % | 0.7 % | 0.5 % / 4.6 % | +261 % |
+| `saturating_large` | 41.8 % | 0.5 % | 1.3 % / 2.6 % | +146 % |
+| `shifted_correlation` | 1.8 % | 1.1 % | 1.9 % / 3.2 % | +220 % |
+| `incoherent_practice` | 1.9 % | 0.2 % | 0.1 % / 0.3 % | +431 % |
+| `base` | 0.3 % | 0.0 % | 0.0 % / 0.0 % | +201 % |
+| `worse_site`, `ngi_site`, `better_site`, `conservative_practice`, `small_mine` | 0 | — | — | — |
+
+Antes de las correcciones de la 5B, `large_mine` elegía en el 60.7 % con 5.0 % demasiado liviano y `worse_site`
+llegaba a 23.4 %. Ahora el p90 por mina queda en 3.7 % o menos en todas las celdas con ln Q. La seguridad se compró
+con sostenimiento y con menos elecciones: con pocas zonas σ_z se conoce mal y su cota lo cubre con más
+sostenimiento, no con más información. Donde el modelo elige, es mucho más seguro que la carta Q sola en los mismos
+tramos.
+
+**Cambios del módulo que pidió el banco (Fase 5B):**
+
+- Nivel 2: el indicador de consistencia de arriba (corte 0.66); el logit ordinal converge con n grande (criterio
+  del gradiente medio).
+- Auditoría: `missing_values`, un hallazgo por columna con celdas vacías (solo conteos, sin `id_tramo`); la regla
+  de Q es |Q registrado − Q recalculado| > máx(0.005, 1 % de Q) o una razón mayor que 2 (`Q_MAX_RATIO`), y un Q
+  registrado ≤ 0 siempre es hallazgo.
+- Nivel 1: `gsi_from_rmr` avisa que GSI y RMR comparten la condición de juntas y el RQD (errores de mapeo
+  correlacionados).
+- Nivel 3: la forma con interacción, la cota χ² de σ_z, las compuertas (a)–(d) y el aviso con menos de 10 zonas
+  (arriba). El JSON del modelo pasa al **esquema 4** (`zone_sd`, `poor_rock`, `class_counts`,
+  `labor_type_failures`); uno de esquema anterior se rechaza y pide reajustar con
+  `rockmass history --performance --model-output`.
+
+Ver `examples/13-mina-sintetica/`: una mina por la auditoría y los niveles 1 a 3, medida contra su verdad.
 
 ## Métodos
 

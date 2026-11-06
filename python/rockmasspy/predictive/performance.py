@@ -22,11 +22,39 @@ train) y la línea base de nivel 0, el modelo exponencial con una sola variable,
 
 La recomendación (R10, §4 punto 7) es para una labor NUEVA: muestra P(falla en H días) para CADA tipo de la mina
 (central = la media marginal 1 − (1 + θλH)^(−1/θ)); elige el más liviano elegible cuyo límite superior
-1 − exp(−λ_sup·H·Z_q) queda bajo el umbral del ingeniero (umbral y H obligatorios), con λ_sup la cota de η al nivel y
+1 − exp(−λ_sup·H·Z_q) queda bajo el umbral del ingeniero (umbral y H obligatorios), con λ_sup la cota de η al nivel
+(que desde la 5B suma la cota de σ_z de una zona nueva, ver abajo) y
 Z_q el cuantil `level` de la fragilidad evaluado con la cota superior de θ, exp(log θ̂ + z·sd(log θ)): conservador
 por diseño (con pocas labores θ̂ puede salir bajo). Solo elige si el modelo está calibrado al sitio,
 el efecto del sostenimiento está identificado y el tramo no extrapola. La decisión final queda en las columnas
 `decision_ingeniero` y `motivo`.
+
+Fase 5B (banco de la mina sintética, `docs/investigacion/BANCO_MINA_SINTETICA.md`):
+- Forma del modelo: además de la aditiva, la interacción calidad × rango, con la columna
+  (calidad − calidad_máx)·(rango − rango_máx) y cota de signo ≥ 0: el sostenimiento ayuda más en peor roca y, con
+  β_q ≤ 0 y β_rank ≤ 0, la tasa sigue siendo monótona en la calidad y en el rango dentro del dominio. Entra solo si
+  la clase menor alcanza 10 eventos por parámetro CONTANDO el de la interacción y si baja la devianza de Poisson
+  fuera de pliegue (partición por labor, los mismos pliegues) frente a la aditiva; si no, queda la aditiva. El
+  déficit frente a la carta NGI se probó en el banco y no ayudó; además la librería no tiene la equivalencia entre
+  los tipos de la mina y las categorías de la carta.
+- Zona nueva: el modelo no tiene efecto de zona en la media, así que la cota superior suma en cuadratura la
+  varianza entre zonas, σ̂_z² = C·Var(η en la media) con la covarianza agrupada por zona (C zonas), decisión de
+  diseño: en el banco su mediana recupera σ_z con 8 zonas. Revisión final (I1): σ̂_z es UNA estimación con C − 1
+  grados de libertad; en el banco va de 0.2 a 0.6 con σ_z = 0.4 y 8 zonas, y la mina que la subestima elige
+  demasiado liviano (8 % con H = 365 y umbral 0.10). Por eso `recommend` usa su cota superior unilateral,
+  σ_z,sup = σ̂_z·sqrt((C − 1)/χ²_{1−u}(C − 1)) con u = 0.5 + level/2, el mismo cuantil que la cota de η (×1.80 con
+  8 zonas, ×2.37 con 5, con level 0.9). En el banco baja el p90 por mina de «demasiado liviano» a ≤ 3.7 %, y cuesta
+  elecciones: `large_mine` (H = 365, 0.10) pasa de elegir en el 51 % al 31 % de los tramos (§11 del banco). Límite
+  de fondo: con pocas zonas σ_z no se conoce; la cota lo cubre con más sostenimiento, no con más información, y una
+  mina cuyas zonas de entrenamiento salieron muy parecidas entre sí todavía puede quedar corta. Ni un piso ni un
+  prior para σ_z: el único valor que los respaldaría es el del generador del banco.
+- Compuertas de `recommend`: (a) observados/esperados fuera de pliegue en el tercio peor de la calidad; si pasa de
+  `POOR_ROCK_MAX_OE` o hay menos de `POOR_ROCK_MIN_EVENTS` fallas para verlo, no elige en ese estrato; (b) soporte:
+  un tipo no es elegible en una clase de Q (Barton et al. 1974; RMR de Bieniawski 1989 con quality="rmr") donde el
+  entrenamiento tiene menos de `MIN_TRAMOS_PER_CLASS` tramos de ese tipo; (c) «ningún tipo cumple» explícito;
+  (d) no elige en un tipo de labor con menos de `MIN_EVENTS_PER_PARAMETER_LEVEL3` fallas en el entrenamiento (su
+  efecto es un parámetro más y no queda estimado; en el banco, una mina con 8 fallas en rampa ponía 70 de los 79
+  tipos demasiado livianos de `worse_site`).
 
 Privacidad (R13): el modelo y su JSON nunca llevan filas ni ids; los mensajes y las razones solo llevan nombres de
 variables, códigos de tipo de sostenimiento y conteos. El `id_tramo` va como campo de `Recommendation` y en la
@@ -45,18 +73,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-from scipy.stats import norm
+from scipy.stats import chi2, norm
 from scipy.stats import t as student_t
 
 from .. import __version__
 from ..batch import write_table
 from ..history import (MIN_EVENTS_PER_PARAMETER_LEVEL3, MIN_TRAMOS_PER_TYPE_LEVEL2, MIN_ZONES_LEVEL3, History,
                        LevelReadiness, labor_key, level3_parameters, level3_rows)
-from .stats import FrailtyHazardFit, exponential_hazard_map_fit, frailty_hazard_map_fit
+from .stats import FrailtyHazardFit, _eta_interval, exponential_hazard_map_fit, frailty_hazard_map_fit
 from .validation import (Comparison, Improvement, ValidationReport, _tramo_number, group_kfold, ngi_category,
                          out_of_fold, tramo_groups, validate)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 CALIBRATION_LEVELS = ("site", "partial", "not_calibrated")
 QUALITIES = ("q", "rmr")
 MAIN, BASELINE, DUMMY = "site", "baseline_ngi", "dummy"
@@ -68,6 +96,19 @@ MISSING_LABOR_TYPE = "(missing)"  # tipo_labor vacío en el entrenamiento: un ni
 NO_LABOR, NO_ZONE = "(no labor)", "(no zone)"
 _ONEHOT = "tipo_labor="
 _RANK = 2  # columna del rango del sostenimiento (posición 0..K−1 en el orden de `orden`)
+_INT = 3  # columna de la interacción calidad × rango, si el modelo la tiene
+FORMS = ("additive", "interaction")
+CANDIDATE_FORMS = FORMS  # las que se prueban; el banco puede restringirlo dentro de su proceso
+# compuerta (a): calibración en el tercio peor de la calidad (decisión de diseño, valores por confirmar)
+POOR_ROCK_FRACTION = 1 / 3
+POOR_ROCK_MAX_OE = 1.2
+POOR_ROCK_MIN_EVENTS = 10
+# compuerta (b): soporte por clase de calidad. Clases de Q de Barton et al. 1974 (NGI) y de RMR de Bieniawski 1989.
+# «Casi no» = menos de 10 tramos de ese tipo en esa clase (decisión de diseño, valor por confirmar)
+Q_CLASS_EDGES = (0.01, 0.1, 1.0, 4.0, 10.0, 40.0, 100.0, 400.0)
+RMR_CLASS_EDGES = (21.0, 41.0, 61.0, 81.0)
+MIN_TRAMOS_PER_CLASS = 10
+FEW_ZONES = 10  # con menos zonas, aviso: σ_z se conoce mal y su cota superior es mucho mayor que σ̂_z (decisión de diseño)
 
 
 # ---------- datos del nivel 3 ----------
@@ -84,20 +125,38 @@ def _labor_types(tipos) -> tuple[str, ...]:
     return tuple(lv) if len(lv) >= 2 else ()
 
 
-def _feature_names(quality: str, use_depth: bool, labor_types) -> tuple[str, ...]:
-    return (("ln_q" if quality == "q" else "rmr", "ln_de", "support_rank") + (("depth_m",) if use_depth else ())
-            + tuple(_ONEHOT + x for x in labor_types[1:]))
+def _feature_names(quality: str, use_depth: bool, labor_types, form: str = "additive") -> tuple[str, ...]:
+    q = "ln_q" if quality == "q" else "rmr"
+    return ((q, "ln_de", "support_rank") + ((f"{q}:support_rank",) if form == "interaction" else ())
+            + (("depth_m",) if use_depth else ()) + tuple(_ONEHOT + x for x in labor_types[1:]))
 
 
-def _signs(use_depth: bool, labor_types) -> tuple[int, ...]:
+def _signs(use_depth: bool, labor_types, form: str = "additive") -> tuple[int, ...]:
     # peor macizo (Q o RMR más bajos), más luz y más profundidad no bajan la tasa; más sostenimiento no la sube;
-    # el tipo de labor queda libre
-    return (-1, 1, -1) + ((1,) if use_depth else ()) + (0,) * max(0, len(labor_types) - 1)
+    # la interacción (calidad − máx)·(rango − máx) ≥ 0: el sostenimiento ayuda más en peor roca; el tipo de labor
+    # queda libre
+    return ((-1, 1, -1) + ((1,) if form == "interaction" else ()) + ((1,) if use_depth else ())
+            + (0,) * max(0, len(labor_types) - 1))
 
 
-def _row(quality_value: float, lnde: float, rank: float, depth, tipo, use_depth, labor_types):
+def _row(quality_value: float, lnde: float, rank: float, depth, tipo, use_depth, labor_types, ref=None):
+    """Fila del diseño. `ref` = (calidad máx, rango máx) del entrenamiento si el modelo lleva la interacción: su
+    columna (calidad − máx)·(rango − máx) es ≥ 0 dentro del dominio."""
     tipo = MISSING_LABOR_TYPE if tipo is None else tipo
-    return [quality_value, lnde, rank] + ([depth] if use_depth else []) + [float(tipo == x) for x in labor_types[1:]]
+    inter = [] if ref is None else [(quality_value - ref[0]) * (rank - ref[1])]
+    return ([quality_value, lnde, rank] + inter + ([depth] if use_depth else [])
+            + [float(tipo == x) for x in labor_types[1:]])
+
+
+def _quality_class(quality: str, value: float) -> int:
+    """Clase de calidad del tramo (0 = la peor): Q de Barton et al. 1974 o RMR de Bieniawski 1989."""
+    if quality == "q":
+        return int(np.searchsorted(Q_CLASS_EDGES, math.exp(value), side="right"))
+    return int(np.searchsorted(RMR_CLASS_EDGES, value, side="right"))
+
+
+def _n_classes(quality: str) -> int:
+    return len(Q_CLASS_EDGES if quality == "q" else RMR_CLASS_EDGES) + 1
 
 
 def _round_out(x: float, up: bool) -> float:
@@ -130,6 +189,10 @@ class PerformanceModel:
     entrenamiento (solo el conteo). `train_min`/`train_max`, `exposure_min`/`exposure_max` (redondeados hacia
     afuera a 3 cifras), `maha_mean`, `maha_inv` (pseudoinversa de la covarianza) y `maha_p99` son el dominio de
     aplicabilidad.
+
+    Fase 5B: `zone_sd` = σ̂_z, la DE entre zonas estimada (la cota de una zona nueva usa `zone_sd_upper`); `poor_rock` = (corte de la
+    calidad del tercio peor, fallas observadas, esperadas) fuera de pliegue, o None si no hubo predicciones fuera
+    de pliegue; `class_counts[c][k]` = tramos del tipo k en la clase de calidad c (`_quality_class`).
     """
 
     quality: str
@@ -156,12 +219,65 @@ class PerformanceModel:
     maha_p99: float
     counts: dict
     warnings: tuple[str, ...]
+    zone_sd: float
+    poor_rock: tuple[float, int, float] | None
+    class_counts: tuple[tuple[int, ...], ...]
+    labor_type_failures: tuple[int, ...]  # fallas del entrenamiento por nivel de labor_types (compuerta d)
     version: str = __version__
     schema_version: int = SCHEMA_VERSION
 
     @property
     def coefficients(self) -> dict[str, float]:
         return {} if self.fit is None else dict(zip(self.features, map(float, self.fit.coef)))
+
+    @property
+    def form(self) -> str:
+        return "interaction" if len(self.features) > _INT and self.features[_INT].endswith(":support_rank")             else "additive"
+
+    @property
+    def interaction_ref(self) -> tuple[float, float] | None:
+        """(calidad máx, rango máx) de la columna de interacción, o None en la forma aditiva."""
+        return (self.train_max[0], len(self.support_types) - 1.0) if self.form == "interaction" else None
+
+    def _support_effect_upper(self) -> float:
+        """Límite superior del IC 95 % del efecto de un tipo más en log λ: β_rank en la forma aditiva; con la
+        interacción, β_rank + β_int·(calidad media − máx), con su covarianza."""
+        if self.form == "additive":
+            return self.coef_ci[_RANK][1]
+        d = self.maha_mean[0] - self.train_max[0]
+        c = np.zeros(self.fit.cov.shape[0])
+        c[_RANK], c[_INT] = 1.0, d
+        z = norm.ppf(0.5 + COEF_LEVEL / 2) if self.fit.df is None else float(
+            student_t.ppf(0.5 + COEF_LEVEL / 2, self.fit.df))
+        return float(c[:-1] @ self.fit.coef + z * math.sqrt(max(c @ self.fit.cov @ c, 0.0)))
+
+    def zone_sd_upper(self, level: float = 0.9) -> float:
+        """Cota superior unilateral de σ_z al cuantil u = 0.5 + level/2 (el de la cota de η):
+        σ̂_z·sqrt((C − 1)/χ²_{1−u}(C − 1)), C = zonas del ajuste. σ̂_z = C·Var(η en la media) tiene C − 1 grados de
+        libertad (covarianza agrupada por zona); con pocas zonas la cota es mucho mayor que σ̂_z."""
+        c = 0 if self.fit is None else self.fit.n_clusters
+        if self.zone_sd == 0 or c < 2:
+            return float(self.zone_sd)
+        u = 0.5 + _rec_level(level) / 2
+        return float(self.zone_sd * math.sqrt((c - 1) / chi2.ppf(1 - u, c - 1)))
+
+    @property
+    def poor_rock_cut(self) -> float:
+        """Corte de la calidad del tercio peor (∞ sin predicciones fuera de pliegue: la compuerta cubre todo)."""
+        return math.inf if self.poor_rock is None else self.poor_rock[0]
+
+    @property
+    def poor_rock_problem(self) -> str | None:
+        """Compuerta (a): por qué no se elige en el tercio peor de la calidad (None: la calibración pasa)."""
+        if self.poor_rock is None:
+            return "calibration in the worst third of rock quality not checked (no out-of-fold predictions)"
+        _, obs, exp = self.poor_rock
+        if obs < POOR_ROCK_MIN_EVENTS:
+            return f"too few failures ({obs}) in the worst third of rock quality to check its calibration"
+        if obs > POOR_ROCK_MAX_OE * exp:
+            return (f"out-of-fold observed/expected failures above {POOR_ROCK_MAX_OE:g} in the worst third of rock "
+                    "quality")
+        return None
 
     @property
     def recommendation_blockers(self) -> tuple[str, ...]:
@@ -171,11 +287,14 @@ class PerformanceModel:
         if self.calibration != "site":
             out.append(f"no choice ({self.calibration}): {self.calibration_reason}")
         if self.fit is not None:
-            if "support_rank" in self.active_bounds:
+            if "support_rank" in self.active_bounds and (self.form == "additive"
+                                                           or self.features[_INT] in self.active_bounds):
                 out.append("support effect not identified (bound active)")
-            elif not self.coef_ci[_RANK][1] < 0:  # el IC 95 % de β_rank toca el cero
+            elif not self._support_effect_upper() < 0:  # el IC 95 % del efecto del sostenimiento toca el cero
                 out.append("support effect not identified")
-            if self.features[0] in self.active_bounds or "ln_de" in self.active_bounds:
+            quality_off = self.features[0] in self.active_bounds and (self.form == "additive"
+                                                                       or self.features[_INT] in self.active_bounds)
+            if quality_off or "ln_de" in self.active_bounds:
                 out.append("model ignores rock quality/span (bound active)")
         return tuple(out)
 
@@ -239,12 +358,14 @@ def _validation_reason(report: ValidationReport) -> str:
     return "; ".join(parts)
 
 
-def _readiness(rows) -> LevelReadiness:
-    """Preparación del nivel 3 sobre las filas que de verdad usa el ajuste (I2), con los mínimos de history."""
+def _readiness(rows, extra_parameters: int = 0) -> LevelReadiness:
+    """Preparación del nivel 3 sobre las filas que de verdad usa el ajuste (I2), con los mínimos de history; la
+    interacción suma un parámetro (`extra_parameters`) al mínimo de eventos."""
     failures = sum(o.failed for o, _ in rows)
     return LevelReadiness(3, "performance", {"minority_class": min(failures, len(rows) - failures),
                                              "zones": len({t.zona_nivel for _, t in rows} - {None})},
-                          {"minority_class": MIN_EVENTS_PER_PARAMETER_LEVEL3 * level3_parameters(rows),
+                          {"minority_class": MIN_EVENTS_PER_PARAMETER_LEVEL3 * (level3_parameters(rows)
+                                                                                 + extra_parameters),
                            "zones": MIN_ZONES_LEVEL3})
 
 
@@ -299,15 +420,59 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
     clusters = [NO_ZONE if z is None else z for z in zones]
     labors = [g if g is not None else (None, i) for i, g in enumerate(labors)]  # validación: su propio grupo
 
-    def design(idx, lt):
-        return np.array([_row(qual[i], lnde[i], rank[i], None if depth is None else depth[i], tipos[i], use_depth,
-                              lt) for i in idx], dtype=float)
+    k_max = len(support) - 1.0
 
-    def site_fp(train, test):  # la codificación de tipo_labor se arma con train (R7)
-        lt = _labor_types([tipos[i] for i in train])
-        f = frailty_hazard_map_fit(design(train, lt), y[train], days[train], [frail[i] for i in train],
-                                   clusters=[clusters[i] for i in train], signs=_signs(use_depth, lt))
-        return f.prob_within(design(test, lt), days[test])  # μ = λ·t, la media marginal de eventos
+    def ref_of(idx, form):  # la referencia de la interacción sale de train (R7), redondeada hacia afuera
+        return (_round_out(float(qual[list(idx)].max()), True), k_max) if form == "interaction" else None
+
+    def design(idx, lt, ref=None):
+        return np.array([_row(qual[i], lnde[i], rank[i], None if depth is None else depth[i], tipos[i], use_depth,
+                              lt, ref) for i in idx], dtype=float)
+
+    def site_fp_of(form):
+        def site_fp(train, test):  # la codificación de tipo_labor y la referencia se arman con train (R7)
+            lt, ref = _labor_types([tipos[i] for i in train]), ref_of(train, form)
+            f = frailty_hazard_map_fit(design(train, lt, ref), y[train], days[train], [frail[i] for i in train],
+                                       clusters=[clusters[i] for i in train], signs=_signs(use_depth, lt, form))
+            return f.prob_within(design(test, lt, ref), days[test])  # μ = λ·t, la media marginal de eventos
+        return site_fp
+
+    # la forma: la interacción entra solo con eventos para su parámetro y si baja la devianza fuera de pliegue.
+    # Pliegues con otra semilla (seed + 1) que los de `validate`: la forma no se elige con la misma partición que
+    # luego decide «site» (M2 de la revisión final)
+    try:
+        folds = group_kfold(labors, k=k, seed=seed + 1)
+    except ValueError:  # una sola labor: no hay partición agrupada
+        folds = None
+    minority = min(int(y.sum()), int(y.size - y.sum()))
+    oofs = {}
+    for f_name in CANDIDATE_FORMS:
+        if f_name == "interaction" and minority < MIN_EVENTS_PER_PARAMETER_LEVEL3 * (level3_parameters(rows) + 1):
+            continue
+        oofs[f_name] = None if folds is None else out_of_fold(folds, site_fp_of(f_name), y.size, kind="proba")
+    form, form_metrics = CANDIDATE_FORMS[0], {}
+    if len(oofs) > 1 and all(o is not None for o in oofs.values()):
+        common = np.logical_and.reduce([o.covered for o in oofs.values()])
+        if common.any():
+            dev = {f_name: poisson_deviance(y[common], o.pred[common]) for f_name, o in oofs.items()}
+            form_metrics = {f"oof_deviance_{f_name}": v for f_name, v in dev.items()}
+            form = min(dev, key=lambda f_name: (dev[f_name], CANDIDATE_FORMS.index(f_name)))  # empate: la primera
+
+    def final_fit(form):  # sin fallas o sin tramos estables no hay tasa que ajustar (la guarda de stats): sin modelo
+        X = design(range(y.size), labor_types, ref_of(range(y.size), form))
+        f = (frailty_hazard_map_fit(X, y, days, frail, clusters=clusters, signs=_signs(use_depth, labor_types, form),
+                                    min_clusters=MIN_CLUSTERS) if 0 < y.sum() < y.size else None)
+        return X, f
+
+    X, fit = final_fit(form)
+    if form == "interaction" and fit is not None and _INT in fit.active_bounds:
+        # la interacción quedó en su cota en el ajuste final: un parámetro en el mínimo sin aporte, vuelve la aditiva
+        form = "additive"
+        X, fit = final_fit(form)
+        form_metrics["interaction_at_bound"] = 1.0
+        if form not in oofs:  # el banco o una prueba pueden haber dejado solo la interacción como candidata
+            oofs[form] = None if folds is None else out_of_fold(folds, site_fp_of(form), y.size, kind="proba")
+    site_fp = site_fp_of(form)
 
     X0 = np.array([[ngi_category(t)] for t in ts], dtype=float)
 
@@ -323,21 +488,20 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
                       labors=labors, zones=zones, years=years, metric=poisson_deviance, higher_is_better=False,
                       reference=(DUMMY, BASELINE), k=k, n_boot=n_boot, seed=seed)
     warns += report.warnings
-    try:
-        oof = out_of_fold(group_kfold(labors, k=k, seed=seed), site_fp, y.size, kind="proba")
-    except ValueError:  # una sola labor: no hay partición agrupada
-        oof = None
+    oof = oofs.get(form)
+    poor = None
     if oof is not None and oof.covered.any():
         metrics, curve = _oof_metrics(y[oof.covered], oof.pred[oof.covered], days[oof.covered])
+        # compuerta (a): observados/esperados fuera de pliegue en el tercio peor de la calidad
+        cut = _round_out(float(np.quantile(qual, POOR_ROCK_FRACTION)), True)
+        sel = oof.covered & (qual <= cut)
+        poor = (cut, int(y[sel].sum()), float(_expected_events(oof.pred[sel]).sum()) if sel.any() else 0.0)
     else:
         metrics, curve = {"n": 0}, ()
+    metrics |= form_metrics
 
-    X = design(range(y.size), labor_types)
-    signs = _signs(use_depth, labor_types)
-    names = _feature_names(quality, use_depth, labor_types)
-    # sin fallas o sin tramos estables no hay tasa que ajustar (la guarda de stats): sin modelo
-    fit = (frailty_hazard_map_fit(X, y, days, frail, clusters=clusters, signs=signs, min_clusters=MIN_CLUSTERS)
-           if 0 < y.sum() < y.size else None)
+    signs = _signs(use_depth, labor_types, form)
+    names = _feature_names(quality, use_depth, labor_types, form)
     coef_ci, active = (), ()
     if fit is None:
         warns.append("no events / no non-events: every usable tramo has the same outcome; no model is fitted")
@@ -360,7 +524,23 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
         warns.append(f"fewer than {FEW_ROWS} usable tramos: the stored ranges, mean and covariance are close to the "
                      "training rows, so the model cannot be saved")
 
-    ready = _readiness(rows)
+    if poor is not None and (poor[1] < POOR_ROCK_MIN_EVENTS or poor[1] > POOR_ROCK_MAX_OE * poor[2]):
+        warns.append("the calibration gate fails in the worst third of rock quality: no choice there")
+    zone_sd = 0.0
+    if fit is not None and fit.n_clusters >= 2:
+        # σ_z² = C·Var(η en la media del diseño): cota por exceso de la varianza entre zonas (decisión de diseño)
+        c = np.append(fit.x_mean, 1.0)
+        v = float(c @ fit.cov @ c)
+        zone_sd = math.sqrt(fit.n_clusters * v) if math.isfinite(v) and v > 0 else 0.0
+        if zone_sd > 0 and fit.n_clusters < FEW_ZONES:
+            factor = math.sqrt((fit.n_clusters - 1) / chi2.ppf(0.05, fit.n_clusters - 1))
+            warns.append(f"only {fit.n_clusters} zones: the between-zone SD (sigma_z) is poorly known; recommend uses "
+                         f"its one-sided upper bound, {factor:.2f} times the estimate at level 0.9")
+    n_cls = _n_classes(quality)
+    cls = Counter((_quality_class(quality, qual[i]), int(rank[i])) for i in range(y.size))
+    class_counts = tuple(tuple(cls.get((c, j), 0) for j in range(len(support))) for c in range(n_cls))
+
+    ready = _readiness(rows, extra_parameters=int(form == "interaction"))
     level = _calibration(fit, ready.ready, report.recommend)
     if fit is None:
         reason = "not calibrated to the site: no events / no non-events, no model is fitted"
@@ -394,7 +574,10 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
         train_max=tuple(_round_out(float(v), True) for v in X.max(axis=0)),
         exposure_min=_round_out(float(days.min()), False), exposure_max=_round_out(float(days.max()), True),
         maha_mean=tuple(map(float, mean)), maha_inv=tuple(tuple(map(float, r)) for r in inv),
-        maha_p99=float(np.percentile(dist, MAHALANOBIS_PERCENTILE)), counts=counts, warnings=tuple(warns))
+        maha_p99=float(np.percentile(dist, MAHALANOBIS_PERCENTILE)), counts=counts, warnings=tuple(warns),
+        zone_sd=zone_sd, poor_rock=poor, class_counts=class_counts,
+        labor_type_failures=tuple(int(sum(yy for x, yy in zip(tipos, y)
+                                          if (MISSING_LABOR_TYPE if x is None else x) == lt)) for lt in labor_types))
 
 
 # ---------- recomendación ----------
@@ -405,7 +588,7 @@ class SupportOption:
     order: int
     p_failure: float  # P(falla dentro del horizonte) para una labor nueva (media marginal)
     p_low: float
-    p_high: float  # cota conservadora: 1 − exp(−λ_sup·H·Z_q)
+    p_high: float  # cota conservadora: 1 − exp(−λ_sup·H·Z_q), λ_sup con la cota de σ_z de una zona nueva
     meets_threshold: bool  # límite superior ≤ umbral
     mahalanobis: float
     extrapolated: bool  # el tramo extrapola, o este tipo (rango fuera del entrenamiento o Mahalanobis > p99)
@@ -484,7 +667,20 @@ def _tramo_inputs(model: PerformanceModel, t):
 
 
 def _model_row(model, qual, lnde, rank, depth, tipo):
-    return _row(qual, lnde, rank, depth, tipo, model.use_depth, model.labor_types)
+    return _row(qual, lnde, rank, depth, tipo, model.use_depth, model.labor_types, model.interaction_ref)
+
+
+def _p_high(model: PerformanceModel, X, exposure: float, level: float) -> np.ndarray:
+    """Cota superior de P(falla en H) para una labor nueva en una zona nueva: 1 − exp(−e^η_sup·H·Z_q), con
+    η_sup = η + q·sqrt(se² + σ_z,sup²) (se = el error de η de `prob_interval`, q su cuantil, σ_z,sup =
+    `model.zone_sd_upper(level)`) y Z_q el cuantil de la fragilidad. Con σ̂_z = 0 es exactamente el límite superior
+    de `FrailtyHazardFit.prob_interval`."""
+    f = model.fit
+    eta, _, hi = _eta_interval(f, X, level)
+    u = 0.5 + level / 2
+    q = norm.ppf(u) if f.df is None else float(student_t.ppf(u, f.df))
+    eta_up = eta + np.sqrt((hi - eta) ** 2 + (q * model.zone_sd_upper(level)) ** 2)
+    return -np.expm1(-np.exp(eta_up) * exposure * f.frailty_quantile(level))
 
 
 def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, practice=None,
@@ -495,11 +691,15 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
 
     - `threshold` (P(falla) aceptable) y `exposure_days` (horizonte H en días) son OBLIGATORIOS: los fija el
       ingeniero.
-    - Se elige el tipo más liviano ELEGIBLE cuyo límite SUPERIOR, 1 − exp(−λ_sup·H·Z_q), queda ≤ el umbral.
-      Elegible: con al menos `MIN_TRAMOS_PER_TYPE_LEVEL2` tramos en el entrenamiento y sin extrapolar ese tipo
-      (rango del tipo fuera del entrenamiento o Mahalanobis sobre el p99). No se elige en ningún tipo si
-      `model.recommendation_blockers` no está vacío o si el tramo extrapola (Q, De, profundidad o H fuera del rango
-      de entrenamiento, o tipo de labor no visto o vacío). Las opciones se muestran igual.
+    - Se elige el tipo más liviano ELEGIBLE cuyo límite SUPERIOR, 1 − exp(−λ_sup·H·Z_q), queda ≤ el umbral;
+      λ_sup suma la cota superior de la varianza entre zonas (`_p_high`, `PerformanceModel.zone_sd_upper`). Elegible: con al menos `MIN_TRAMOS_PER_TYPE_LEVEL2` tramos
+      en el entrenamiento, con al menos `MIN_TRAMOS_PER_CLASS` de ese tipo en la clase de calidad del tramo y sin
+      extrapolar ese tipo (rango del tipo fuera del entrenamiento o Mahalanobis sobre el p99). No se elige en
+      ningún tipo si `model.recommendation_blockers` no está vacío, si el tramo extrapola (Q, De, profundidad o H
+      fuera del rango de entrenamiento, o tipo de labor no visto o vacío) o si está en el tercio peor de la
+      calidad y su calibración fuera de pliegue no pasa (`model.poor_rock_problem`), o si su tipo de labor tuvo
+      menos de `MIN_EVENTS_PER_PARAMETER_LEVEL3` fallas en el entrenamiento. Si ningún tipo queda bajo el
+      umbral, lo dice («no support type meets the threshold»). Las opciones se muestran igual.
     - `tramos`: `HistoryTramo`, o cualquier objeto (o dict) con `id_tramo`, `q_valor` (o `rmr_valor`), `luz_m`,
       `esr`, `tipo_labor` y `profundidad_m` (si el modelo la usa).
     - `practice`: el nivel 2, opcional. Protocolo: cualquier objeto con `conformal_set(tramo) -> tuple[str, ...]`
@@ -510,7 +710,9 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
     lv = _rec_level(level)
     lo_tr, hi_tr = np.array(model.train_min), np.array(model.train_max)
     mean, inv = np.array(model.maha_mean), np.array(model.maha_inv)
-    n_cont = 3 + model.use_depth  # columnas no una-caliente
+    n_cont = 3 + (model.form == "interaction") + model.use_depth  # columnas no una-caliente
+    ranged = [j for j in range(n_cont) if j != _RANK and not (model.form == "interaction" and j == _INT)]
+    poor_problem = model.poor_rock_problem
     blockers = model.recommendation_blockers
     block = blockers[0] if blockers else None
     bound_notes = tuple(f"sign bound active for {a}" for a in model.active_bounds)
@@ -536,12 +738,13 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
             out.append(empty(f"missing or invalid input: {', '.join(missing)}"))
             continue
         X = np.array([_model_row(model, qual, lnde, i, depth, tipo) for i in range(len(model.support_types))])
-        p, p_lo, p_hi = model.fit.prob_interval(X, exp, lv)
+        p, p_lo, _ = model.fit.prob_interval(X, exp, lv)
+        p_hi = _p_high(model, X, exp, lv)
+        q_class = min(_quality_class(model.quality, qual), len(model.class_counts) - 1)
         d = np.sqrt(np.einsum("ij,jk,ik->i", X - mean, inv, X - mean).clip(min=0))
         outside = (X[:, :n_cont] < lo_tr[:n_cont]) | (X[:, :n_cont] > hi_tr[:n_cont])
         rank_out, far = outside[:, _RANK], d > model.maha_p99
-        ext_notes = [f"{model.features[j]} outside the training range" for j in range(n_cont)
-                     if j != _RANK and outside[0, j]]
+        ext_notes = [f"{model.features[j]} outside the training range" for j in ranged if outside[0, j]]
         if not model.exposure_min <= exp <= model.exposure_max:
             ext_notes.append("exposure_days outside the training range of exposures")
         if model.labor_types and (tipo is None or tipo not in model.labor_types):
@@ -550,7 +753,9 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
         options = []
         for i, ((c, o), n_hist) in enumerate(zip(model.support_types, model.support_counts)):
             note = ("not enough history" if n_hist < MIN_TRAMOS_PER_TYPE_LEVEL2
-                    else "extrapolation" if rank_out[i] or far[i] else None)
+                    else "extrapolation" if rank_out[i] or far[i]
+                    else "not enough history in this rock class"
+                    if model.class_counts[q_class][i] < MIN_TRAMOS_PER_CLASS else None)
             options.append(SupportOption(c, o, float(p[i]), float(p_lo[i]), float(p_hi[i]), bool(p_hi[i] <= thr),
                                          float(d[i]), bool(tramo_ext or rank_out[i] or far[i]), int(n_hist),
                                          note is None, note))
@@ -563,9 +768,15 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
         chosen, reason = None, block
         if reason is None and tramo_ext:
             reason = "input outside the training domain (extrapolation)"
+        if reason is None and poor_problem is not None and qual <= model.poor_rock_cut:
+            reason = poor_problem
+        if reason is None and model.labor_types and                 model.labor_type_failures[model.labor_types.index(tipo)] < MIN_EVENTS_PER_PARAMETER_LEVEL3:
+            reason = f"fewer than {MIN_EVENTS_PER_PARAMETER_LEVEL3} failures of this tipo_labor in training: its "                      "effect is not estimated"
         if reason is None:
             chosen = next((o.code for o in options if o.eligible and o.meets_threshold), None)
-            reason = None if chosen else "no eligible type meets the threshold"
+            if chosen is None:  # compuerta (c): «ningún tipo cumple», o los que cumplen no son elegibles
+                reason = ("no support type meets the threshold" if not any(o.meets_threshold for o in options)
+                          else "the types that meet the threshold are not eligible")
         i_ref = next((i for i, o in enumerate(options) if o.code == chosen), 0)
         contrib = model.fit.coef * (X[i_ref] - model.fit.x_mean)
         top = np.argsort(-np.abs(contrib), kind="stable")[:3]
@@ -638,7 +849,7 @@ def isoprobability_grid(model: PerformanceModel, *, support_code: str, exposure_
         if len(rg) != 2 or not 0 < rg[0] < rg[1]:
             raise ValueError(f"{name} must be (low, high) with 0 < low < high")
     if model.use_depth and depth_m is None:
-        depth_m = model.maha_mean[3]
+        depth_m = model.maha_mean[model.features.index("depth_m")]
     tipo = tipo_labor if tipo_labor is not None else (model.labor_types[0] if model.labor_types else None)
     lq = np.linspace(math.log10(q_range[0]), math.log10(q_range[1]), n)
     ld = np.linspace(math.log10(de_range[0]), math.log10(de_range[1]), n)
@@ -735,6 +946,12 @@ _TOP_CHECKS = {
     "counts": lambda v: isinstance(v, dict) and all(_is_int(x) for x in v.values())
     and {"tramos", "zones", "minority_class", "minority_class_minimum"} <= set(v),
     "warnings": _strs, "version": lambda v: isinstance(v, str), "schema_version": _is_int,
+    "zone_sd": lambda v: _is_num(v) and v >= 0,
+    "poor_rock": lambda v: v is None or (isinstance(v, list) and len(v) == 3 and _is_num(v[0]) and _is_int(v[1])
+                                         and v[1] >= 0 and _is_num(v[2]) and v[2] >= 0),
+    "labor_type_failures": lambda v: isinstance(v, list) and all(_is_int(c) and c >= 0 for c in v),
+    "class_counts": lambda v: isinstance(v, list) and all(
+        isinstance(r, list) and all(_is_int(c) and c >= 0 for c in r) for r in v),
     "fit": lambda v: v is None or isinstance(v, dict), "validation": lambda v: v is None or isinstance(v, dict),
 }
 _FIT_CHECKS = {
@@ -756,6 +973,11 @@ def _check_model(m: PerformanceModel) -> None:
         raise _ModelFileError("performance model: support_types must be in strictly increasing order")
     if len(m.support_counts) != len(m.support_types):
         raise _ModelFileError("performance model: support_counts must have one count per support type")
+    if len(m.labor_type_failures) != len(m.labor_types):
+        raise _ModelFileError("performance model: labor_type_failures must have one count per labor type")
+    if len(m.class_counts) != _n_classes(m.quality) or any(len(r) != len(m.support_types) for r in m.class_counts):
+        raise _ModelFileError("performance model: class_counts must have one row per quality class and one count per "
+                              "support type")
     p = len(m.features)
     lengths = {"signs": len(m.signs), "train_min": len(m.train_min), "train_max": len(m.train_max),
                "maha_mean": len(m.maha_mean), "maha_inv": len(m.maha_inv)}
@@ -794,7 +1016,8 @@ def load_model(path) -> PerformanceModel:
     if not isinstance(d, dict):
         raise ValueError("the performance model file must hold a JSON object")
     if d.get("schema_version") != SCHEMA_VERSION or isinstance(d.get("schema_version"), bool):
-        raise ValueError(f"unsupported performance model schema_version (this version reads {SCHEMA_VERSION})")
+        raise ValueError(f"unsupported performance model schema_version (this version reads {SCHEMA_VERSION}); "
+                         "refit with `rockmass history --performance --model-output`")
     _check_keys("performance model", d, PerformanceModel.__dataclass_fields__)
     for k, chk in _TOP_CHECKS.items():
         if not chk(d[k]):

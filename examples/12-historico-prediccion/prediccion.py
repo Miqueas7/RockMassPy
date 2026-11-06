@@ -61,6 +61,7 @@ def main(out_dir: Path, n_boot: int = 2000) -> dict:
                      "beyond_chart": practica.beyond_chart},
         "calibration": modelo.calibration,
         "coefficients": modelo.coefficients,
+        "interaction_ref": modelo.interaction_ref,  # None en la forma aditiva
         "recommendations": [(r.chosen, r.reason, r.extrapolation) for r in recs],
         "files": archivos,
     }
@@ -78,6 +79,11 @@ if __name__ == "__main__":
     print(f"nivel 3: calibración {r['calibration']}")
     for name, b in r["coefficients"].items():
         print(f"  {name}: {b:.4g}")
+    if r["interaction_ref"] is not None:  # la columna de la interacción no es ln Q × rango a secas
+        q_max, k_max = r["interaction_ref"]
+        print(f"  (ln_q:support_rank multiplica (ln Q − {q_max:.4g})·(rango − {k_max:g}): la calidad y el rango "
+              "medidos desde sus máximos del entrenamiento, así la columna es ≥ 0 y su coeficiente ≥ 0 dice que el "
+              "sostenimiento ayuda más en peor roca; 0 = sin interacción)")
     print(f"recomendación (umbral {UMBRAL}, {HORIZONTE_DIAS} días):")
     for i, (tipo, motivo, alerta) in enumerate(r["recommendations"], 1):
         print(f"  tramo nuevo {i}: {tipo or 'sin elección: ' + motivo}" + (" (alerta de extrapolación)" if alerta

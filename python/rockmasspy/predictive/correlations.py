@@ -254,6 +254,12 @@ def fit_site_correlation(history: History, kind: str, *, group_by: str | None = 
     if kind == "gsi_from_rmr":
         warns.append(f"the global prior uses {sel.edition}' (dry, no orientation adjustment); rmr_valor may include "
                      "the water and orientation ratings (not recorded), which shifts the site line")
+        # Fase 5B: el error de mapeo de la condición de juntas y el RQD entra en x y en y a la vez
+        quantified = sum((t.gsi_tabla or "").strip().casefold().startswith("gsi cuantificado") for t in rows)
+        warns.append("GSI and RMR share components (joint condition and RQD): their mapping errors are correlated, "
+                     "so the CI of the slope is optimistic when the mapping is noisy"
+                     + (f"; {quantified} pair(s) use the quantified GSI (Hoek et al. 2013), computed from those "
+                        "same ratings" if quantified else ""))
     else:
         q_eds = {t.q_edicion.strip().casefold() for t in rows if t.q_edicion}
         if len(q_eds) > 1:

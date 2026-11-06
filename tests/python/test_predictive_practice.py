@@ -182,3 +182,44 @@ def test_tramo_nuevo_incompleto_o_con_tipo_de_labor_no_visto(coherent):
     with pytest.raises(ValueError, match="tramo at position 1: esr"):
         a.predict_proba([t, dataclasses.replace(t, esr=None)])
     assert a.conformal_set(t)  # con todo, funciona
+
+
+def test_consistencia_separa_la_practica_ruidosa(coherent):
+    # Fase 5B: los signos salen «coherent» en incoherent_practice; el ancho de las bandas del logit lo ve
+    from rockmasspy.predictive import synthetic_mine
+    from rockmasspy.predictive.practice import CONSISTENCY_VERDICTS, MAX_PRACTICE_INCONSISTENCY
+    _, a = coherent
+    assert 0 < a.consistency < 1 and a.consistency_verdict in CONSISTENCY_VERDICTS
+    base = audit_practice(synthetic_mine("base", seed=0)[0], n_boot=10)
+    noisy = audit_practice(synthetic_mine("incoherent_practice", seed=0)[0], n_boot=10)
+    assert base.consistency < MAX_PRACTICE_INCONSISTENCY < noisy.consistency
+    assert base.consistency_verdict == "consistent" and not any("poorly consistent" in w for w in base.warnings)
+    assert noisy.verdicts["ln_q"] == "coherent"  # los signos no lo ven
+    assert noisy.consistency_verdict == "practice poorly consistent"
+    assert any(w.startswith("practice poorly consistent") for w in noisy.warnings)
+
+
+@pytest.mark.parametrize("geology", ["worse_site", "better_site"])
+def test_consistencia_no_depende_de_la_mezcla_de_tipos(geology):
+    # revisión de la Fase 5B: la entropía / ln K medía la mezcla de clases; con la geología de worse_site o
+    # better_site la práctica incoherente salía consistente (0/20). El ancho de banda no depende de cuántos tramos
+    # caen en cada tipo
+    from rockmasspy.predictive import synthetic_mine
+    from rockmasspy.predictive.mine import SCENARIOS
+    from rockmasspy.predictive.practice import MAX_PRACTICE_INCONSISTENCY
+    inco = SCENARIOS["incoherent_practice"]
+    sc = dataclasses.replace(SCENARIOS[geology], name=f"{geology}+incoherent", sd_gsi_visual=inco.sd_gsi_visual,
+                             p_lighter=inco.p_lighter, p_heavier=inco.p_heavier,
+                             table_change_date=inco.table_change_date)
+    ok = audit_practice(synthetic_mine(geology, seed=3001)[0], n_boot=10)
+    bad = audit_practice(synthetic_mine(sc, seed=3001)[0], n_boot=10)
+    assert ok.consistency < MAX_PRACTICE_INCONSISTENCY < bad.consistency
+    assert (ok.consistency_verdict, bad.consistency_verdict) == ("consistent", "practice poorly consistent")
+
+
+def test_consistencia_no_estimable_sin_conjuntos():
+    h = _history(0.0, seed=1)
+    med = float(np.median([t.q_valor for t in h.tramos]))
+    a = audit_practice(_edit(h, lambda i, t: dataclasses.replace(t, sost_instalado="I" if t.q_valor > med else "V")),
+                       n_boot=10)
+    assert math.isnan(a.consistency) and a.consistency_verdict == "not estimable"

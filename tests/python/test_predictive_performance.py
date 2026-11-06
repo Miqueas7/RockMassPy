@@ -12,6 +12,7 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("scipy")
 
 from rockmasspy.history import History, audit_history  # noqa: E402
+from rockmasspy.predictive import performance as perf  # noqa: E402
 from rockmasspy.predictive import (RECOMMENDATION_COLUMNS, SyntheticTruth, fit_performance,  # noqa: E402
                                    isoprobability_grid, load_model, poisson_deviance, recommend, save_model,
                                    save_recommendations, synthetic_history)
@@ -29,11 +30,33 @@ def _sentinel(h):
     return dataclasses.replace(h, tramos=ts)
 
 
+def _additive(h, **kw):
+    """La forma aditiva de la Fase 4 (las pruebas de la 4C se escribieron para ella); la selección se prueba aparte."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(perf, "CANDIDATE_FORMS", ("additive",))
+        return fit_performance(h, **kw)
+
+
 @pytest.fixture(scope="module")
-def big():
+def big_history():
     # ~1400 tramos: con ~700, «site» sale en 7 de 10 semillas
     h, _ = synthetic_history(seed=0, n_zones=8, labors_per_zone=12, tramos_per_labor=15)
-    h = _sentinel(h)
+    return _sentinel(h)
+
+
+@pytest.fixture(scope="module")
+def big(big_history):
+    return big_history, _additive(big_history, n_boot=N_BOOT)
+
+
+@pytest.fixture(scope="module")
+def big_auto():
+    """Con las dos formas candidatas, en una mina sintética con déficit frente a la carta (`worse_site`, semilla 5):
+    la validación elige la interacción y no queda en su cota. En `big_history` (verdad aditiva) las dos formas
+    empatan a 1e-9 y la interacción queda en la cota (ver `test_interaccion_en_su_cota_vuelve_a_la_aditiva`)."""
+    from rockmasspy.predictive import synthetic_mine
+
+    h, _ = synthetic_mine("worse_site", seed=5)
     return h, fit_performance(h, n_boot=N_BOOT)
 
 
@@ -164,11 +187,14 @@ def test_partial_muestra_probabilidades_sin_elegir(big):
 def test_elige_el_mas_liviano_elegible_que_cumple(big):
     h, m = big
     recs = recommend(m, h.tramos[:60], **REC)
-    assert any(r.chosen for r in recs) and any(r.reason == "no eligible type meets the threshold" for r in recs)
+    none = ("no support type meets the threshold", "the types that meet the threshold are not eligible")
+    assert any(r.chosen for r in recs) and any(r.reason in none for r in recs)
     for r in recs:
         assert [o.order for o in r.options] == [1, 2, 3, 4, 5]
         assert all(o.p_low <= o.p_failure <= o.p_high for o in r.options)
-        if r.reason in (None, "no eligible type meets the threshold"):
+        if r.reason == none[0]:  # compuerta (c): ningún tipo cumple, elegible o no
+            assert not any(o.meets_threshold for o in r.options)
+        if r.reason in (None, *none):
             first = next((o.code for o in r.options if o.eligible and o.p_high <= 0.35), None)
             assert r.chosen == first and (r.reason is None) == (first is not None)
         assert len(r.reasons) == 3 and all(x.effect in ("raises", "lowers", "neutral") for x in r.reasons)
@@ -335,7 +361,7 @@ def test_json_ida_y_vuelta_exacta_y_sin_ids(big, tmp_path):
     assert m2.validation.recommend == m.validation.recommend and m2.coef_ci == m.coef_ci
     assert m2.fit.signs == m.fit.signs and m2.support_counts == m.support_counts
     d = json.loads(text)
-    assert d["schema_version"] == 3 and "version" in d
+    assert d["schema_version"] == 4 and "version" in d
     # nunca filas ni ids: ningún id_tramo, labor, zona, coordenada ni litología del entrenamiento
     assert SENT not in text and "123456" not in text and "654321" not in text
     assert not any(t.id_tramo in text for t in h.tramos)
@@ -352,7 +378,8 @@ def test_json_validado_al_cargar(big, tmp_path):
     base = json.loads(save_model(m, tmp_path / "ok.json").read_text(encoding="utf-8"))
     fit_bad_sign = {**base["fit"], "coef": [abs(c) + 0.1 for c in base["fit"]["coef"]]}
     cases = {
-        "schema": ({**base, "schema_version": 2}, "unsupported performance model schema_version"),
+        "schema": ({**base, "schema_version": 2}, "unsupported performance model schema_version .*refit with "
+                   "`rockmass history --performance --model-output`"),
         "unknown": ({**base, "rows": []}, "1 unknown key"),
         "named": ({**base, "theta": 0.5}, r"unexpected keys \['theta'\]"),
         "missing": ({k: v for k, v in base.items() if k != "maha_p99"}, r"missing keys \['maha_p99'\]"),
@@ -511,3 +538,158 @@ def test_calidad_rmr_y_errores():
     with pytest.raises(ValueError, match="at least 2 usable tramos"):
         fit_performance(dataclasses.replace(h, inspections=()))
     assert math.isfinite(m.maha_p99)
+
+
+# ---------- Fase 5B: forma, zona nueva y compuertas ----------
+
+def test_forma_elegida_por_validacion_y_con_su_parametro(big_auto):
+    h, m = big_auto
+    assert set(m.metrics) >= {"oof_deviance_additive", "oof_deviance_interaction"}
+    best = min(("additive", "interaction"), key=lambda f: m.metrics[f"oof_deviance_{f}"])
+    assert m.form == best == "interaction"
+    assert m.features[:4] == ("ln_q", "ln_de", "support_rank", "ln_q:support_rank") and m.signs[:4] == (-1, 1, -1, 1)
+    assert m.interaction_ref == (m.train_max[0], 4.0)
+    assert "ln_q:support_rank" not in m.active_bounds and m.coefficients["ln_q:support_rank"] > 0
+    # la interacción cuenta en el mínimo de eventos: un parámetro más que la aditiva
+    from rockmasspy.history import level3_parameters, level3_rows
+    assert m.counts["minority_class_minimum"] == 10 * (level3_parameters(level3_rows(h)) + 1)
+    # monotonía dentro del dominio: más sostenimiento no sube la P; peor macizo no la baja
+    t = h.tramos[0]
+    for q in (0.05, 0.5, 5.0, 50.0):
+        r = recommend(m, [_p(t, q_valor=q)], **REC)[0]
+        ps = [o.p_failure for o in r.options]
+        assert ps == sorted(ps, reverse=True), q
+    by_q = [recommend(m, [_p(t, q_valor=q)], **REC)[0].options[1].p_failure for q in (50.0, 5.0, 0.5, 0.05)]
+    assert by_q == sorted(by_q)
+
+
+def test_interaccion_solo_con_eventos_para_su_parametro():
+    # 63 eventos en la clase menor: alcanza para la aditiva (6 parámetros) pero no para 7: ni se prueba
+    h, _ = synthetic_history(seed=3, n_zones=4, labors_per_zone=4, tramos_per_labor=12)
+    m = fit_performance(h, n_boot=50)
+    assert 60 <= m.counts["minority_class"] < 70 and m.counts["minority_class_minimum"] == 60
+    assert m.form == "additive" and "oof_deviance_interaction" not in m.metrics
+
+
+def test_interaccion_en_su_cota_vuelve_a_la_aditiva(big_history, monkeypatch):
+    # verdad aditiva: forzada como única candidata, la interacción queda en su cota en el ajuste final (M3)
+    monkeypatch.setattr(perf, "CANDIDATE_FORMS", ("interaction",))
+    m = fit_performance(big_history, n_boot=50)
+    assert m.form == "additive" and m.metrics["interaction_at_bound"] == 1.0
+    assert "ln_q:support_rank" not in m.features and m.metrics["n"] > 0 and m.poor_rock is not None
+
+
+def test_pliegues_de_la_forma_distintos_de_la_validacion(big_history, monkeypatch):
+    # M2: la forma se elige con pliegues por labor de otra semilla que los de `validate`
+    seeds = []
+    real = perf.group_kfold
+    monkeypatch.setattr(perf, "group_kfold", lambda g, k, seed: seeds.append(seed) or real(g, k=k, seed=seed))
+    fit_performance(big_history, n_boot=20, seed=7)
+    assert seeds == [8]
+
+
+def test_json_ida_y_vuelta_con_interaccion(big_auto, tmp_path):
+    h, m = big_auto
+    m2 = load_model(save_model(m, tmp_path / "mi.json"))
+    assert m2.form == "interaction" and m2.class_counts == m.class_counts and m2.poor_rock == m.poor_rock
+    assert recommend(m2, h.tramos[:20], **REC) == recommend(m, h.tramos[:20], **REC)
+    d = json.loads((tmp_path / "mi.json").read_text(encoding="utf-8"))
+    d["class_counts"] = d["class_counts"][:-1]
+    with pytest.raises(ValueError, match="class_counts"):
+        load_model(_bad_json(tmp_path, d, "cls"))
+
+
+def test_zona_nueva_en_la_cota_superior(big):
+    h, m = big
+    assert m.fit.cov_kind == "cluster" and 0 < m.zone_sd < 2
+    t = _ok(big)
+    X = np.array([perf._model_row(m, math.log(t.q_valor), math.log(t.luz_m / t.esr), i, t.profundidad_m,
+                                  t.tipo_labor) for i in range(5)])
+    m0 = dataclasses.replace(m, zone_sd=0.0)
+    np.testing.assert_allclose(perf._p_high(m0, X, 365.0, 0.9), m.fit.prob_interval(X, 365.0, 0.9)[2])
+    a = recommend(m0, [t], **REC)[0]
+    b = recommend(m, [t], **REC)[0]
+    assert all(y.p_high > x.p_high and y.p_failure == x.p_failure for x, y in zip(a.options, b.options))
+    assert _order(b) >= _order(a)  # la zona nueva pide igual o más sostenimiento
+
+
+def test_cota_superior_de_sigma_z_con_pocas_zonas(big):
+    # I1: σ̂_z tiene C − 1 grados de libertad; recommend usa su cota unilateral al cuantil de η (0.95 con level 0.9)
+    from scipy.stats import chi2
+
+    h, m = big
+    c = m.fit.n_clusters
+    assert c == 8
+    up = m.zone_sd_upper(0.9)
+    assert up == pytest.approx(m.zone_sd * math.sqrt((c - 1) / chi2.ppf(0.05, c - 1)))
+    assert up / m.zone_sd == pytest.approx(1.80, abs=0.01)
+    assert m.zone_sd_upper(0.95) > up > m.zone_sd_upper(0.5) > m.zone_sd
+    assert dataclasses.replace(m, zone_sd=0.0).zone_sd_upper(0.9) == 0.0
+    assert any("only 8 zones: the between-zone SD (sigma_z) is poorly known" in w for w in m.warnings)
+    t = _ok(big)
+    X = np.array([perf._model_row(m, math.log(t.q_valor), math.log(t.luz_m / t.esr), i, t.profundidad_m,
+                                  t.tipo_labor) for i in range(5)])
+    eta, _, hi = perf._eta_interval(m.fit, X, 0.9)
+    q = float(perf.student_t.ppf(0.95, m.fit.df))
+    want = -np.expm1(-np.exp(eta + np.sqrt((hi - eta) ** 2 + (q * up) ** 2)) * 365.0 * m.fit.frailty_quantile(0.9))
+    np.testing.assert_allclose(perf._p_high(m, X, 365.0, 0.9), want)
+
+
+def test_compuerta_calibracion_en_el_tercio_peor(big):
+    h, m = big
+    cut, obs, exp = m.poor_rock
+    assert obs >= 10 and m.poor_rock_problem is None
+    ts = [t for t in h.tramos[:200]]
+    lowq = [t for t in ts if math.log(t.q_valor) <= cut]
+    highq = [t for t in ts if math.log(t.q_valor) > cut]
+    assert lowq and highq
+    bad = dataclasses.replace(m, poor_rock=(cut, obs, obs / 1.5))
+    assert "observed/expected failures above 1.2" in bad.poor_rock_problem
+    assert all(r.chosen is None and r.reason == bad.poor_rock_problem and r.options
+               for r in recommend(bad, lowq, **REC))
+    assert [r.chosen for r in recommend(bad, highq, **REC)] == [r.chosen for r in recommend(m, highq, **REC)]
+    few = dataclasses.replace(m, poor_rock=(cut, 9, 9.0))
+    assert few.poor_rock_problem.startswith("too few failures (9)")
+    none = dataclasses.replace(m, poor_rock=None)
+    assert all(r.chosen is None for r in recommend(none, ts[:20], **REC))
+
+
+def test_compuerta_soporte_por_clase_de_q(big):
+    h, m = big
+    t = _ok(big)
+    chosen = recommend(m, [t], **REC)[0].chosen
+    c = perf._quality_class("q", math.log(t.q_valor))
+    assert c == int(np.searchsorted(perf.Q_CLASS_EDGES, t.q_valor, side="right"))
+    k = [code for code, _ in m.support_types].index(chosen)
+    cc = [list(r) for r in m.class_counts]
+    cc[c][k] = 9
+    r = recommend(dataclasses.replace(m, class_counts=tuple(map(tuple, cc))), [t], **REC)[0]
+    opt = r.options[k]
+    assert not opt.eligible and opt.note == "not enough history in this rock class"
+    assert r.chosen != chosen
+    assert sum(map(sum, m.class_counts)) == m.counts["tramos"] and len(m.class_counts) == 9
+
+
+def test_ningun_tipo_cumple_explicito(big):
+    h, m = big
+    r = recommend(m, [_ok(big)], threshold=1e-6, exposure_days=365)[0]
+    assert r.chosen is None and r.reason == "no support type meets the threshold"
+    assert not any(o.meets_threshold for o in r.options)
+
+
+def test_compuerta_tipo_de_labor_con_pocas_fallas(big, tmp_path):
+    h, m = big
+    assert len(m.labor_type_failures) == len(m.labor_types) and sum(m.labor_type_failures) == m.counts["failures"]
+    assert all(n >= 10 for n in m.labor_type_failures)
+    t = _ok(big)
+    k = m.labor_types.index(t.tipo_labor)
+    few = list(m.labor_type_failures)
+    few[k] = 9
+    r = recommend(dataclasses.replace(m, labor_type_failures=tuple(few)), [t], **REC)[0]
+    assert r.chosen is None and r.options and r.reason.startswith("fewer than 10 failures of this tipo_labor")
+    other = next(x for x in h.tramos if x.tipo_labor != t.tipo_labor and recommend(m, [x], **REC)[0].chosen)
+    assert recommend(dataclasses.replace(m, labor_type_failures=tuple(few)), [other], **REC)[0].chosen
+    d = json.loads(save_model(m, tmp_path / "l.json").read_text(encoding="utf-8"))
+    d["labor_type_failures"] = d["labor_type_failures"][:-1]
+    with pytest.raises(ValueError, match="labor_type_failures"):
+        load_model(_bad_json(tmp_path, d, "lab"))
