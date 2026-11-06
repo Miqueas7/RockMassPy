@@ -4,7 +4,7 @@ Librería open source de ingeniería de macizo rocoso para minería: clasificaci
 resistencia de Hoek-Brown, tablas personalizables por labor, gráficos, recomendación de sostenimiento, perfiles
 normativos por país, tajo abierto y predicción de sostenimiento con datos históricos. Núcleo en C++20 con API en Python.
 
-**Estado:** fases 1A (núcleo de cálculo) y 1B (tablas por labor) terminadas en las ramas `fase-1a` y `fase-1b`; aún sin versión publicada.
+**Estado:** fases 1 a 4 terminadas (núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo) más la fase 5 (mina sintética y banco de pruebas); aún sin versión en PyPI.
 La librería recomienda, el ingeniero decide.
 
 ## Instalación (desde el código)

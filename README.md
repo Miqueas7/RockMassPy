@@ -4,7 +4,7 @@ Open-source rock mass engineering library for mining: rock mass classifications 
 Hoek-Brown strength, site-customizable classification tables, charts, ground support recommendation, per-country
 regulatory profiles, open-pit slope analysis and data-driven support prediction. C++20 core with a Python API.
 
-**Status:** phase 1A (calculation core) and 1B (per-labor tables) done on branches `fase-1a` and `fase-1b`; no release yet. The library recommends, the engineer decides.
+**Status:** phases 1 to 4 done (calculation core and per-labor tables, support and the Peru profile, open pit, predictive module) plus phase 5 (synthetic mine and test bench); no release on PyPI yet. The library recommends, the engineer decides.
 
 ## Install (from source)
 

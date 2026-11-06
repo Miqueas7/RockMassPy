@@ -19,7 +19,7 @@ criterio (`rm.assess_criteria`). Guarda `bloques_resultados.csv`, `equilibrio_re
 sección de cada análisis (`seccion_le_2.png` muestra las tres cuñas de Sarma) y el Newmark del pad (`newmark_3.png`).
 Escribe tres informes: `criterios_tajo.html` (el completo, frente a Read y Stacey y con el art. 264; también
 `criterios_tajo.docx` si tienes python-docx), `criterios_botadero.html` (tabla propia) y `criterios_pad.html` (NDEP).
-Al final corre las dos CLI. Tarda unos 10 s.
+Al final corre las dos CLI. Tarda de 10 a 30 s según la máquina.
 
 ## Qué es un criterio de aceptación
 
