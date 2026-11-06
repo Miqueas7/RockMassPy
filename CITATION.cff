@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use RockMassPy in your work, please cite it as below."
+type: software
+title: "RockMassPy: rock mass classifications, Hoek-Brown strength and mining geomechanics"
+abstract: >-
+  Open-source rock mass engineering library for mining: rock mass classifications (RQD, RMR, Q, GSI, MRMR, Q-slope,
+  SMR), Hoek-Brown strength, site-customizable classification tables, charts, ground support recommendation,
+  per-country regulatory profiles, open-pit slope analysis and data-driven support prediction. C++20 core with a
+  Python API. Every result records the method edition it follows.
+authors:
+  - family-names: "Quintanilla Ventura"
+    given-names: "Miqueas"
+    email: "miqueasq@gmail.com"
+version: "0.1.0"
+date-released: "2026-11-06"
+license: MIT
+repository-code: "https://github.com/Miqueas7/RockMassPy"
+url: "https://miqueas.dev/rockmasspy"
+keywords:
+  - mining
+  - geomechanics
+  - rock mass
+  - RMR
+  - Q-system
+  - GSI
+  - Hoek-Brown
+  - slope stability
