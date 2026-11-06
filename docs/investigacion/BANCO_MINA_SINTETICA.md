@@ -7,10 +7,12 @@ pruebas: no entrena ningún modelo que se entregue ni da coeficientes por defect
 
 - Script: [`scripts/banco_mina_sintetica.py`](scripts/banco_mina_sintetica.py).
 - Resultados:
-  - [`banco_mina_sintetica.csv`](banco_mina_sintetica.csv): la corrida principal, con los mínimos vigentes de la
-    librería. Una fila por escenario × semilla × defectos × umbral × horizonte (2124 filas, 100 columnas).
+  - [`banco_mina_sintetica.csv`](banco_mina_sintetica.csv): **desde la Fase 5B, la corrida del §10** (13 escenarios,
+    2412 filas, 151 columnas; el nivel 3 en tres variantes: `antes_*`, `sz_*` y las de siempre). La corrida de los
+    §2 a §9 (2124 filas, 100 columnas) es la del commit c575d12: `git show c575d12:docs/investigacion/banco_mina_sintetica.csv`.
   - [`banco_mina_sintetica_sin_minimo_l3.csv`](banco_mina_sintetica_sin_minimo_l3.csv): sensibilidad del §6, con el
     mínimo de eventos por parámetro del nivel 3 bajado a 1 dentro del proceso (la librería no cambia).
+- **Los §1 a §9 son la corrida de la Fase 5 (c575d12); el §10 es la de la 5B.**
 - Versión: rama `fase-5` en **fa0a8f5** (la verdad ya corregida: cada tipo contrafactual usa sus propias horas sin
   sostener). Una vista previa anterior, con la verdad vieja, se descartó.
 - Comandos, desde la raíz del repo:
@@ -269,3 +271,107 @@ No se corrigió nada (este banco no toca `python/` ni `tests/`):
 - Las tasas «demasiado liviano» con pocas elecciones (decenas a cientos, de 2 a 7 minas «site») dependen de una o dos
   minas; sirven para ver dónde falla, no para fijar un número.
 - El costo es el `relative_cost` sintético de `SUPPORT_TYPES`, no el de una mina; el sobrecosto es solo comparativo.
+
+## 10. Antes y después de la 5B
+
+Fase 5B, tarea 7 (6-nov). Mismas semillas, `--reps 50 --reps-large 20 --n-boot 500` y mínimos de la librería que
+la corrida c575d12; commit **59e7560** de `fase-5`. Tomó 1014 s de reloj con 28 procesos. Cambios medidos:
+
+- **Mina:** `base` pasa a ≈ 800 tramos (8 labores por zona); los demás escenarios de la Fase 5 no cambian (las
+  minas son idénticas a las de c575d12). Dos escenarios nuevos con el **mecanismo alternativo**
+  (`failure_mechanism="saturating"`: sin carta ni déficit, −0.6·ln Q + 0.8·ln De y un efecto del sostenimiento
+  que se satura, 4·(1 − exp(−(rango − 1)/2.5))): `saturating_large` (como `large_mine`, ≈ 13 % de fallas, 20
+  semillas) y `saturating_worse` (geología de `worse_site`, ≈ 20 %).
+- **Nivel 3** (`performance.py`):
+  1. forma: aditiva o interacción (calidad − máx)·(rango − máx) con cota ≥ 0; la interacción entra solo si la clase
+     menor alcanza 10 eventos por parámetro contándola y si baja la devianza de Poisson fuera de pliegue
+     (partición por labor);
+  2. **zona nueva en la cota superior:** η_sup = η + q·sqrt(se² + σ_z²), σ_z² = C·Var(η en la media) con la
+     covarianza agrupada por zona;
+  3. compuertas de `recommend` (valores por confirmar): (a) O/E fuera de pliegue en el tercio peor de la calidad,
+     falla si pasa de 1.2 o si hay menos de 10 fallas; (b) un tipo no es elegible en una clase de Q de Barton et al.
+     1974 con menos de 10 tramos de ese tipo; (c) «ningún tipo cumple» explícito; (d) no elige en un tipo de labor
+     con menos de 10 fallas en el entrenamiento.
+- **Tres variantes con la misma mina, en el mismo proceso:** «antes» = aditiva, sin zona ni compuertas a, b y d
+  (reproduce c575d12 **exactamente** en los 10 escenarios que no cambiaron de tamaño); «sin zona» = 5B con
+  `zone_sd` = 0; «después» = 5B tal como se entrega.
+
+### Recomendación, H = 365 días
+
+Elige % / demasiado liviano % (conteo sumado) / sobrecosto mediano frente al óptimo de verdad.
+
+| Escenario | Umbral | Antes | Sin zona | Después |
+|---|---:|---|---|---|
+| `base` (≈ 800) | 0.05 | 5.0 % / 6.1 % (124/2020) / +127 % | 2.0 % / 7.5 % (59/787) / +115 % | 0.8 % / 3.4 % (11/321) / +144 % |
+| `base` (≈ 800) | 0.10 | 9.2 % / 4.9 % (180/3710) / +91 % | 6.3 % / 3.6 % (91/2517) / +91 % | 3.1 % / 2.2 % (28/1254) / +156 % |
+| `worse_site` | 0.05 | 0.5 % / 6.9 % (11/159) / +155 % | 0.1 % / 2.9 % (1/34) / +184 % | 0 / sin elecciones |
+| `worse_site` | 0.10 | 2.5 % / **23.4 %** (175/747) / +119 % | 1.3 % / 11.0 % (42/383) / +109 % | 0.6 % / **5.3 %** (10/189) / +126 % |
+| `shifted_correlation` | 0.05 | 8.3 % / 2.1 % (53/2477) / +128 % | 2.7 % / 5.4 % (44/821) / +110 % | 1.7 % / 6.4 % (33/517) / +149 % |
+| `shifted_correlation` | 0.10 | 12.5 % / 3.4 % (126/3741) / +79 % | 6.1 % / 4.2 % (77/1816) / +90 % | 4.1 % / 2.3 % (29/1237) / +134 % |
+| `incoherent_practice` | 0.05 | 12.0 % / 2.2 % (80/3630) / +180 % | 5.5 % / 1.9 % (32/1672) / +218 % | 3.0 % / 1.9 % (17/898) / +285 % |
+| `incoherent_practice` | 0.10 | 18.3 % / 1.1 % (59/5569) / +145 % | 11.3 % / 0.6 % (19/3426) / +162 % | 7.3 % / 0.1 % (2/2214) / +249 % |
+| `mine_practice` | 0.05 | 2.2 % / 3.1 % (20/650) / +107 % | 1.1 % / 1.5 % (5/329) / +115 % | 0.5 % / 0.7 % (1/144) / +148 % |
+| `mine_practice` | 0.10 | 2.9 % / 3.7 % (32/876) / +66 % | 2.6 % / 1.0 % (8/795) / +112 % | 2.2 % / 0.1 % (1/677) / +135 % |
+| `noisy_mapping` | 0.05 | 2.8 % / 2.3 % (19/832) / +151 % | 1.4 % / 2.1 % (9/436) / +160 % | 0.9 % / 1.1 % (3/275) / +229 % |
+| `noisy_mapping` | 0.10 | 3.8 % / 1.3 % (15/1150) / +102 % | 2.7 % / 1.4 % (11/806) / +103 % | 1.7 % / 0.2 % (1/526) / +187 % |
+| `large_mine` | 0.05 | 46.9 % / 3.3 % (1484/44985) / +114 % | 45.6 % / 3.2 % (1420/43707) / +116 % | 26.5 % / 1.1 % (283/25435) / +260 % |
+| `large_mine` | 0.10 | 60.7 % / **5.0 %** (2923/58165) / +59 % | 60.0 % / 4.8 % (2740/57538) / +57 % | 50.8 % / **1.3 %** (646/48735) / +133 % |
+| `saturating_large` | 0.05 | 49.3 % / 3.3 % (1558/47138) / +80 % | 48.5 % / 3.2 % (1504/46448) / +80 % | 39.0 % / 1.3 % (467/37349) / +114 % |
+| `saturating_large` | 0.10 | 63.5 % / 4.0 % (2440/60739) / +65 % | 62.1 % / 4.0 % (2394/59435) / +67 % | 53.7 % / 1.5 % (772/51356) / +97 % |
+| `saturating_worse` | 0.05 | 2.6 % / 4.6 % (36/776) / +97 % | 1.5 % / 5.3 % (24/450) / +81 % | 0.9 % / 3.4 % (9/267) / +132 % |
+| `saturating_worse` | 0.10 | 4.8 % / 4.9 % (71/1439) / +84 % | 3.6 % / 4.2 % (46/1095) / +95 % | 2.7 % / 2.6 % (21/805) / +123 % |
+
+`ngi_site`, `better_site`, `conservative_practice` y `small_mine` siguen **sin ninguna elección** en las tres
+variantes y los dos horizontes (estados idénticos a c575d12: `ngi_site` 38 not_calibrated y 12 partial, los otros
+tres 50/50 not_calibrated). La columna c575d12 no se repite: «antes» es igual, salvo `base`, que cambió de tamaño
+(en c575d12, con ≈ 600 tramos: 2.2 % / 2.6 % / +164 % y 3.5 % / 2.4 % / +126 %).
+
+Con H = 1095 días (el resto en el CSV): `large_mine` 0.10 pasa de 2.4 % (821/34677) a 1.3 % (155/12371), con
+0.05 de 4.8 % a 2.7 %; `saturating_large` de 2.5 % a 1.1 %; `noisy_mapping` 0.05 de 9.9 % (28/282) a 0 % (0/10) y
+`mine_practice` 0.05 de 8.0 % a sin elecciones. Quedan sobre 5 %: `base` 0.10 con 6.2 % (8/128) y
+`saturating_worse` 0.10 con 6.9 % (10/145), con muy pocas elecciones.
+
+### Qué quedó en el modelo y por qué
+
+- **La forma casi no importa.** La interacción entró en 7/20 minas de `large_mine`, 11/20 de `saturating_large`,
+  18/50 de `worse_site`, 20/50 de `saturating_worse` y 1–7 de 50 en los demás. «Sin zona» (forma elegida y
+  compuertas, sin la zona nueva) deja `large_mine` en 4.8 % y `saturating_large` en 4.0 %: casi lo mismo que antes.
+- **El déficit frente a la carta se probó y se descartó.** En un prototipo sin validación ni mínimos, el
+  déficit/sobrante con el Q registrado subió «demasiado liviano» en `large_mine` (4.8 % → 7.8 % con 0.10) y no bajó
+  en `worse_site`. Además la librería no tiene la equivalencia entre los tipos de una mina y las categorías de la
+  carta, así que el déficit necesitaría un dato que hoy no se pide.
+- **La causa principal era la zona nueva**, no la forma: la mina de prueba trae zonas que el ajuste no vio (DE 0.4
+  en log λ) y el modelo no tiene efecto de zona en la media. σ_z estimado: mediana 0.42 [0.21–0.62] en
+  `large_mine` y 0.41 en `saturating_large` (verdad 0.40); 0.42–0.49 en las minas de 600–800 tramos (por exceso,
+  como se buscaba). Es lo que baja `large_mine` de 5.0 % a 1.3 %.
+- **`worse_site` era una sola mina:** con 8 fallas en rampa, el efecto de rampa salió −0.34 (verdad 0) y la mina de
+  prueba tiene 215 tramos de rampa: 70 de sus 79 livianos tras la zona nueva. La compuerta (d) la saca; el 5.3 %
+  que queda son 10 de 189, 9 de ellos de otra mina.
+- Lo que el modelo sigue sin ver: el × 4 de las horas sin sostener sobre el autosoporte (C6.5), que en el
+  diagnóstico explica casi todos los livianos que quedan. ln(horas) como variable bajó «demasiado liviano» de 4.8 %
+  a 4.0 % en el prototipo, pero al recomendar pide las horas previstas de cada tipo: queda pendiente.
+
+### Compuertas
+
+| Compuerta | Valor | Tramos sin elección por ella (después, H = 365, 0.10) |
+|---|---|---|
+| (a) O/E en el tercio peor de la calidad | > 1.2, o < 10 fallas | 273 `incoherent_practice`, 350 `noisy_mapping`, 259 `saturating_worse`; ninguna en las minas grandes. Falló en 0 de 20 `large_mine` (O/E 0.96 [0.79–1.05]) y en 47–50 de 50 en las minas de pocas fallas, que de todos modos no están calibradas |
+| (b) soporte por clase de Q | < 10 tramos del tipo en la clase | cuenta dentro de «no elegible»: 2333 en `large_mine`, 4294 en `saturating_large`, 76–866 en las otras |
+| (c) ningún tipo cumple | todas las cotas sobre el umbral | 38990 en `large_mine`, 29561 en `saturating_large`, 479–5569 en las otras |
+| (d) tipo de labor con pocas fallas | < 10 fallas | 1210 `base`, 1262 `shifted_correlation`, 1173 `incoherent_practice`, 215 `worse_site`, 0 en las grandes |
+
+Las cuatro son decisiones de diseño con el valor por confirmar.
+
+### Contra la meta
+
+| Meta | Resultado |
+|---|---|
+| «Demasiado liviano» < 5 % en `large_mine` | **Cumple** con H = 365 (1.1 % y 1.3 %) y con H = 1095 (2.7 % y 1.3 %) |
+| … en `worse_site` | **Casi:** 5.3 % (10/189) con 0.10; con 0.05 ya no elige |
+| … en el mecanismo alternativo | **Cumple:** `saturating_large` 1.3 % / 1.5 %, `saturating_worse` 3.4 % / 2.6 % (H = 365); con H = 1095 `saturating_worse` 0.10 queda en 6.9 % (10/145) |
+| `ngi_site`, `small_mine`, `better_site` sin recomendar | **Cumple:** 0 elecciones en todas las variantes |
+| Sin subir el sobrecosto | **No cumple.** El sobrecosto mediano sube en todos los escenarios: `large_mine` +59 % → +133 % (0.10) y +114 % → +260 % (0.05); `saturating_large` +65 % → +97 %; `worse_site` +119 % → +126 %. También baja la fracción de tramos con elección (`large_mine` 60.7 % → 50.8 %) |
+
+La seguridad se compró con sostenimiento: el modelo no es más fino, es más prudente donde no sabe (zonas nuevas,
+tipos de labor y clases de Q con poca historia). Bajar el sobrecosto pide que la media mejore (efecto de zona o
+de nivel cuando la zona es conocida, las horas sin sostener) y no más compuertas.

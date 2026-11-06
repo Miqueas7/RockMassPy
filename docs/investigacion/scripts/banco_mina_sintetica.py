@@ -11,6 +11,13 @@ Uso (con el paquete importable, desde la raíz del repo):
 
 Los mínimos de la librería NO se tocan: se mide lo que hace el módulo tal como se entrega.
 La recomendación se aplica a una SEGUNDA mina del mismo escenario (otra semilla): labores y zonas que el ajuste no vio.
+
+Fase 5B: el nivel 3 se mide en tres variantes con la misma mina, en el mismo proceso:
+- «antes» (columnas `antes_*`): la forma aditiva sola, sin la zona nueva en la cota y sin las compuertas a, b y d;
+  reproduce el nivel 3 del banco c575d12 (la librería no cambia: el script restringe `CANDIDATE_FORMS` y neutraliza
+  los campos de las compuertas con `dataclasses.replace`).
+- «sin zona» (columnas `sz_*`): el modelo de la 5B (forma elegida y compuertas) con `zone_sd` = 0.
+- «después» (columnas `rec_*`, las de siempre): el modelo de la 5B tal como se entrega.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):  # un 
 
 import argparse  # noqa: E402
 import csv  # noqa: E402
+import dataclasses  # noqa: E402
 import math  # noqa: E402
 import sys  # noqa: E402
 import time  # noqa: E402
@@ -50,7 +58,9 @@ FINDING_FOR = {"q_mismatch": "q_mismatch", "overlapping_chainage": "overlapping_
                "inspection_before_installation": "inspection_before_installation",
                "unknown_support": "unknown_support", "empty_cell": None}
 L1_KINDS = (("rq", "rmr_from_q"), ("gr", "gsi_from_rmr"))
-WHY = ("elige", "no_calibrado", "parcial", "beta_rank", "cota_calidad_o_luz", "extrapola", "ninguno_cumple", "otro")
+WHY = ("elige", "no_calibrado", "parcial", "beta_rank", "cota_calidad_o_luz", "extrapola", "roca_mala",
+       "labor_pocas", "no_elegible", "ninguno_cumple", "otro")
+VARIANTS = (("antes_", "antes"), ("sz_", "sin zona"), ("", "después"))  # prefijo de columnas, nombre
 TEST_OFFSET = 99  # la mina de prueba: misma receta, otra semilla
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -66,6 +76,8 @@ def _why(reason):
         return "elige"
     for key, tag in (("not_calibrated", "no_calibrado"), ("(partial)", "parcial"), ("support effect", "beta_rank"),
                      ("ignores rock", "cota_calidad_o_luz"), ("extrapolation", "extrapola"),
+                     ("worst third", "roca_mala"), ("failures of this tipo_labor", "labor_pocas"),
+                     ("not eligible", "no_elegible"),
                      ("threshold", "ninguno_cumple")):
         if key in reason:
             return tag
@@ -73,7 +85,8 @@ def _why(reason):
 
 
 assert _why("no choice (not_calibrated): x") == "no_calibrado" and _why("no choice (partial): x") == "parcial"
-assert _why(None) == "elige" and _why("no eligible type meets the threshold") == "ninguno_cumple"
+assert _why(None) == "elige" and _why("no support type meets the threshold") == "ninguno_cumple"
+assert _why("the types that meet the threshold are not eligible") == "no_elegible"
 
 
 def _line(x, y):
@@ -192,6 +205,20 @@ def _cost_metrics(prefix, picks, p_true, opt, thr):
             prefix + "sobrecosto_rel": c_pick / c_opt - 1 if c_opt else math.nan}
 
 
+def _before(h, n_boot, seed):
+    """El nivel 3 de la Fase 4 (banco c575d12): forma aditiva, sin zona nueva y sin las compuertas (a) y (b)."""
+    forms = _perf.CANDIDATE_FORMS
+    _perf.CANDIDATE_FORMS = ("additive",)
+    try:
+        m = fit_performance(h, n_boot=n_boot, seed=seed)
+    finally:
+        _perf.CANDIDATE_FORMS = forms
+    big = 10 ** 9
+    return dataclasses.replace(m, zone_sd=0.0, poor_rock=(-math.inf, big, float(big)),
+                               labor_type_failures=tuple(big for _ in m.labor_type_failures),
+                               class_counts=tuple(tuple(big for _ in r) for r in m.class_counts))
+
+
 def run_level3(h, sc_name, test_seed, n_boot, seed):
     base = {}
     rows = level3_rows(h)
@@ -199,13 +226,20 @@ def run_level3(h, sc_name, test_seed, n_boot, seed):
     base["l3_fallas"] = sum(o.failed for o, _ in rows)
     try:
         m = fit_performance(h, n_boot=n_boot, seed=seed)
+        mb = _before(h, n_boot, seed)
     except Exception as e:
         return [base | {"l3_error": type(e).__name__}]
     base |= dict(l3_estado=m.calibration, l3_bloqueo=_blocker(m), l3_theta=m.fit.theta if m.fit else math.nan,
+                 l3_forma=m.form, l3_zona_de=m.zone_sd,
+                 l3_roca_mala_obs=m.poor_rock[1] if m.poor_rock else math.nan,
+                 l3_roca_mala_esp=m.poor_rock[2] if m.poor_rock else math.nan,
+                 l3_roca_mala_falla=int(m.poor_rock_problem is not None),
                  l3_beta_rank=m.coefficients.get("support_rank", math.nan),
+                 l3_beta_int=m.coefficients.get("ln_q:support_rank", math.nan),
                  l3_beta_rank_inf=m.coef_ci[2][0] if m.fit else math.nan,
                  l3_beta_rank_sup=m.coef_ci[2][1] if m.fit else math.nan,
-                 l3_exp_max=m.exposure_max)
+                 l3_exp_max=m.exposure_max, antes_l3_estado=mb.calibration, antes_l3_bloqueo=_blocker(mb))
+    models = {"antes_": mb, "sz_": dataclasses.replace(m, zone_sd=0.0), "": m}
     h2, tr2 = synthetic_mine(sc_name, seed=test_seed)
     test = list(h2.tramos)
     by2 = {t.id_tramo: t for t in tr2.tramos}
@@ -218,18 +252,19 @@ def run_level3(h, sc_name, test_seed, n_boot, seed):
             r = dict(base, umbral=thr, horizonte_dias=H, rec_tramos=len(test))
             opt = [next((c for c in CODES if p[c] <= thr), None) for p in p_true]
             r["opt_sin"] = sum(o is None for o in opt)
-            recs = recommend(m, test, threshold=thr, exposure_days=H)
-            why = Counter(_why(x.reason) for x in recs)
-            r |= {f"rec_why_{w}": why[w] for w in WHY}
-            picks = [(i, x.chosen) for i, x in enumerate(recs) if x.chosen is not None]
-            r |= _cost_metrics("rec_", picks, p_true, opt, thr)
-            r["rec_igual_carta"] = sum(c == chart[i] for i, c in picks)
-            c_rec, c_chart = sum(COST[c] for _, c in picks), sum(COST[chart[i]] for i, _ in picks)
-            r["rec_costo_vs_carta"] = c_rec / c_chart - 1 if picks else math.nan  # en los mismos tramos
+            for pre, mv in models.items():
+                recs = recommend(mv, test, threshold=thr, exposure_days=H)
+                why = Counter(_why(x.reason) for x in recs)
+                r |= {f"{pre}rec_why_{w}": why[w] for w in WHY}
+                picks = [(i, x.chosen) for i, x in enumerate(recs) if x.chosen is not None]
+                r |= _cost_metrics(pre + "rec_", picks, p_true, opt, thr)
+                r[pre + "rec_igual_carta"] = sum(c == chart[i] for i, c in picks)
+                c_rec, c_chart = sum(COST[c] for _, c in picks), sum(COST[chart[i]] for i, _ in picks)
+                r[pre + "rec_costo_vs_carta"] = c_rec / c_chart - 1 if picks else math.nan  # en los mismos tramos
+                r[pre + "carta_liviana_en_elegidos"] = sum(p_true[i][chart[i]] > thr for i, _ in picks)
+                r[pre + "inst_liviana_en_elegidos"] = sum(p_true[i][inst[i]] > thr for i, _ in picks)
             r |= _cost_metrics("carta_", list(enumerate(chart)), p_true, opt, thr)
             r |= _cost_metrics("inst_", list(enumerate(inst)), p_true, opt, thr)
-            r["carta_liviana_en_elegidos"] = sum(p_true[i][chart[i]] > thr for i, _ in picks)
-            r["inst_liviana_en_elegidos"] = sum(p_true[i][inst[i]] > thr for i, _ in picks)
             out.append(r)
     return out
 
@@ -307,9 +342,20 @@ def summary(rows):
         print(f"{s}: estado {dict(Counter(r.get('l3_estado') for r in rs0))} bloqueo "
               f"{dict(Counter(r.get('l3_bloqueo') for r in rs0))} fallas {_med([r['l3_fallas'] for r in rs0])} "
               f"filas {_med([r['l3_filas'] for r in rs0])}")
+        oe = [r["l3_roca_mala_obs"] / r["l3_roca_mala_esp"] for r in rs0 if r.get("l3_roca_mala_esp")]
+        print(f"    forma {dict(Counter(r.get('l3_forma') for r in rs0))} estado antes "
+              f"{dict(Counter(r.get('antes_l3_estado') for r in rs0))} zona DE {_med([r.get('l3_zona_de') for r in rs0])}"
+              f" compuerta roca mala falla {sum(r.get('l3_roca_mala_falla', 0) for r in rs0)}/{len(rs0)} O/E {_med(oe)}")
         for H in HORIZONS:
             for thr in THRESHOLDS:
                 rs = [r for r in clean if r["escenario"] == s and r["umbral"] == thr and r["horizonte_dias"] == H]
+                for pre, name in VARIANTS:
+                    why = {w: sum(r.get(f"{pre}rec_why_{w}", 0) for r in rs) for w in WHY}
+                    why = {w: n for w, n in why.items() if n}
+                    print(f"    H={H:g} umbral={thr} {name}: elige {_ratio(rs, pre + 'rec_n', 'rec_tramos')} liviana "
+                          f"{_ratio(rs, pre + 'rec_liviana', pre + 'rec_n')} sobrecosto "
+                          f"{_med([r.get(pre + 'rec_sobrecosto_rel') for r in rs])} carta liviana en elegidos "
+                          f"{_ratio(rs, pre + 'carta_liviana_en_elegidos', pre + 'rec_n')} motivos {why}")
                 print(f"    H={H:g} umbral={thr}: elige {_ratio(rs, 'rec_n', 'rec_tramos')} liviana "
                       f"{_ratio(rs, 'rec_liviana', 'rec_n')} sobrecosto {_med([r.get('rec_sobrecosto_rel') for r in rs])}"
                       f" vs carta {_med([r.get('rec_costo_vs_carta') for r in rs])} igual carta {_ratio(rs, 'rec_igual_carta', 'rec_n')}"
@@ -339,7 +385,7 @@ def main(argv=None):
     names = a.scenarios.split(",")
     jobs = []
     for si, name in enumerate(names):
-        reps = a.reps_large if name == "large_mine" else a.reps
+        reps = a.reps_large if name.endswith("_large") or name == "large_mine" else a.reps
         seeds = [_seed(a.seed, list(SCENARIOS).index(name), r) for r in range(reps)]
         jobs += [(name, r, s, False, a.n_boot) for r, s in enumerate(seeds)]
         if not a.no_defects:
