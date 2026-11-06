@@ -692,6 +692,14 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l2_reference": {"es": "Tipo de labor de referencia (los tipo_labor=… son contrastes contra él)",
                      "en": "Reference excavation type (the tipo_labor=… terms are contrasts against it)"},
     "l2_ready": {"es": "listo", "en": "ready"},
+    "l2_consistency": {"es": "Consistencia: entropía media fuera de pliegue / ln K (0 = siempre el mismo tipo en la "
+                             "misma condición, 1 = al azar)",
+                       "en": "Consistency: mean out-of-fold entropy / ln K (0 = always the same type in the same "
+                             "condition, 1 = at random)"},
+    "consistency_ok": {"es": "consistente", "en": "consistent"},
+    "consistency_poor": {"es": "práctica poco consistente", "en": "practice poorly consistent"},
+    "dd_consistency": {"es": "Entropía máxima de una práctica consistente (banco sintético, por confirmar)",
+                       "en": "Maximum entropy of a consistent practice (synthetic bench, to be confirmed)"},
     "l2_insufficient": {"es": "datos insuficientes", "en": "insufficient data"},
     "cap_l2_coef": {"es": "Coeficientes del logit acumulado (ajuste final) y veredictos de signo",
                     "en": "Cumulative logit coefficients (final fit) and sign verdicts"},
@@ -733,12 +741,16 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "l2_conformal": {
         "es": "Conjunto conforme agrupado al {level:.0%} (Angelopoulos y Bates 2023 [V2]): el umbral del puntaje "
               "({q}) sale de las probabilidades fuera de pliegue por labor. {k} de {n} tramos tienen un tipo "
-              "instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa condición. La "
-              "cobertura es aproximada y supone labores intercambiables; con zonas muy distintas no se cumple.",
+              "instalado fuera de su conjunto: la práctica de la mina no suele instalar eso en esa condición. Por "
+              "construcción queda fuera ≈ 1 − nivel de los tramos con cualquier práctica: no equivale a un desvío, "
+              "solo marca los tramos menos típicos. La cobertura es aproximada y supone labores intercambiables; con "
+              "zonas muy distintas no se cumple.",
         "en": "Grouped conformal set at {level:.0%} (Angelopoulos and Bates 2023 [V2]): the score threshold ({q}) "
               "comes from the out-of-fold probabilities by excavation. {k} of {n} tramos have an installed type "
-              "outside their set: the mine does not usually install that in that condition. The coverage is "
-              "approximate and assumes exchangeable excavations; with very different zones it does not hold.",
+              "outside their set: the mine does not usually install that in that condition. By construction about "
+              "1 − level of the tramos fall outside with any practice: it is not a deviation, it only flags the "
+              "least typical tramos. The coverage is approximate and assumes exchangeable excavations; with very "
+              "different zones it does not hold.",
     },
     "cap_l2_outside": {"es": "Tramos con el tipo instalado fuera del conjunto conforme",
                        "en": "Tramos with the installed type outside the conformal set"},

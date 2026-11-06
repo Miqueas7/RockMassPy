@@ -292,6 +292,7 @@ def test_practice_and_performance_site_exit_0(grande, tmp_path, capsys, niveles_
     rb = rp.recommendation_blockers(pred.load_model(modelo))
     assert code == (2 if rb else 0), out  # «site» pero recommend no elegiría: hay que revisar
     assert "practice ln_q: coherent (beta " in out and "practice ln_de: coherent (beta " in out
+    assert "practice consistency: consistent (mean out-of-fold entropy " in out
     assert "practice kappa labor: practice " in out and "over ngi " in out and "blockers 0" in out
     assert "practice outside the conformal set: " in out and "practice concordance: n " in out
     assert ("performance: calibration site, but recommend will not choose: " if rb

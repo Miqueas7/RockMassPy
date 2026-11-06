@@ -1173,6 +1173,8 @@ def _hist_methods(results, lang) -> tuple[Table, tuple[MethodRef, ...]]:
 # --- niveles 2 y 3 (Fase 4B y 4C): solo conteos, coeficientes y códigos de tipo; el id_tramo solo en tablas ---
 
 _PARTITIONS = ("labor", "zone", "temporal", "random")
+_CONSISTENCY_KEYS = {"consistent": "consistency_ok", "practice poorly consistent": "consistency_poor",
+                     "not estimable": "verdict_not_estimable"}
 _VERDICT_KEYS = {"coherent": "verdict_coherent", "not significant": "verdict_not_significant",
                  "practice incoherent with rock quality": "verdict_rock",
                  "practice incoherent with span": "verdict_span", "not estimable": "verdict_not_estimable"}
@@ -1238,6 +1240,7 @@ def _dd_table(rows, lang) -> Table:
 
 def _practice_section(number, a, lang) -> Section:
     from ..history import MIN_LABORS_PER_TYPE_LEVEL2, MIN_TRAMOS_PER_TYPE_LEVEL2
+    from ..predictive.practice import MAX_PRACTICE_ENTROPY
     from ..predictive.validation import MAX_DISCARDED_FRACTION_DECISION
 
     none = t("none", lang)
@@ -1248,7 +1251,9 @@ def _practice_section(number, a, lang) -> Section:
                   (t("l2_status", lang), t("l2_ready" if a.status == "ready" else "l2_insufficient", lang)),
                   (t("l2_missing", lang), ", ".join(a.missing_types) or none),
                   (t("l2_dropped", lang), ", ".join(a.dropped_columns) or none),
-                  (t("l2_reference", lang), a.design.labor_levels[0] if a.design.labor_levels else none))),
+                  (t("l2_reference", lang), a.design.labor_levels[0] if a.design.labor_levels else none),
+                  (t("l2_consistency", lang),
+                   f"{_f(a.consistency)} ({t(_CONSISTENCY_KEYS[a.consistency_verdict], lang)})"))),
               Table(t("cap_l2_coef", lang), (t("h_variable", lang), t("h_coef", lang), t("h_se", lang),
                                              t("h_ci95", lang), t("h_verdict", lang)),
                     tuple((name, _f(c.value), _f(c.se), f"{_f(c.ci_low)}; {_f(c.ci_high)}",
@@ -1278,6 +1283,7 @@ def _practice_section(number, a, lang) -> Section:
         (t("dd_l2_min", lang), t("dd_l2_min_v", lang).format(t=MIN_TRAMOS_PER_TYPE_LEVEL2,
                                                               l=MIN_LABORS_PER_TYPE_LEVEL2)),
         (t("dd_conformal", lang), f"{a.conformal_level:.0%}"),
+        (t("dd_consistency", lang), f"{MAX_PRACTICE_ENTROPY:g}"),
         (t("dd_gain_ci", lang), t("dd_gain_ci_v", lang)),
         (t("dd_discarded", lang), f"≤ {MAX_DISCARDED_FRACTION_DECISION:.0%}")), lang))
     blocks += _warnings_table(a.warnings, a.validation, lang)

@@ -637,7 +637,10 @@ def _print_validation(level: str, metric: str, report, fmt: str) -> None:
 
 
 def _print_practice(a) -> bool:
-    """Líneas del nivel 2; True si hay que revisar (práctica incoherente, no significativa o datos insuficientes)."""
+    """Líneas del nivel 2; True si hay que revisar (práctica incoherente, no significativa, poco consistente o datos
+    insuficientes)."""
+    from .predictive.practice import MAX_PRACTICE_ENTROPY
+
     ref = a.design.labor_levels[0] if a.design.labor_levels else None  # los tipo_labor=… son contrastes contra él
     print(f"practice: n {a.n}, labors {a.labors}, types {', '.join(a.types)}, {a.status}"
           + ("" if ref is None else f", reference tipo_labor {ref}"))
@@ -645,19 +648,22 @@ def _print_practice(a) -> bool:
         c = a.coefficients.get(name)
         coef = "" if c is None else f" (beta {c.value:.3f}, 95% CI {c.ci_low:.3f}; {c.ci_high:.3f})"
         print(f"practice {name}: {v}{coef}")
+    print(f"practice consistency: {a.consistency_verdict} (mean out-of-fold entropy {a.consistency:.3f} of the "
+          f"maximum, design threshold {MAX_PRACTICE_ENTROPY:g})")
     _print_validation("practice", "kappa", a.validation, ".3f")
     print(f"practice beyond the Q chart: {'yes' if a.beyond_chart else 'no'} (describes the practice, "
           "it does not recommend)")
     n_sets = sum(x.conformal_set is not None for x in a.tramos)
     print(f"practice outside the conformal set: {len(a.outside_set)} of {n_sets} tramos "
-          f"(level {a.conformal_level:g})")
+          f"(level {a.conformal_level:g}; about 1 - level fall outside by construction, it is not a deviation)")
     cc = a.concordance
     print("practice concordance: none" if cc is None else
           f"practice concordance: n {cc.n}, kappa {'-' if cc.kappa is None else f'{cc.kappa:.3f}'}")
     for w in a.warnings:
         if w not in a.validation.warnings:  # ya salieron como «validation warning»
             print(f"practice warning: {w}")
-    return a.status != "ready" or any(v != "coherent" for v in a.verdicts.values())
+    return (a.status != "ready" or any(v != "coherent" for v in a.verdicts.values())
+            or a.consistency_verdict != "consistent")
 
 
 def _print_performance(m) -> bool:

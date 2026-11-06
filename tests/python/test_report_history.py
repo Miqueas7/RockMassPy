@@ -183,7 +183,11 @@ def test_level2_describes_and_lists_outside(niveles):
     assert val.header[3:6] == ("practice", "dummy", "ngi")
     assert len(conc.rows) == len(practice.concordance.types)
     assert outside.header[0] == "id_tramo" and {r[0] for r in outside.rows} == set(practice.outside_set)
-    assert "decisión de diseño" in dd.caption and len(dd.rows) == 4
+    assert "decisión de diseño" in dd.caption and len(dd.rows) == 5
+    # Fase 5B: la consistencia va con su veredicto y su corte; «fuera del conjunto» no es un desvío
+    assert dict(data.rows)[rp.t("l2_consistency", "es")].endswith(f"({rp.t('consistency_ok', 'es')})")
+    assert dict(dd.rows)[rp.t("dd_consistency", "es")] == "0.76"
+    assert "no equivale a un desvío" in texto
 
 
 def test_level3_state_validation_figures_and_rule(niveles):

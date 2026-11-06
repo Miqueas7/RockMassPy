@@ -182,3 +182,26 @@ def test_tramo_nuevo_incompleto_o_con_tipo_de_labor_no_visto(coherent):
     with pytest.raises(ValueError, match="tramo at position 1: esr"):
         a.predict_proba([t, dataclasses.replace(t, esr=None)])
     assert a.conformal_set(t)  # con todo, funciona
+
+
+def test_consistencia_separa_la_practica_ruidosa(coherent):
+    # Fase 5B: los signos salen «coherent» en incoherent_practice; la entropía fuera de pliegue lo ve
+    from rockmasspy.predictive import synthetic_mine
+    from rockmasspy.predictive.practice import CONSISTENCY_VERDICTS, MAX_PRACTICE_ENTROPY
+    _, a = coherent
+    assert 0 < a.consistency < 1 and a.consistency_verdict in CONSISTENCY_VERDICTS
+    base = audit_practice(synthetic_mine("base", seed=0)[0], n_boot=10)
+    noisy = audit_practice(synthetic_mine("incoherent_practice", seed=0)[0], n_boot=10)
+    assert base.consistency < MAX_PRACTICE_ENTROPY < noisy.consistency
+    assert base.consistency_verdict == "consistent" and not any("poorly consistent" in w for w in base.warnings)
+    assert noisy.verdicts["ln_q"] == "coherent"  # los signos no lo ven
+    assert noisy.consistency_verdict == "practice poorly consistent"
+    assert any(w.startswith("practice poorly consistent") for w in noisy.warnings)
+
+
+def test_consistencia_no_estimable_sin_conjuntos():
+    h = _history(0.0, seed=1)
+    med = float(np.median([t.q_valor for t in h.tramos]))
+    a = audit_practice(_edit(h, lambda i, t: dataclasses.replace(t, sost_instalado="I" if t.q_valor > med else "V")),
+                       n_boot=10)
+    assert math.isnan(a.consistency) and a.consistency_verdict == "not estimable"

@@ -15,7 +15,15 @@ del de desempeño (§7.2) y aquí solo se audita.
   práctica es más predecible que la carta Q; no habilita ninguna recomendación.
 - Conjunto conforme agrupado (Angelopoulos y Bates 2023, [V2]): probabilidades fuera de pliegue por labor, puntaje
   1 − p(clase verdadera) y cuantil con la corrección de muestra finita. La garantía de cobertura supone que las
-  labores son intercambiables; con zonas muy distintas entre sí no se cumple (§4, punto 3).
+  labores son intercambiables; con zonas muy distintas entre sí no se cumple (§4, punto 3). **«Fuera del conjunto»
+  marca ≈ 1 − nivel de los tramos por construcción** (≈ 10 % al 90 %), con cualquier práctica: no equivale a un
+  desvío ni a un error de la mina, solo dice cuáles tramos son los menos típicos de su propia práctica.
+- Consistencia (Fase 5B): los signos no ven una práctica ruidosa (tipos más livianos o más pesados al azar, GSI
+  leído a ojo, cambio de tabla), porque el ruido no invierte la tendencia. El indicador es la entropía media de las
+  probabilidades fuera de pliegue por labor, dividida entre ln K: 0 = la práctica da siempre el mismo tipo en la
+  misma condición, 1 = elige al azar entre los K tipos. Sobre `MAX_PRACTICE_ENTROPY` el veredicto es «practice
+  poorly consistent», además de los de signo; sin probabilidades fuera de pliegue, «not estimable». El corte sale
+  del banco de la mina sintética con 5 tipos (ver la constante): con otro número de tipos está menos probado.
 - Concordancia entre `sost_recomendado` y `sost_instalado` (matriz y kappa ponderado).
 - Tramos nuevos: `PracticeAudit.predict_proba` y `conformal_set` usan el ajuste final y la misma codificación; es
   el protocolo `practice` que recibe `recommend` del nivel 3. Un `tipo_labor` no visto lanza ValueError.
@@ -44,6 +52,11 @@ from .validation import (ValidationReport, dummy_class_fit_predict, group_kfold,
 VERDICTS = ("coherent", "not significant", "practice incoherent with rock quality", "practice incoherent with span",
             "not estimable")
 STATUSES = ("ready", "insufficient data")
+CONSISTENCY_VERDICTS = ("consistent", "practice poorly consistent", "not estimable")
+# Decisión de diseño, valor por confirmar (Fase 5B, banco de la mina sintética con 5 tipos, 50 semillas; media
+# [mín; máx]): base 0.673 [0.590; 0.729], mine_practice 0.595 [0.551; 0.665], noisy_mapping 0.707 [0.596; 0.757] e
+# incoherent_practice 0.814 [0.762; 0.866]. El tamaño del conjunto conforme y el kappa fuera de pliegue se solapan más
+MAX_PRACTICE_ENTROPY = 0.76
 _EXPECTED_SIGN = {"ln_q": -1.0, "ln_de": 1.0}  # peor macizo (ln Q menor) o más luz → tipo más pesado
 _INCOHERENT = {"ln_q": VERDICTS[2], "ln_de": VERDICTS[3]}
 _Z95 = 1.959963984540054
@@ -95,6 +108,10 @@ class PracticeAudit:
     types: tuple[str, ...]  # tipos presentes, del más liviano al más pesado (clases 0..K−1)
     coefficients: dict[str, Coefficient]
     verdicts: dict[str, str]  # "ln_q" y "ln_de" → uno de VERDICTS
+    # entropía media de las probabilidades fuera de pliegue / ln K (NaN sin ellas) y su veredicto, uno de
+    # CONSISTENCY_VERDICTS: describe qué tan ruidosa es la práctica, aparte de los signos
+    consistency: float
+    consistency_verdict: str
     converged: bool
     validation: ValidationReport = field(repr=False)
     conformal_level: float
@@ -309,7 +326,7 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
     # conjunto conforme agrupado por labor
     sets: list[tuple[int, ...] | None] = [None] * len(rows)
     best: list[int | None] = [None] * len(rows)
-    q_hat, folds = math.nan, None
+    q_hat, folds, consistency = math.nan, None, math.nan
     if not fit.converged:  # conformal_set usa el ajuste final: sin él no hay conjuntos
         warns.append("conformal sets not computed: the final ordinal fit did not converge")
     else:
@@ -334,13 +351,26 @@ def audit_practice(history: History, *, conformal_level: float = 0.9, k: int = 5
                 p = oof.pred[i]
                 sets[i] = tuple(int(c) for c in np.flatnonzero(1.0 - p <= q_hat))
                 best[i] = int(np.argmax(p))
+            pr = oof.pred[idx]
+            with np.errstate(divide="ignore", invalid="ignore"):  # p = 0 aporta 0 a la entropía
+                consistency = float(np.mean(-np.sum(np.where(pr > 0, pr * np.log(pr), 0.0), axis=1)) / math.log(K))
+    if math.isnan(consistency):
+        consistency_verdict = CONSISTENCY_VERDICTS[2]
+    elif consistency > MAX_PRACTICE_ENTROPY:
+        consistency_verdict = CONSISTENCY_VERDICTS[1]
+        warns.append(f"practice poorly consistent: mean out-of-fold entropy {consistency:.2f} of the maximum "
+                     f"(threshold {MAX_PRACTICE_ENTROPY:g}, design decision): the same condition gets different "
+                     "support types")
+    else:
+        consistency_verdict = CONSISTENCY_VERDICTS[0]
 
     tramos = tuple(PracticeTramo(t.id_tramo, t.sost_instalado, None if best[i] is None else types[best[i]],
                                  None if sets[i] is None else tuple(types[c] for c in sets[i]),
                                  sets[i] is not None and int(y[i]) not in sets[i]) for i, t in enumerate(rows))
     return PracticeAudit(
         n=len(rows), labors=len({labor_key(t) for t in rows} - {None}), types=types, coefficients=coefficients,
-        verdicts=verdicts, converged=fit.converged, validation=validation, conformal_level=float(conformal_level),
+        verdicts=verdicts, consistency=consistency, consistency_verdict=consistency_verdict, converged=fit.converged,
+        validation=validation, conformal_level=float(conformal_level),
         conformal_threshold=q_hat, outside_set=tuple(t.id_tramo for t in tramos if t.outside),
         tramos=tramos, concordance=_concordance(history), status=status, missing_types=missing,
         dropped_columns=dropped, warnings=tuple(warns), fit=fit, design=design, columns=tuple(cols.tolist()))
