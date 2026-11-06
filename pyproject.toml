@@ -47,6 +47,8 @@ ml = ["numpy>=1.24", "scipy>=1.10"]
 rockmass = "rockmasspy.cli:main"
 
 [tool.scikit-build]
+# El sdist lleva lo que la suite necesita (tests, examples, tools, README); la bitácora interna y la guía del agente no
+sdist.exclude = ["docs/", "CLAUDE.md"]
 cmake.build-type = "Release"
 cmake.args = ["-DROCKMASSPY_BUILD_PYTHON=ON", "-DROCKMASSPY_BUILD_TESTS=OFF"]
 wheel.packages = ["python/rockmasspy"]
@@ -56,6 +58,7 @@ testpaths = ["tests/python"]
 
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
-skip = "pp* *-musllinux*"
+# 32 bits fuera: numpy, scipy y matplotlib, que piden las pruebas, ya no publican ruedas de 32 bits
+skip = "pp* *-musllinux* *-win32 *_i686"
 test-requires = "pytest hypothesis pyyaml openpyxl matplotlib python-docx numpy scipy statsmodels"
 test-command = "pytest {project}/tests/python -q -p no:cacheprovider"

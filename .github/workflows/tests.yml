@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Suite C++ en las tres plataformas, en Debug y Release por separado: la optimización puede mover la coma
+  # flotante y varias pruebas miran fronteras exactas de las tablas.
+  cpp:
+    name: C++ ${{ matrix.os }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configurar
+        run: cmake -S . -B build -DROCKMASSPY_BUILD_TESTS=ON -DROCKMASSPY_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Compilar
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+      - name: Ejecutar pruebas
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+
+  # Suite Python contra la extensión compilada e instalada, con la versión mínima y la última estable.
+  python:
+    name: Python ${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Instalar el paquete con todos sus extras
+        run: python -m pip install --upgrade pip && python -m pip install ".[test,io,viz,report,ml]"
+      - name: Ejecutar la suite
+        run: python -m pytest tests/python -q
+      - name: Comprobar la línea de comandos
+        run: rockmass --help
