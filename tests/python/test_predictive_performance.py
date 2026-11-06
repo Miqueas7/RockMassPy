@@ -628,3 +628,21 @@ def test_ningun_tipo_cumple_explicito(big):
     r = recommend(m, [_ok(big)], threshold=1e-6, exposure_days=365)[0]
     assert r.chosen is None and r.reason == "no support type meets the threshold"
     assert not any(o.meets_threshold for o in r.options)
+
+
+def test_compuerta_tipo_de_labor_con_pocas_fallas(big, tmp_path):
+    h, m = big
+    assert len(m.labor_type_failures) == len(m.labor_types) and sum(m.labor_type_failures) == m.counts["failures"]
+    assert all(n >= 10 for n in m.labor_type_failures)
+    t = _ok(big)
+    k = m.labor_types.index(t.tipo_labor)
+    few = list(m.labor_type_failures)
+    few[k] = 9
+    r = recommend(dataclasses.replace(m, labor_type_failures=tuple(few)), [t], **REC)[0]
+    assert r.chosen is None and r.options and r.reason.startswith("fewer than 10 failures of this tipo_labor")
+    other = next(x for x in h.tramos if x.tipo_labor != t.tipo_labor and recommend(m, [x], **REC)[0].chosen)
+    assert recommend(dataclasses.replace(m, labor_type_failures=tuple(few)), [other], **REC)[0].chosen
+    d = json.loads(save_model(m, tmp_path / "l.json").read_text(encoding="utf-8"))
+    d["labor_type_failures"] = d["labor_type_failures"][:-1]
+    with pytest.raises(ValueError, match="labor_type_failures"):
+        load_model(_bad_json(tmp_path, d, "lab"))

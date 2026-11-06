@@ -42,7 +42,10 @@ Fase 5B (banco de la mina sintética, `docs/investigacion/BANCO_MINA_SINTETICA.m
 - Compuertas de `recommend`: (a) observados/esperados fuera de pliegue en el tercio peor de la calidad; si pasa de
   `POOR_ROCK_MAX_OE` o hay menos de `POOR_ROCK_MIN_EVENTS` fallas para verlo, no elige en ese estrato; (b) soporte:
   un tipo no es elegible en una clase de Q (Barton et al. 1974; RMR de Bieniawski 1989 con quality="rmr") donde el
-  entrenamiento tiene menos de `MIN_TRAMOS_PER_CLASS` tramos de ese tipo; (c) «ningún tipo cumple» explícito.
+  entrenamiento tiene menos de `MIN_TRAMOS_PER_CLASS` tramos de ese tipo; (c) «ningún tipo cumple» explícito;
+  (d) no elige en un tipo de labor con menos de `MIN_EVENTS_PER_PARAMETER_LEVEL3` fallas en el entrenamiento (su
+  efecto es un parámetro más y no queda estimado; en el banco, una mina con 8 fallas en rampa ponía 70 de los 79
+  tipos demasiado livianos de `worse_site`).
 
 Privacidad (R13): el modelo y su JSON nunca llevan filas ni ids; los mensajes y las razones solo llevan nombres de
 variables, códigos de tipo de sostenimiento y conteos. El `id_tramo` va como campo de `Recommendation` y en la
@@ -209,6 +212,7 @@ class PerformanceModel:
     zone_sd: float
     poor_rock: tuple[float, int, float] | None
     class_counts: tuple[tuple[int, ...], ...]
+    labor_type_failures: tuple[int, ...]  # fallas del entrenamiento por nivel de labor_types (compuerta d)
     version: str = __version__
     schema_version: int = SCHEMA_VERSION
 
@@ -535,7 +539,9 @@ def fit_performance(history: History, *, quality: str = "q", k: int = 5, n_boot:
         exposure_min=_round_out(float(days.min()), False), exposure_max=_round_out(float(days.max()), True),
         maha_mean=tuple(map(float, mean)), maha_inv=tuple(tuple(map(float, r)) for r in inv),
         maha_p99=float(np.percentile(dist, MAHALANOBIS_PERCENTILE)), counts=counts, warnings=tuple(warns),
-        zone_sd=zone_sd, poor_rock=poor, class_counts=class_counts)
+        zone_sd=zone_sd, poor_rock=poor, class_counts=class_counts,
+        labor_type_failures=tuple(int(sum(yy for x, yy in zip(tipos, y)
+                                          if (MISSING_LABOR_TYPE if x is None else x) == lt)) for lt in labor_types))
 
 
 # ---------- recomendación ----------
@@ -654,7 +660,8 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
       extrapolar ese tipo (rango del tipo fuera del entrenamiento o Mahalanobis sobre el p99). No se elige en
       ningún tipo si `model.recommendation_blockers` no está vacío, si el tramo extrapola (Q, De, profundidad o H
       fuera del rango de entrenamiento, o tipo de labor no visto o vacío) o si está en el tercio peor de la
-      calidad y su calibración fuera de pliegue no pasa (`model.poor_rock_problem`). Si ningún tipo queda bajo el
+      calidad y su calibración fuera de pliegue no pasa (`model.poor_rock_problem`), o si su tipo de labor tuvo
+      menos de `MIN_EVENTS_PER_PARAMETER_LEVEL3` fallas en el entrenamiento. Si ningún tipo queda bajo el
       umbral, lo dice («no support type meets the threshold»). Las opciones se muestran igual.
     - `tramos`: `HistoryTramo`, o cualquier objeto (o dict) con `id_tramo`, `q_valor` (o `rmr_valor`), `luz_m`,
       `esr`, `tipo_labor` y `profundidad_m` (si el modelo la usa).
@@ -726,6 +733,8 @@ def recommend(model: PerformanceModel, tramos, *, threshold, exposure_days, prac
             reason = "input outside the training domain (extrapolation)"
         if reason is None and poor_problem is not None and qual <= model.poor_rock_cut:
             reason = poor_problem
+        if reason is None and model.labor_types and                 model.labor_type_failures[model.labor_types.index(tipo)] < MIN_EVENTS_PER_PARAMETER_LEVEL3:
+            reason = f"fewer than {MIN_EVENTS_PER_PARAMETER_LEVEL3} failures of this tipo_labor in training: its "                      "effect is not estimated"
         if reason is None:
             chosen = next((o.code for o in options if o.eligible and o.meets_threshold), None)
             if chosen is None:  # compuerta (c): «ningún tipo cumple», o los que cumplen no son elegibles
@@ -903,6 +912,7 @@ _TOP_CHECKS = {
     "zone_sd": lambda v: _is_num(v) and v >= 0,
     "poor_rock": lambda v: v is None or (isinstance(v, list) and len(v) == 3 and _is_num(v[0]) and _is_int(v[1])
                                          and v[1] >= 0 and _is_num(v[2]) and v[2] >= 0),
+    "labor_type_failures": lambda v: isinstance(v, list) and all(_is_int(c) and c >= 0 for c in v),
     "class_counts": lambda v: isinstance(v, list) and all(
         isinstance(r, list) and all(_is_int(c) and c >= 0 for c in r) for r in v),
     "fit": lambda v: v is None or isinstance(v, dict), "validation": lambda v: v is None or isinstance(v, dict),
@@ -926,6 +936,8 @@ def _check_model(m: PerformanceModel) -> None:
         raise _ModelFileError("performance model: support_types must be in strictly increasing order")
     if len(m.support_counts) != len(m.support_types):
         raise _ModelFileError("performance model: support_counts must have one count per support type")
+    if len(m.labor_type_failures) != len(m.labor_types):
+        raise _ModelFileError("performance model: labor_type_failures must have one count per labor type")
     if len(m.class_counts) != _n_classes(m.quality) or any(len(r) != len(m.support_types) for r in m.class_counts):
         raise _ModelFileError("performance model: class_counts must have one row per quality class and one count per "
                               "support type")
