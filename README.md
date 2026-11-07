@@ -11,13 +11,13 @@ and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Mique
 
 ## Install
 
-Once 0.1.0 is on PyPI, with all the optional extras (Excel/YAML, charts, Word report, predictive module):
+From PyPI, with all the optional extras (Excel/YAML, charts, Word report, predictive module); prebuilt wheels for Linux x86_64, Windows and macOS arm64, no compiler needed:
 
 ```bash
 pip install "rockmasspy[io,viz,report,ml]"
 ```
 
-Until then, from source (needs Python >= 3.10 and a C++20 compiler):
+From source (needs Python >= 3.10 and a C++20 compiler):
 
 ```bash
 git clone https://github.com/Miqueas7/RockMassPy.git

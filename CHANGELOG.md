@@ -4,7 +4,7 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
-## [0.1.0] - 2026-11-06
+## [0.1.0] - 2026-11-07
 
 First public release. Every result records the method and edition it follows; the library recommends, the engineer
 decides. Full documentation: <https://miqueas.dev/rockmasspy>.

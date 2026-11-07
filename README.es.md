@@ -12,13 +12,13 @@ La librería recomienda, el ingeniero decide.
 
 ## Instalación
 
-Cuando la 0.1.0 esté en PyPI, con todos los extras opcionales (Excel/YAML, gráficos, informe Word, módulo predictivo):
+Desde PyPI, con todos los extras opcionales (Excel/YAML, gráficos, informe Word, módulo predictivo); trae ruedas ya compiladas para Linux x86_64, Windows y macOS arm64, sin compilador:
 
 ```bash
 pip install "rockmasspy[io,viz,report,ml]"
 ```
 
-Mientras tanto, desde el código (necesitas Python >= 3.10 y un compilador C++20):
+Desde el código (necesitas Python >= 3.10 y un compilador C++20):
 
 ```bash
 git clone https://github.com/Miqueas7/RockMassPy.git
