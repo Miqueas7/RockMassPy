@@ -73,11 +73,21 @@ def table(rep, key, lang="es"):
 
 # ---------------------------------------------------------------- regresión: sin criterios, el informe de la 3C
 
-# sha256 del HTML del commit 369ad13 (antes de la tarea 4), con la versión reemplazada por «VER»
-_GOLDEN = {("all", "es"): "38b86073d2ff4233cb2f9b30f2ab41e4aee80b0547458f13b7ab7cb610cdaed9",
-           ("le", "es"): "5c8296ee1f78f49aaba0f83a1e2d50bb2d555b5eb64ae09af1dd0b3aa78945f4",
-           ("all", "en"): "11dcb41719790e43a15013a435c3c6e67895a7cdb46ad54989f70dc9b24e99c0",
-           ("le", "en"): "2960a91240f58023c86d8916c61a1bf5e266e5e8e6684e29fae0c017fb86f0ca"}
+# sha256 del HTML del commit 369ad13 (antes de la tarea 4), con la versión reemplazada por «VER» y sin el conteo
+# de superficies descartadas
+_GOLDEN = {("all", "es"): "f4df0c6f97bd1be9483039a116c989f94790f1ca339d26b34f8a612500bbd9d8",
+           ("le", "es"): "b123c0aa60566431120220771348d787738021f0b05c03277d84f344c089baf7",
+           ("all", "en"): "2b1d4fb509ca09dbea5deef9b62aab2448e715289acf164c80ad4f68479b33f3",
+           ("le", "en"): "09d62d940d257ec202a2d410604a0e6618d2cdccecd4676a02c1e47ba15ede6c"}
+
+
+def _sin_descartadas(h, lang):
+    # las descartadas de la búsqueda circular dependen del redondeo de la libm (348 en Windows, 352 en Linux y 357 en
+    # macOS, con las mismas 6437 evaluadas y la misma superficie crítica): se enmascara esa columna
+    cap = f"<caption>{t('cap_le_surface', lang)}</caption>"
+    i = h.index(cap)
+    j = h.index("</table>", i)
+    return h[:i] + re.sub(r"<td>\d+</td></tr>", "<td>N</td></tr>", h[i:j]) + h[j:]
 
 
 def test_sin_criterios_el_html_es_byte_a_byte_el_de_la_3c(tmp_path):
@@ -90,7 +100,7 @@ def test_sin_criterios_el_html_es_byte_a_byte_el_de_la_3c(tmp_path):
             rep = rp.build_slope_report(res, title="T", lang=lang, figures=False, date="2026-11-04", criteria=None,
                                         profile_checks=None, **kw)
             h = rp.write_html(rep, tmp_path / f"{name}{lang}.html").read_text(encoding="utf-8")
-            h = h.replace(rm.__version__, "VER")
+            h = _sin_descartadas(h.replace(rm.__version__, "VER"), lang)
             assert hashlib.sha256(h.encode()).hexdigest() == _GOLDEN[name, lang], (name, lang)
 
 

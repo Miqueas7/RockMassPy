@@ -455,7 +455,9 @@ TEST(LimitEquilibrium, RandomSectionsConvergeOrWarn) {
         const int nl = U(0, 1) < 0.5 ? 2 : 3;
         double y = H;
         for (int i = 0; i < nl; ++i) {
-            s.materials.push_back(mc(U(18, 26), U(0, 60), U(15, 40)));
+            // un sorteo por declaración: el orden de los argumentos de una llamada cambia entre compiladores
+            const double phi = U(15, 40), c = U(0, 60), g = U(18, 26);
+            s.materials.push_back(mc(g, c, phi));
             if (i + 1 == nl) {
                 s.layers.push_back(LeLayer{{}, i});
             } else {
@@ -1125,7 +1127,10 @@ SweepCase sweep_case(Uniform& U, Sweep kind) {
     double y = H;
     for (int i = 0; i < nl; ++i) {
         if (kind == Sweep::MohrCoulomb) {
-            s.materials.push_back(mc(U(17, 26), no_c ? 0.0 : U(2, 60), U(20, 42), U(0, 0.4)));
+            // un sorteo por declaración, en el orden de MSVC y GCC (de derecha a izquierda), que es el de los casos
+            // medidos; dentro de los argumentos de una llamada clang sortea al revés y macOS armaba otros taludes
+            const double ru = U(0, 0.4), phi = U(20, 42), c = no_c ? 0.0 : U(2, 60), g = U(17, 26);
+            s.materials.push_back(mc(g, c, phi, ru));
         } else {
             const double g = U(22, 27), mb = U(0.3, 5), X = std::pow(10.0, U(std::log10(0.02), std::log10(0.5)));
             double sv = std::pow(10.0, U(-4, -2));

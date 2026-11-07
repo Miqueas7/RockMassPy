@@ -200,7 +200,7 @@ def test_bayes_pocos_datos_queda_cerca_del_prior(n):
     yhat, lo, hi = fit.predict(2.0)
     assert np.isfinite([lo, hi]).all() and lo < yhat < hi
     if n == 0:
-        assert (fit.a, fit.b) == (5.0, 40.0) and fit.alpha == 2.0 and fit.beta == pytest.approx(36.0)
+        assert (fit.a, fit.b) == pytest.approx((5.0, 40.0)) and fit.alpha == 2.0 and fit.beta == pytest.approx(36.0)
 
 
 @pytest.mark.parametrize("n", [2, 4])

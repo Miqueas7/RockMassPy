@@ -854,8 +854,8 @@ class _PositionedPractice:
         try:
             return self.audit.conformal_set(tramo)
         except ValueError as e:
-            raise ValueError(f"tramo at position {i + 1}: practice model: "
-                             f"{re.sub(r'^tramo( at position \d+)?: ', '', str(e))}") from None
+            detail = re.sub(r'^tramo( at position \d+)?: ', '', str(e))
+            raise ValueError(f"tramo at position {i + 1}: practice model: {detail}") from None
 
 
 def _new_tramos(path):
