@@ -303,8 +303,8 @@ Con 6 zonas, la marginal cubre 0.92–0.97 y la condicional 0.69–0.83.
 
 ## 5. Mínimos propuestos
 
-Cada uno es una **decisión de diseño respaldada por simulación**. No cambié las constantes de `history.py`: decide
-el orquestador.
+Cada uno es una **decisión de diseño respaldada por simulación**. No cambié las constantes de `history.py`: la decisión
+queda en el diseño de la librería.
 
 | Constante | Actual | Propuesto | Justificación |
 |---|---:|---:|---|
@@ -315,7 +315,7 @@ el orquestador.
 | `MIN_EVENTS_PER_PARAMETER_LEVEL3` | 10 | **10 (se confirma como piso de «not_calibrated»; vale antes y después de la fragilidad)** | El mínimo no es lo que protege. Lo que protege es la regla de validación, que no recomienda en el nulo con ningún tamaño (0/300 antes, 0/600 después) y casi nunca con 5 por parámetro (≤ 4 %), y, desde la fragilidad, la cota de una labor nueva: 0–4.7 % de elecciones demasiado livianas por celda. Subirlo a 20 solo pasaría casos «partial» a «not_calibrated». Hay que decir que con 10 por parámetro el modelo llega a «site» en 2–10 % de las minas: para esperarlo en un tercio o en la mitad hacen falta ~20 por parámetro y ~100 labores. |
 | `MIN_ZONES_LEVEL3` | 3 | **3 (no se probó)** | Todas las celdas usaron un pozo de 4 zonas. La simulación no lo confirma ni lo corrige. |
 
-## 6. Riesgos y propuestas para el orquestador
+## 6. Riesgos y propuestas
 
 1. **Recomendación demasiado liviana: resuelta con la fragilidad.** Con el modelo exponencial era 10–21 % con
    suficiente información (11.8 % junto). Con la fragilidad gamma por labor y la cota de una labor nueva bajó a

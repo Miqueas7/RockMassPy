@@ -162,4 +162,4 @@ Lo que **no** sirve o no se encontró está al final (Kaggle, Hugging Face, port
 4. **Datos de Perú o Chile:** ningún dataset de macizo ni de estabilidad con datos abiertos. Lo único peruano es el tajo de Trinidad y Momayez 2026, sin verificar.
 
 ## 5. Copias locales
-Carpeta base: `C:\Users\mique\AppData\Local\Temp\claude\d--Repositorios\6029f054-c137-4272-9985-b7d83a6bd29e\scratchpad\geomecanica\datos_publicos\`. Hay una carpeta por dataset y solo están los que tienen licencia CC BY o CC0. No se ejecutó nada de lo descargado; la estructura se leyó con `scripts\estructura.py` (openpyxl en solo lectura y `python -I`).
+Carpeta base: `docs/investigacion/datos_publicos/` (fuera de git). Hay una carpeta por dataset y solo están los que tienen licencia CC BY o CC0. No se ejecutó nada de lo descargado; la estructura se leyó con `scripts\estructura.py` (openpyxl en solo lectura y `python -I`).
