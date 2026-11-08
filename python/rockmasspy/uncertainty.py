@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from . import _rockmasspy_core as rm
 from .probabilistic import Distribution, sample_model
 
+_Q_ED = {"Q-NGI-2015": rm.QEdition.NGI2015, "Q-NGI-2025": rm.QEdition.NGI2025}
+_Q_NAME = {v: k for k, v in _Q_ED.items()}
+
 UNCERTAINTY_INFO = rm.MethodInfo(
     "Uncertainty-MC-LHS", rm.Verification.Secondary,
     "Hoek (2023) PRE ch. 9; sampling as in Probabilistic-MC-LHS")
@@ -91,8 +94,13 @@ def classification_uncertainty(method: str, base, variables: Mapping[str, Distri
     for name in variables:
         if _missing(get(name)):
             raise ValueError(f"variable '{name}' is sampled but the base has no value for it")
-    if method == "Q" and edition is None:
-        edition = rm.QEdition.NGI2025
+    ed_warns: tuple[str, ...] = ()
+    if method == "Q":
+        te = _Q_ED.get(table.table.base_edition) if table is not None else None
+        if edition is None:
+            edition = te or rm.QEdition.NGI2025
+        elif te is not None and edition != te:
+            ed_warns = (f"Q edition {_Q_NAME[edition]} differs from table edition {table.table.base_edition}",)
     out_key = {"RMR89": "rmr", "Q": "q", "GSI": "gsi"}.get(method)
     labels = [c.label for c in table.table.classes] if table is not None else []
     counts, supports = Counter(), Counter()
@@ -139,4 +147,4 @@ def classification_uncertainty(method: str, base, variables: Mapping[str, Distri
     return UncertaintyResult(
         method, sampling, n, seed, k, tuple(sorted(variables)), {name: _summary(v) for name, v in ms.outputs.items()},
         {lb: counts[lb] / k for lb in labels} if k else {}, {c: m / k for c, m in sorted(supports.items())} if k else {},
-        UNCERTAINTY_INFO, ms.warnings, tuple(notes))
+        UNCERTAINTY_INFO, ed_warns + ms.warnings, tuple(notes))

@@ -140,6 +140,7 @@ def test_report_has_class_probability_table_only_with_probabilities():
         assert cap in caps
         tab = next(b for b in s4.blocks if getattr(b, "caption", None) == cap)
         assert tab.rows[0][0] == "T1" and re.fullmatch(r"III \d+ %; IV \d+ %", tab.rows[0][4])
+        assert re.fullmatch(r"\d+%", tab.rows[0][2]) and re.fullmatch(r"\d+%", tab.rows[0][3])
     plain = rp.build_memoria(rm.classify_tramos([tr(rmr_valor=41)], TABLES), TABLES, title="x")
     s4 = next(s for s in plain.sections if s.number == "4")
     assert len(s4.blocks) == 1
@@ -192,3 +193,42 @@ def test_cli_iterations_need_distributions(tmp_path, capsys):
     code = main(["classify", str(p), "--tables", str(t), "-o", str(tmp_path / "r.csv"), "--iterations", "10"])
     cap = capsys.readouterr()
     assert code == 1 and "--iterations needs --distributions" in cap.err and cap.out == ""
+
+
+# --- ronda final (I1, M2, M6) ---
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+@pytest.mark.parametrize("worst_first", [True, False])
+def test_probability_tie_goes_to_less_favourable_class(seed, worst_first):
+    from rockmasspy.batch import _fila_p
+    cls = [rm.RangeClass(0, 40, "IV", "III"), rm.RangeClass(40, 100, "III", "II")]
+    t = rm.RangeTable("RMR", "RMR89", cls if worst_first else cls[::-1])
+    (r,) = run([tr(rmr_valor=40)], [drow(media=40.0, sd=4.0, lo=30.0, hi=50.0)], tables=[lab("galeria", t)],
+               iterations=2000, seed=seed)
+    assert r.probabilities["IV"] == r.probabilities["III"] == 0.5
+    assert r.label == "IV" and _fila_p(r)[0] == "IV"
+
+
+def test_tiny_probability_shows_less_than_one_percent():
+    from rockmasspy.batch import _percent_text
+    assert _percent_text({"III": 0.999, "IV": 0.001, "V": 0.0}) == "III 100 %; IV <1 %"
+    assert _percent_text({"III": 0.6, "IV": 0.4}) == "III 60 %; IV 40 %"
+
+
+def test_error_names_the_real_tramos_sheet():
+    with pytest.raises(ValueError, match=r"sheet 'Hoja1', row 5"):
+        run([tr("T2", rmr_valor=41, fila=5)], [drow("T2", media=95.0, sd=30.0, lo=-50.0, hi=200.0)],
+            tramos_sheet="Hoja1")
+
+
+def test_cli_error_names_real_sheet(tmp_path, capsys):
+    p, t = xlsx(tmp_path)
+    wb = openpyxl.load_workbook(p)
+    wb["Tramos"].title = "Hoja1"
+    wb["Hoja1"]["D2"] = None
+    wb["Distribuciones"]["D2"] = 41
+    wb.save(p)
+    code = main(["classify", str(p), "--tables", str(t), "--sheet", "Hoja1", "--distributions", str(p),
+                 "-o", str(tmp_path / "r.csv")])
+    cap = capsys.readouterr()
+    assert code == 1 and "sheet 'Hoja1', row 2" in cap.err and "ZZSENT" not in cap.err

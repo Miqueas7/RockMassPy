@@ -209,6 +209,12 @@ def _str(v) -> str:
     return "" if v is None else f"{v:g}" if isinstance(v, float) else str(v)
 
 
+def _prob_row(r) -> list:
+    """`_fila_p` con las dos probabilidades como porcentaje entero (el CSV guarda la fracción)."""
+    f = _fila_p(r)
+    return [f[0], *(None if v is None else f"{v:.0%}" for v in f[1:3]), *f[3:]]
+
+
 def _label(lt: LaborTable, lang: str) -> str:
     if not lt.span_m:
         return lt.labor_type
@@ -326,7 +332,7 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
         head = tuple(t(k, lang) for k in ("h_class_probable", "h_prob_probable", "h_prob_assigned", "h_probabilities",
                                           "h_valid_samples"))
         s4 = replace(s4, blocks=s4.blocks + (Table(t("cap_class_prob", lang), ("id_tramo",) + head, tuple(
-            tuple(_str(v) for v in (r.tramo.id_tramo, *_fila_p(r))) for r in prob)),))
+            tuple(_str(v) for v in (r.tramo.id_tramo, *_prob_row(r))) for r in prob)),))
     # avisos únicos con la cantidad de tramos que los tienen; nunca qué id_tramo
     counts = Counter(w for r in results for w in set(r.warnings))
     if counts:

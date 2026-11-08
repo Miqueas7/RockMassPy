@@ -96,6 +96,8 @@ class RangeTable:
         for a, b in zip(cs, cs[1:]):
             if not math.isclose(a.hi, b.lo, rel_tol=1e-9, abs_tol=1e-12):  # un hueco o solape no es un borde
                 continue
+            if kind == "factor" and b.lo <= 0:
+                continue
             d = abs(math.log10(value / b.lo)) if kind == "factor" else abs(value - b.lo)
             if d <= tol + _NEAR_EPS and (best is None or d < best[0]):
                 best = (d, a.label, b.label)

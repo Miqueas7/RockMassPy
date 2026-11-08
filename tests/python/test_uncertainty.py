@@ -95,3 +95,13 @@ def test_near_boundary_warning_rmr_gsi():
     assert any(w.startswith("near the boundary between classes B and A") for w in near.warnings)
     far = cu("RMR89", rmr_base(), {"ucs_mpa": pb.uniform(80, 100)}, table=lab("RMR", "RMR89", (0, 20, 100)), n=200)
     assert not any("near the boundary" in w for w in far.warnings)
+
+
+def test_q_edition_follows_the_table_and_mismatch_warns():
+    var = {"jn": pb.uniform(9, 15)}
+    t15 = lab("Q", "Q-NGI-2015", (0, 4, 1000))
+    same = cu("Q", q_base(), var, table=t15, n=200)
+    assert same == cu("Q", q_base(), var, table=t15, edition=rm.QEdition.NGI2015, n=200)
+    assert not any("differs from table edition" in w for w in same.warnings)
+    r = cu("Q", q_base(), var, table=t15, edition=rm.QEdition.NGI2025, n=200)
+    assert r.warnings[0] == "Q edition Q-NGI-2025 differs from table edition Q-NGI-2015"

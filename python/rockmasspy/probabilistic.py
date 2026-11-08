@@ -265,7 +265,7 @@ def sample_model(fn, variables: Mapping[str, Distribution], *, n: int = 5000, sa
                 raise ValueError(msg.split("Received:")[0].strip()) from None
             raise ValueError(f"variable '{hit[0]}': a sampled value is outside the valid range of the model; "
                              "narrow its minimum and maximum") from None
-        for w in set(map(_norm, ws)):
+        for w in dict.fromkeys(map(_norm, ws)):
             warns[w] = warns.get(w, 0) + 1
         if res:
             n_valid += 1
@@ -307,10 +307,10 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
                 capped.append(i)
                 return {}, []
         if r.factor_of_safety is None:  # el motivo de no formarse va en la nota del bloque
-            for t in set(map(_norm, r.notes)) or {"no reason given"}:
+            for t in dict.fromkeys(map(_norm, r.notes)) or ("no reason given",):
                 reasons[t] = reasons.get(t, 0) + 1
         else:
-            for t in set(map(_norm, r.notes)):
+            for t in dict.fromkeys(map(_norm, r.notes)):
                 notes[t] = notes.get(t, 0) + 1
         return {}, list(r.warnings)
 

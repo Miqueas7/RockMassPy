@@ -97,7 +97,8 @@ def _classify_all(a):
     dists = load_tramo_distributions(a.distributions, sheet=a.sheet_distributions) if a.distributions else None
     kw = dict(distributions=dists, iterations=a.iterations, sampling=a.sampling.replace("-", "_"),
               seed=a.seed) if dists is not None else {}
-    results = classify_tramos(tramos, tables, **kw)
+    csv_sheet = Path(a.tramos).stem if Path(a.tramos).suffix.lower() == ".csv" else a.sheet
+    results = classify_tramos(tramos, tables, tramos_sheet=csv_sheet, **kw)
     if esr:
         results = add_q_chart_reference(results, esr, edition=a.q_edition)
     return results, tables

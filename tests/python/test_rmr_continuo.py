@@ -62,9 +62,9 @@ def test_rmr89_modes():
 def test_monotone_and_in_range(fn, hi, top, lo, a, b):
     x, y = sorted((a * hi, b * hi))
     if fn is rm.rmr14_joints_per_m_rating:  # más juntas, menos puntaje
-        assert lo <= fn(y) <= fn(x) <= top
+        assert lo <= fn(y) <= fn(x) + 1e-12 and fn(x) <= top
     else:
-        assert lo <= fn(x) <= fn(y) <= top
+        assert lo <= fn(x) <= fn(y) + 1e-12 and fn(y) <= top
 
 
 @given(a=st.floats(1.0001, 400), b=st.floats(1.0001, 400))

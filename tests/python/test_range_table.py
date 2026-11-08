@@ -97,3 +97,8 @@ def test_near_boundary_q_factor():
 def test_near_boundary_gap_is_not_a_boundary():
     t = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 38, "IV", "I"), rm.RangeClass(42, 100, "III", "I")])
     assert t.near_boundary(40) is None and t.near_boundary(38) is None
+
+
+def test_near_boundary_q_edge_at_zero_is_skipped():
+    t = rm.RangeTable("Q", "Q-NGI-2025", [rm.RangeClass(-5, 0, "x"), rm.RangeClass(0, 10, "y"), rm.RangeClass(10, 1000, "z")])
+    assert t.near_boundary(0.05) is None

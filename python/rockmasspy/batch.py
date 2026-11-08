@@ -171,7 +171,7 @@ def _classify(t: Tramo, lt: LaborTable) -> TramoResult:
     return TramoResult(**base, label=c.label, support=c.support, warnings=tuple(warns), support_order=order)
 
 
-def _check_distributions(tramos: list[Tramo], distributions) -> dict[str, list[TramoDistributionRow]]:
+def _check_distributions(tramos: list[Tramo], distributions, sheet: str = TRAMOS_SHEET) -> dict[str, list[TramoDistributionRow]]:
     """Cruza `Distribuciones` con `Tramos` antes de muestrear: los errores nombran hoja, fila y columna, nunca el id."""
     by_id = {t.id_tramo: t for t in tramos}
     per: dict[str, list[TramoDistributionRow]] = {}
@@ -183,7 +183,7 @@ def _check_distributions(tramos: list[Tramo], distributions) -> dict[str, list[T
         if d.variable in _Q_PARAMS and t.q_valor is not None:
             raise ValueError(f"{_where(d.hoja, d.fila, 'variable')}: {d.variable} cannot be sampled when q_valor is given")
         if getattr(t, d.variable) is None:  # sin el valor, el resultado determinístico correría otro modelo
-            raise ValueError(f"{_where(TRAMOS_SHEET, t.fila, d.variable)}: required because it is sampled in {d.hoja}")
+            raise ValueError(f"{_where(sheet, t.fila, d.variable)}: required because it is sampled in {d.hoja}")
         per.setdefault(d.id_tramo, []).append(d)
     return per
 
@@ -193,7 +193,7 @@ def _int_arg(v, name, lo):
         raise ValueError(f"{name} must be an integer >= {lo}")
 
 
-def _with_probabilities(r: TramoResult, lt: LaborTable, rows, iterations, sampling, seed) -> TramoResult:
+def _with_probabilities(r: TramoResult, lt: LaborTable, rows, iterations, sampling, seed, sheet=TRAMOS_SHEET) -> TramoResult:
     t, tab = r.tramo, lt.table
     for d in rows:
         if d.variable not in _METHOD_VARIABLES.get(r.method, ()):
@@ -215,15 +215,15 @@ def _with_probabilities(r: TramoResult, lt: LaborTable, rows, iterations, sampli
     try:
         ms = sample_model(one, {d.variable: d.distribution for d in rows}, n=iterations, sampling=sampling, seed=seed)
     except ValueError as e:
-        raise ValueError(f"sheet '{TRAMOS_SHEET}', row {t.fila}: {e}") from None
+        raise ValueError(f"sheet '{sheet}', row {t.fila}: {e}") from None
     k = ms.n_valid
-    labels = dict.fromkeys(c.label for c in tab.classes)
+    labels = dict.fromkeys(c.label for c in sorted(tab.classes, key=lambda c: c.lo))  # empate: gana la de menor lo
     return replace(r, probabilities={lb: counts[lb] / k for lb in labels}, n_valid=k)
 
 
 def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable], *,
                     distributions: Iterable[TramoDistributionRow] | None = None, iterations: int = 2000,
-                    sampling: str = "lhs", seed: int = 1) -> list[TramoResult]:
+                    sampling: str = "lhs", seed: int = 1, tramos_sheet: str = TRAMOS_SHEET) -> list[TramoResult]:
     """Clasifica cada tramo. Con `distributions` agrega, a los tramos que las tienen, la probabilidad de cada clase de su
     tabla (Monte Carlo o LHS sobre la clasificación de cada muestra); la clase determinística no cambia."""
     tables, tramos = list(tables), list(tramos)
@@ -235,7 +235,7 @@ def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable], *,
         _int_arg(seed, "seed", 0)
         if sampling not in ("lhs", "monte_carlo"):
             raise ValueError("sampling must be 'lhs' or 'monte_carlo'")
-        per = _check_distributions(tramos, distributions)
+        per = _check_distributions(tramos, distributions, tramos_sheet)
     out = []
     for t in tramos:
         try:
@@ -245,7 +245,7 @@ def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable], *,
             continue
         r = _classify(t, lt)
         if t.id_tramo in per and r.label is not None:
-            r = _with_probabilities(r, lt, per[t.id_tramo], iterations, sampling, seed)
+            r = _with_probabilities(r, lt, per[t.id_tramo], iterations, sampling, seed, tramos_sheet)
         out.append(r)
     return out
 
@@ -262,11 +262,12 @@ def summarize(results: Iterable[TramoResult]) -> BatchSummary:
 
 def _percent_text(probs: dict[str, float]) -> str:
     """`III 59 %; IV 41 %`: de mayor a menor, enteros que suman 100 (resto repartido por mayor fracción)."""
-    items = [(lb, p) for lb, p in probs.items() if p > 0]
+    items = [(lb, p) for lb, p in probs.items() if p >= 0.005]
+    tiny = [lb for lb, p in probs.items() if 0 < p < 0.005]
     pct = {lb: int(p * 100 + 1e-9) for lb, p in items}
     for lb, _ in sorted(items, key=lambda x: x[1] * 100 - pct[x[0]], reverse=True)[:100 - sum(pct.values())]:
         pct[lb] += 1
-    return "; ".join(f"{lb} {pct[lb]} %" for lb, _ in sorted(items, key=lambda x: -x[1]))
+    return "; ".join([f"{lb} {pct[lb]} %" for lb, _ in sorted(items, key=lambda x: -x[1])] + [f"{lb} <1 %" for lb in tiny])
 
 
 def _fila_p(r: TramoResult):

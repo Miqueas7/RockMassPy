@@ -280,3 +280,16 @@ def test_toppling_upper_bound_counts_as_failure():
 def test_summarize_fs_rejects_nan_and_minus_inf(bad):
     with pytest.raises(ValueError, match=r"^fs: "):
         summarize_fs([1.2, bad], model="planar", sampling="lhs", n=2, seed=1, variables=())
+
+
+def test_aggregated_warning_order_is_independent_of_hash_seed():
+    import os
+    import subprocess
+    import sys
+    code = ("from rockmasspy import probabilistic as pb\n"
+            "ms = pb.sample_model(lambda d: ({}, ['w-zeta', 'w-alpha', 'w-mid', 'w-beta']), "
+            "{'x': pb.uniform(0, 1)}, n=10, sampling='lhs', seed=1)\n"
+            "print(ms.warnings)\n")
+    outs = [subprocess.run([sys.executable, "-c", code], env={**os.environ, "PYTHONHASHSEED": h},
+                           capture_output=True, text=True, check=True).stdout for h in ("0", "3")]
+    assert outs[0] == outs[1] and outs[0].index("w-zeta") < outs[0].index("w-alpha")
