@@ -1,5 +1,5 @@
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import example, given, strategies as st
 
 import rockmasspy as rm
 
@@ -56,6 +56,8 @@ def test_rmr89_modes():
     (rm.rating_spacing89_continuous, 10.0, 20.0, 0.0), (rm.rmr14_joints_per_m_rating, 100.0, 40.0, 0.0),
     (rm.rmr14_strength_rating, 400.0, 15.0, 0.0),
 ])
+@example(a=0.0, b=1e-5)
+@example(a=0.0, b=1e-4)
 @given(a=st.floats(0, 1), b=st.floats(0, 1))
 def test_monotone_and_in_range(fn, hi, top, lo, a, b):
     x, y = sorted((a * hi, b * hi))
@@ -69,3 +71,11 @@ def test_monotone_and_in_range(fn, hi, top, lo, a, b):
 def test_is50_monotone(a, b):
     x, y = sorted((a, b))
     assert 0.0 <= rm.rating_is50_89_continuous(x) <= rm.rating_is50_89_continuous(y) <= 15.0
+
+
+def test_bottom_of_range_is_zero():
+    for x in (0.0, 0.03, 0.07):
+        assert rm.rating_rqd89_continuous(x) == 0.0
+    for x in (0.0, 0.005):
+        assert rm.rating_ucs89_continuous(x) == 0.0 and rm.rmr14_strength_rating(x) == 0.0
+    assert rm.rating_rqd89_continuous(0.0) <= rm.rating_rqd89_continuous(0.001)

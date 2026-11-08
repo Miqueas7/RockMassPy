@@ -76,9 +76,10 @@ inline int rating_spacing89(double spacing_m) {
 
 // Curvas continuas ajustadas a las cartas de Bieniawski (1989): Kundu et al. (2020), IJRMMS 129:104280.
 // Sin redondeo ni saltos: solo se recorta al rango del puntaje.
+// La ecuación publicada usa |x - c|; max(x - c, 0) mantiene la curva monótona y es idéntico para x >= c.
 inline double rating_ucs89_continuous(double ucs_mpa) {
     validation::require_non_negative(ucs_mpa, "ucs_mpa");
-    return std::clamp(0.42 * std::pow(std::fabs(ucs_mpa - 0.01), 0.65) - 0.1, 0.0, 15.0);
+    return std::clamp(0.42 * std::pow(std::max(ucs_mpa - 0.01, 0.0), 0.65) - 0.1, 0.0, 15.0);
 }
 
 /// Is50 <= 1 MPa no tiene puntaje, igual que en la tabla.
@@ -91,7 +92,7 @@ inline double rating_is50_89_continuous(double is50_mpa) {
 
 inline double rating_rqd89_continuous(double rqd_pct) {
     validation::require_in_range(rqd_pct, 0.0, 100.0, "rqd_pct");
-    return std::clamp(0.317 * std::pow(std::fabs(rqd_pct - 0.07), 0.9) - 0.02, 0.0, 20.0);
+    return std::clamp(0.317 * std::pow(std::max(rqd_pct - 0.07, 0.0), 0.9) - 0.02, 0.0, 20.0);
 }
 
 /// La ecuación original usa mm; aquí el espaciamiento entra en m.

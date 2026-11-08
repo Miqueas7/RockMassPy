@@ -163,3 +163,8 @@ TEST(Rmr89Continuous, ReadmeExample) {
     auto r = rmr89(in);
     EXPECT_NEAR(r.rmr, 53.8707, 1e-4); EXPECT_EQ(r.info.method_id, "RMR89-continuous"); EXPECT_EQ(r.rmr_class.roman, "III");
 }
+TEST(Rmr89Continuous, MonotoneAtBottomOfRange) {
+    for (double x : {0.0, 0.03, 0.07}) EXPECT_EQ(rating_rqd89_continuous(x), 0.0);
+    for (double x : {0.0, 0.005}) { EXPECT_EQ(rating_ucs89_continuous(x), 0.0); EXPECT_EQ(rmr14_strength_rating(x), 0.0); }
+    EXPECT_LE(rating_rqd89_continuous(0.0), rating_rqd89_continuous(0.001));
+}
