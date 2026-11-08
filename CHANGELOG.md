@@ -6,7 +6,7 @@ versions.
 
 ## [0.2.0] - 2026-11-08
 
-Uncertainty in classifications. Results with the default settings are the same as in 0.1.1.
+Uncertainty in classifications.
 
 ### Added
 
@@ -21,7 +21,11 @@ Uncertainty in classifications. Results with the default settings are the same a
 
 ### Changed
 
-- `Rmr89Result.r_strength`, `r_rqd` and `r_spacing` are now `float` (they were `int`).
+- Range-table classification now adds the near-boundary warning also without `--distributions`: it appears in the
+  `avisos` column, in the `warnings: N` count and in the report's warnings table. Exit codes do not change.
+- `Rmr89Result.r_strength`, `r_rqd` and `r_spacing` are now `float` (they were `int`), so they print as `7.0`.
+- With `--distributions`, all tramos use the same seed: each tramo's probabilities are correct, but aggregates across
+  tramos are correlated.
 
 ### To confirm
 

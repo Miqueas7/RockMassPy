@@ -155,7 +155,7 @@ import rockmasspy as rm
 from rockmasspy import probabilistic as pb
 
 base = rm.Rmr89Input()
-base.functions = rm.RmrFunctions.Continuous            # Kundu et al. (2020) curves instead of the table ratings
+base.functions = rm.RmrFunctions.Continuous            # curvas de Kundu et al. (2020) en lugar de los puntajes de la tabla
 base.ucs_mpa, base.rqd_pct, base.spacing_m = 90.0, 70.0, 0.3
 base.joint_condition_rating, base.water = 20.0, rm.Water.Dry
 
