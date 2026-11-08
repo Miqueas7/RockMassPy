@@ -2,12 +2,12 @@
 
 Librería open source de ingeniería de macizo rocoso para minería: clasificaciones (RQD, RMR, Q, GSI, MRMR, Q-slope, SMR),
 resistencia de Hoek-Brown, tablas personalizables por labor, gráficos, recomendación de sostenimiento, perfiles
-normativos por país, tajo abierto y predicción de sostenimiento con datos históricos. Núcleo en C++20 con API en Python.
+normativos por país, análisis de taludes en roca (cinemática, estereografía, bloques y equilibrio límite), incertidumbre en las clasificaciones y predicción de sostenimiento con datos históricos. Núcleo en C++20 con API en Python.
 
 **Documentación: <https://miqueas.dev/rockmasspy>** (guía, métodos, casos resueltos y referencia de la API, en
 español e inglés). Los cambios de cada versión están en [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md) (en inglés).
 
-**Estado:** versión 0.1.1 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas).
+**Estado:** versión 0.2.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones).
 La librería recomienda, el ingeniero decide.
 
 ## Instalación
@@ -141,6 +141,38 @@ rockmass report tramos.xlsx --tables galeria.json -o informe.docx --template ane
 ```
 
 Ver `examples/04-informe/`.
+
+## Incertidumbre y bordes de clase
+
+`classification_uncertainty` muestrea las entradas de RMR89, Q, GSI o Hoek-Brown (Monte Carlo o LHS, con semilla) y
+entrega media, desviación, p05, p50, p95, mínimo y máximo de cada salida, más la probabilidad de cada clase y de cada
+sostenimiento de la tabla de la labor. Informa y nada más: no cambia ninguna regla de atención ni el código de salida.
+Las distribuciones las eliges tú; la librería solo propaga lo que le das. Una muestra que el núcleo rechaza es un
+error que nombra la variable.
+
+```python
+import rockmasspy as rm
+from rockmasspy import probabilistic as pb
+
+base = rm.Rmr89Input()
+base.functions = rm.RmrFunctions.Continuous            # Kundu et al. (2020) curves instead of the table ratings
+base.ucs_mpa, base.rqd_pct, base.spacing_m = 90.0, 70.0, 0.3
+base.joint_condition_rating, base.water = 20.0, rm.Water.Dry
+
+table = rm.LaborTable("gallery", rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("II", 2)]),
+                      rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 68, "fair", "II"), rm.RangeClass(68, 100, "good", "I")]))
+u = rm.classification_uncertainty("RMR89", base, {"ucs_mpa": pb.normal(90, 15, 50, 130), "rqd_pct": pb.uniform(55, 85)},
+                                  table=table, n=2000, seed=1)
+print(round(u.outputs["rmr"].mean, 1), u.class_probabilities)   # 67.4 {'fair': 0.5995, 'good': 0.4005}
+```
+
+`RmrFunctions.Continuous` usa funciones continuas ajustadas a las gráficas de Bieniawski (1989) (Kundu et al., 2020;
+método `RMR89-continuous`), así que un cambio pequeño de UCS, RQD o espaciamiento mueve el puntaje sin saltos. La
+clasificación con una tabla por rangos avisa `near the boundary between classes {a} and {b}` cuando el valor está a
+3 puntos o menos del borde (RMR, GSI) o dentro de un factor 1.25 (Q); estos dos márgenes son provisionales. En el lote,
+una hoja `Distribuciones` por `id_tramo` agrega `clase_probable`, `prob_clase_probable`, `prob_clase`,
+`probabilidades` y `n_validas` a los resultados (`rockmass classify ... --distributions ARCHIVO`, también en `report`).
+Ver `examples/14-incertidumbre-clasificacion/`.
 
 ## Carta de sostenimiento Q (referencia)
 
@@ -767,7 +799,7 @@ Si RockMassPy te sirve en tu trabajo, cítalo. GitHub muestra el botón «Cite t
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (versión 0.1.1) [Software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (versión 0.2.0) [Software]. https://github.com/Miqueas7/RockMassPy
 
 Cada resultado registra además el método y la edición que sigue (`result.info`); cita también esa fuente original.
 

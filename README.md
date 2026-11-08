@@ -2,12 +2,12 @@
 
 Open-source rock mass engineering library for mining: rock mass classifications (RQD, RMR, Q, GSI, MRMR, Q-slope, SMR),
 Hoek-Brown strength, site-customizable classification tables, charts, ground support recommendation, per-country
-regulatory profiles, open-pit slope analysis and data-driven support prediction. C++20 core with a Python API.
+regulatory profiles, rock slope analysis (kinematics, stereonets, block and limit equilibrium), uncertainty in classifications and data-driven support prediction. C++20 core with a Python API.
 
 **Documentation: <https://miqueas.dev/rockmasspy>** (guide, methods, worked examples and API reference, in English
 and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md).
 
-**Status:** version 0.1.1 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench). The library recommends, the engineer decides.
+**Status:** version 0.2.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications). The library recommends, the engineer decides.
 
 ## Installation
 
@@ -139,6 +139,36 @@ rockmass report tramos.xlsx --tables galeria.json -o report.docx --template anex
 ```
 
 See `examples/04-informe/`.
+
+## Uncertainty and class boundaries
+
+`classification_uncertainty` samples the inputs of RMR89, Q, GSI or Hoek-Brown (Monte Carlo or LHS, fixed seed) and
+reports mean, sd, p05, p50, p95, minimum and maximum of each output, plus the probability of each class and of each
+support of the labor table. It reports; it never changes an attention rule or an exit code. The distributions are
+yours: the library only propagates what you give it. A sample the core rejects is an error that names the variable.
+
+```python
+import rockmasspy as rm
+from rockmasspy import probabilistic as pb
+
+base = rm.Rmr89Input()
+base.functions = rm.RmrFunctions.Continuous            # Kundu et al. (2020) curves instead of the table ratings
+base.ucs_mpa, base.rqd_pct, base.spacing_m = 90.0, 70.0, 0.3
+base.joint_condition_rating, base.water = 20.0, rm.Water.Dry
+
+table = rm.LaborTable("gallery", rm.SupportCatalog([rm.SupportType("I", 1), rm.SupportType("II", 2)]),
+                      rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 68, "fair", "II"), rm.RangeClass(68, 100, "good", "I")]))
+u = rm.classification_uncertainty("RMR89", base, {"ucs_mpa": pb.normal(90, 15, 50, 130), "rqd_pct": pb.uniform(55, 85)},
+                                  table=table, n=2000, seed=1)
+print(round(u.outputs["rmr"].mean, 1), u.class_probabilities)   # 67.4 {'fair': 0.5995, 'good': 0.4005}
+```
+
+`RmrFunctions.Continuous` uses continuous functions fitted to the Bieniawski (1989) charts (Kundu et al., 2020; method
+`RMR89-continuous`), so a small change in UCS, RQD or spacing moves the rating smoothly. Classification against a
+range table warns `near the boundary between classes {a} and {b}` when the value is within 3 points of the edge
+(RMR, GSI) or within a factor of 1.25 (Q); these two margins are provisional. In batch, a `Distribuciones` sheet per
+`id_tramo` adds `clase_probable`, `prob_clase_probable`, `prob_clase`, `probabilidades` and `n_validas` to the results
+(`rockmass classify ... --distributions FILE`, also in `report`). See `examples/14-incertidumbre-clasificacion/`.
 
 ## Q support chart (reference)
 
@@ -741,7 +771,7 @@ If RockMassPy helps your work, please cite it. GitHub shows a "Cite this reposit
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (version 0.1.1) [Computer software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (version 0.2.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
 
 Each result also records the method and edition it follows (`result.info`); cite that original source as well.
 

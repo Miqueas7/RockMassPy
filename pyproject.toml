@@ -5,8 +5,8 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "rockmasspy"
 dynamic = ["readme"]
-version = "0.1.1"
-description = "Rock mass classifications, Hoek-Brown strength and mining geomechanics (C++ core, Python API)"
+version = "0.2.0"
+description = "Rock mass classifications, Hoek-Brown strength, support design and rock slope analysis (kinematics, stereonets, block and limit equilibrium) for mining. C++ core, Python API"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
@@ -14,7 +14,8 @@ authors = [
     {name = "Miqueas Quintanilla Ventura", email = "miqueasq@gmail.com"},
 ]
 keywords = ["mining", "geomechanics", "rock-mass", "RMR", "Q-system", "GSI",
-            "hoek-brown", "engineering"]
+            "hoek-brown", "engineering", "rock-slope", "slope-stability", "kinematic-analysis",
+            "stereonet", "markland", "smr", "monte-carlo", "limit-equilibrium"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

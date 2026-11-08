@@ -4,6 +4,32 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
+## [0.2.0] - 2026-11-08
+
+Uncertainty in classifications. Results with the default settings are the same as in 0.1.1.
+
+### Added
+
+- Continuous RMR89 functions (`RmrFunctions.Continuous`, method `RMR89-continuous`) for UCS, Is50, RQD and spacing,
+  and the helpers `rmr14_strength_rating` and `rmr14_joints_per_m_rating` for RMR14.
+- `classification_uncertainty` (RMR89, Q, GSI and Hoek-Brown): Monte Carlo or LHS summaries and probability of each
+  class and support.
+- Warning `near the boundary between classes {a} and {b}` in range-table classification.
+- `--distributions` (with `--sheet-distributions`, `--iterations`, `--sampling`, `--seed`) in `rockmass classify` and
+  `report`, and `classify_tramos(..., distributions=...)`: class probabilities per tramo.
+- Example 14, `examples/14-incertidumbre-clasificacion/`.
+
+### Changed
+
+- `Rmr89Result.r_strength`, `r_rqd` and `r_spacing` are now `float` (they were `int`).
+
+### To confirm
+
+- P1: the continuous functions were transcribed from the QuickRMR 1.0.0 program of Kundu et al. (2020); they are
+  pending confirmation against the paper (RQD and UCS use max(x - c, 0) to stay monotone).
+- P2: no rounding and no jump to 20 above 19.95, unlike QuickRMR (difference up to 0.1).
+- P6: the boundary margins (3 points for RMR and GSI, factor 1.25 for Q) are provisional.
+
 ## [0.1.1] - 2026-11-07
 
 Packaging and documentation only: the calculations are the same as in 0.1.0.
@@ -62,5 +88,6 @@ decides. Full documentation: <https://miqueas.dev/rockmasspy>.
   optional extras `io`, `viz`, `report` and `ml`; type stubs (`py.typed`).
 - Thirteen worked examples in `examples/` with synthetic data only.
 
+[0.2.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.0
