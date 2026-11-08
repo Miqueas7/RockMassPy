@@ -237,6 +237,45 @@ def _assign(work, name: str, value: float) -> None:
         setattr(work, name, value)
 
 
+@dataclass(frozen=True)
+class ModelSamples:
+    n: int
+    n_valid: int
+    outputs: dict[str, tuple[float, ...]]  # solo de las muestras válidas (las que devuelven salidas)
+    warnings: tuple[str, ...]
+    notes: tuple[str, ...]
+
+
+def sample_model(fn, variables: Mapping[str, Distribution], *, n: int = 5000, sampling: str = "lhs",
+                 seed: int = 1) -> ModelSamples:
+    """Evalúa `fn(muestra) -> (salidas, avisos)` sobre n muestras. Un dict de salidas vacío es una muestra sin
+    resultado. Un ValueError de `fn` se traduce a un error que nombra la variable, sin valores."""
+    draws = sample(variables, n, sampling=sampling, seed=seed)
+    names = tuple(draws)
+    outs: dict[str, list[float]] = {}
+    warns: dict[str, int] = {}
+    n_valid = 0
+    for i in range(n):
+        try:
+            res, ws = fn({name: draws[name][i] for name in names})
+        except ValueError as e:
+            msg = str(e)
+            hit = [v for v in names if f"parameter '{v}'" in msg]
+            if not hit:  # combinación con un campo fijo: mensaje del núcleo sin el valor
+                raise ValueError(msg.split("Received:")[0].strip()) from None
+            raise ValueError(f"variable '{hit[0]}': a sampled value is outside the valid range of the model; "
+                             "narrow its minimum and maximum") from None
+        for w in set(map(_norm, ws)):
+            warns[w] = warns.get(w, 0) + 1
+        if res:
+            n_valid += 1
+            for k, v in res.items():
+                outs.setdefault(k, []).append(v)
+    notes = (f"{n - n_valid} of {n} samples gave no result",) if n_valid < n else ()
+    return ModelSamples(n, n_valid, {k: tuple(v) for k, v in outs.items()},
+                        tuple(f"{t} ({k} of {n} samples)" for t, k in warns.items()), notes)
+
+
 def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *, n: int = 5000,
                       sampling: str = "lhs", seed: int = 1) -> ProbabilisticResult:
     if model not in _MODELS:
@@ -248,26 +287,17 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
     for name in variables:
         if name not in valid:
             raise ValueError(f"unknown variable; allowed: {', '.join(valid)}")
-    draws = sample(variables, n, sampling=sampling, seed=seed)
-    names = tuple(draws)
     work = _clone(base)  # una copia de trabajo: la base no se toca
     fs: list[float | None] = []
-    warns: dict[str, int] = {}
     notes: dict[str, int] = {}
     reasons: dict[str, int] = {}
     capped, bounded = [], []
-    for i in range(n):
-        for name in names:
-            _assign(work, name, draws[name][i])
-        try:
-            r = fn(work)
-        except ValueError as e:
-            msg = str(e)
-            hit = [v for v in names if f"parameter '{v}'" in msg]
-            if not hit:  # combinación con un campo fijo: mensaje del núcleo sin el valor
-                raise ValueError(msg.split("Received:")[0].strip()) from None
-            raise ValueError(f"variable '{hit[0]}': a sampled value is outside the valid range of the model; "
-                             "narrow its minimum and maximum") from None
+
+    def one(draw):
+        for name, v in draw.items():
+            _assign(work, name, v)
+        r = fn(work)
+        i = len(fs)
         fs.append(r.factor_of_safety)
         if model == "toppling":
             # la cota tan(phi)/(1 - 1e-9) nunca prueba FS > 1 (el mu requerido es >= 1): cuenta como falla
@@ -275,18 +305,19 @@ def run_probabilistic(model: str, base, variables: Mapping[str, Distribution], *
                 bounded.append(i)
             elif r.capped:  # el tope solo trae su nota, que summarize_fs da una vez para todas las muestras
                 capped.append(i)
-                continue
-        for w in set(map(_norm, r.warnings)):
-            warns[w] = warns.get(w, 0) + 1
+                return {}, []
         if r.factor_of_safety is None:  # el motivo de no formarse va en la nota del bloque
             for t in set(map(_norm, r.notes)) or {"no reason given"}:
                 reasons[t] = reasons.get(t, 0) + 1
         else:
             for t in set(map(_norm, r.notes)):
                 notes[t] = notes.get(t, 0) + 1
+        return {}, list(r.warnings)
+
+    ms = sample_model(one, variables, n=n, sampling=sampling, seed=seed)
     return summarize_fs(
-        fs, model=model, sampling=sampling, n=n, seed=seed, variables=names,
-        extra_warnings=[f"{t} ({k} of {n} samples)" for t, k in warns.items()],
+        fs, model=model, sampling=sampling, n=n, seed=seed, variables=sorted(variables),
+        extra_warnings=ms.warnings,
         extra_notes=[f"{k} of {n} samples do not form a block ({t})" for t, k in reasons.items()]
         + [f"{t} ({k} of {n} samples)" for t, k in notes.items()], capped=capped, upper_bounds=bounded)
 
