@@ -107,7 +107,6 @@ BLOCK_COLUMNS = tuple(f.name for f in fields(BlockRow) if f.name not in ("fila",
 DISTRIBUTION_COLUMNS = tuple(f.name for f in fields(DistributionRow) if f.name not in ("fila", "hoja"))
 _BLOCK_TEXT = {"id_bloque", "id_talud", "modelo", "familia_1", "familia_2", "perno_tipo", "retroanalisis", "escala",
                "consecuencia"}
-_DIST_TEXT = {"id_bloque", "variable", "distribucion"}
 
 _INF = math.inf
 # columna: (mínimo, máximo, mínimo abierto, máximo abierto); b_m solo debe ser finito
@@ -280,16 +279,17 @@ def _block(vals, n, sheet):
     return BlockRow(**vals, fila=n, hoja=sheet)
 
 
-def _distribution(vals, n, sheet):
+def _check_distribution(vals, n, sheet, key, allowed, ranges):
+    """Valida y normaliza una fila de distribución (la comparten bloques y tramos); `key` es la columna de enlace."""
     def bad(c, motivo):
         raise ValueError(f"{_where(sheet, n, c)}: {motivo}")
 
-    _floats(vals, _DIST_TEXT, sheet, n)
+    _floats(vals, {key, "variable", "distribucion"}, sheet, n)
     vals["distribucion"] = _word(vals["distribucion"])
     vals["variable"] = _word(vals["variable"])
-    if vals["variable"] not in _ALL_VARS:
-        bad("variable", f"unknown variable; allowed: {', '.join(sorted(_ALL_VARS))}")
-    rng = _DIST_RANGES.get(vals["variable"])
+    if vals["variable"] not in allowed:
+        bad("variable", f"unknown variable; allowed: {', '.join(sorted(allowed))}")
+    rng = ranges.get(vals["variable"])
     if rng is not None:  # el dominio de la columna (o de la variable sin columna) acota la distribución
         lo, hi, lo_open, hi_open = rng
         for c in ("minimo", "maximo"):
@@ -305,12 +305,29 @@ def _distribution(vals, n, sheet):
             bad(c, f"required for a {vals['distribucion']} distribution")
         if c not in needs and vals[c] is not None:
             bad(c, f"not used by a {vals['distribucion']} distribution")
-    row = DistributionRow(**vals, fila=n, hoja=sheet)
     try:
-        row.distribution
+        Distribution(kind, vals["minimo"], vals["maximo"], vals["media"], vals["desviacion"])
     except ValueError as e:  # los mensajes de Distribution no traen valores
         raise ValueError(f"sheet '{sheet}', row {n}: {e}") from None
-    return row
+
+
+def _distribution(vals, n, sheet):
+    _check_distribution(vals, n, sheet, "id_bloque", _ALL_VARS, _DIST_RANGES)
+    return DistributionRow(**vals, fila=n, hoja=sheet)
+
+
+def load_distribution_rows(path, sheet, column_map, key, columns, build):
+    """Lector común de `Distribuciones`: `key` enlaza con el bloque o el tramo; un par (key, variable) no se repite."""
+    rows = _cargar(path, sheet, column_map, columns, {key, "variable", "distribucion"},
+                   (key, "variable", "distribucion", "minimo", "maximo"), None, build)
+    seen: dict[tuple[str, str], int] = {}
+    for d in rows:
+        k = (getattr(d, key), d.variable)
+        if k in seen:
+            raise ValueError(f"{_where(d.hoja, d.fila, 'variable')}: duplicate {key} and variable "
+                             f"(first in row {seen[k]})")
+        seen[k] = d.fila
+    return rows
 
 
 def load_blocks(path, *, sheet: str = BLOCKS_SHEET, column_map: Mapping[str, str] | None = None) -> list[BlockRow]:
@@ -322,16 +339,7 @@ def load_blocks(path, *, sheet: str = BLOCKS_SHEET, column_map: Mapping[str, str
 def load_distributions(path, *, sheet: str = DISTRIBUTIONS_SHEET,
                        column_map: Mapping[str, str] | None = None) -> list[DistributionRow]:
     """Lee `Distribuciones` (una variable aleatoria por fila); un par (id_bloque, variable) no se repite."""
-    rows = _cargar(path, sheet, column_map, DISTRIBUTION_COLUMNS, _DIST_TEXT,
-                   ("id_bloque", "variable", "distribucion", "minimo", "maximo"), None, _distribution)
-    seen: dict[tuple[str, str], int] = {}
-    for d in rows:
-        k = (d.id_bloque, d.variable)
-        if k in seen:
-            raise ValueError(f"{_where(d.hoja, d.fila, 'variable')}: duplicate id_bloque and variable "
-                             f"(first in row {seen[k]})")
-        seen[k] = d.fila
-    return rows
+    return load_distribution_rows(path, sheet, column_map, "id_bloque", DISTRIBUTION_COLUMNS, _distribution)
 
 
 # ---------------------------------------------------------------- evaluación

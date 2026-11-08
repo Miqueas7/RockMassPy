@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .batch import add_q_chart_reference, classify_tramos, parse_esr_spec, q_chart_crosstab, save_results, summarize
+from .batch import (add_q_chart_reference, classify_tramos, load_tramo_distributions, parse_esr_spec, q_chart_crosstab,
+                    save_results, summarize)
 from .q_chart_data import ESR_TABLES
 from .report.texts import t
 from .table_files import load_table
@@ -72,11 +73,31 @@ def _esr_specs(values: Sequence[str]) -> dict:
 _ESR_EXAMPLE = {"A": "4", "B": "2.5"}
 
 
+def _dist_args(a) -> None:
+    """Valida las opciones de distribuciones antes de leer archivos; deja los valores por defecto en `a`."""
+    if not a.distributions:
+        for attr in ("iterations", "sampling", "seed"):
+            if getattr(a, attr) is not None:
+                raise ValueError(f"--{attr} needs --distributions")
+        return
+    a.iterations = 2000 if a.iterations is None else a.iterations
+    a.seed = 1 if a.seed is None else a.seed
+    a.sampling = a.sampling or "lhs"
+    if a.iterations < 1:
+        raise ValueError("--iterations must be at least 1")
+    if a.seed < 0:
+        raise ValueError("--seed must be 0 or more")
+
+
 def _classify_all(a):
+    _dist_args(a)
     tables = [load_table(p) for p in a.tables]
     tramos = load_tramos(a.tramos, sheet=a.sheet, column_map=_column_map(a.column_map))
     esr = _esr_specs(a.esr) if a.esr else None  # antes de clasificar: un --esr malo falla temprano
-    results = classify_tramos(tramos, tables)
+    dists = load_tramo_distributions(a.distributions, sheet=a.sheet_distributions) if a.distributions else None
+    kw = dict(distributions=dists, iterations=a.iterations, sampling=a.sampling.replace("-", "_"),
+              seed=a.seed) if dists is not None else {}
+    results = classify_tramos(tramos, tables, **kw)
     if esr:
         results = add_q_chart_reference(results, esr, edition=a.q_edition)
     return results, tables
@@ -99,10 +120,18 @@ def _print_summary(s) -> int:
     return 2 if s.unclassified else 0
 
 
+def _print_probabilistic(a, results) -> None:
+    if a.distributions:
+        n = sum(1 for r in results if r.probabilities is not None)
+        print(f"probabilistic: {n} of {len(results)} tramos with distributions\n"
+              f"samples: {a.iterations} iterations, {a.sampling}, seed {a.seed}")
+
+
 def _classify(a) -> int:
     results, _ = _classify_all(a)
     out = save_results(results, a.output)
     code = _print_summary(summarize(results))
+    _print_probabilistic(a, results)
     _print_chart_summary(a, results)
     print(f"results: {out}")
     return code
@@ -125,6 +154,7 @@ def _report(a) -> int:
         rep = rp.build_memoria(results, tables, **kw)
     out = rp.write_docx(rep, a.output, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.output)
     code = _print_summary(summarize(results))
+    _print_probabilistic(a, results)
     _print_chart_summary(a, results)
     print(f"report: {out}")
     return code
@@ -963,6 +993,11 @@ def _parser() -> argparse.ArgumentParser:
         c.add_argument("--column-map", metavar="MAP.json")
         c.add_argument("--esr", nargs="+", metavar="SPEC", help="Q chart reference: C, A:4, labor=C or labor=A:4")
         c.add_argument("--q-edition", choices=("Q-NGI-2025", "Q-NGI-2015"), default="Q-NGI-2025")
+        c.add_argument("--distributions", metavar="DIST", help="random variables per tramo (sheet Distribuciones)")
+        c.add_argument("--sheet-distributions", default="Distribuciones")
+        c.add_argument("--iterations", type=int, metavar="N", help="samples per tramo (default 2000)")
+        c.add_argument("--sampling", choices=("lhs", "monte-carlo"), help="default lhs")
+        c.add_argument("--seed", type=int, help="default 1")
 
     c = sub.add_parser("classify", help="classify tramos and save the results")
     batch_args(c)

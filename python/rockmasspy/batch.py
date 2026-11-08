@@ -7,7 +7,7 @@ no llevan valores de columnas de identificación (solo códigos de sostenimiento
 from collections import Counter
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Union
 
@@ -16,7 +16,9 @@ from .cell_table import CellTable
 from .csv_io import _celda, _system_csv_format
 from .q_chart_data import ESR_TABLES, Q_CHARTS
 from .q_support import QSupportResult, recommend_q_support
+from .excel_io import _where
 from .labor_table import LaborTable, _key, select_table
+from .probabilistic import Distribution, sample_model
 from .range_table import RangeTable
 from .support import SupportType
 from .table_io import _optional
@@ -28,6 +30,13 @@ _COLUMNS = ("id_tramo", "tipo_labor", "luz_m", "tabla_luz_min_m", "tabla_luz_max
 _Q_COLUMNS = ("q_carta_edicion", "q_carta_esr", "q_carta_de_m", "q_carta_categoria", "q_carta_shotcrete_min_mm",
               "q_carta_shotcrete_max_mm", "q_carta_espaciamiento_min_m", "q_carta_espaciamiento_max_m",
               "q_carta_longitud_min_m", "q_carta_longitud_max_m", "q_carta_rrs", "q_carta_avisos")
+_P_COLUMNS = ("clase_probable", "prob_clase_probable", "prob_clase", "probabilidades", "n_validas")
+_Q_PARAMS = ("rqd_pct", "jn", "jr", "ja", "jw", "srf")
+TRAMO_DISTRIBUTION_VARIABLES = ("rmr_valor", "gsi_valor", "q_valor") + _Q_PARAMS
+_METHOD_VARIABLES = {"RMR": {"rmr_valor"}, "GSI": {"gsi_valor"}, "Q": {"q_valor", *_Q_PARAMS}}
+TRAMO_DISTRIBUTION_COLUMNS = ("id_tramo", "variable", "distribucion", "media", "desviacion", "minimo", "maximo")
+DISTRIBUTIONS_SHEET = "Distribuciones"
+TRAMOS_SHEET = "Tramos"
 EsrSpec = Union[str, tuple[str, float]]  # "C" o ("A", 4.0)
 
 
@@ -46,6 +55,43 @@ class TramoResult:
     support_order: int | None = None  # posición (1 = primero) del sostenimiento en el catálogo de la tabla
     q_chart: QSupportResult | None = None  # referencia de la carta Q (solo techo); no altera la clasificación propia
     q_chart_warnings: tuple[str, ...] = ()
+    probabilities: dict[str, float] | None = None  # clase de la tabla -> fracción de las muestras (solo con distribuciones)
+    n_valid: int | None = None
+
+
+@dataclass(frozen=True)
+class TramoDistributionRow:
+    id_tramo: str = field(repr=False)
+    variable: str
+    distribucion: str
+    media: float | None
+    desviacion: float | None
+    minimo: float
+    maximo: float
+    fila: int
+    hoja: str = field(default=DISTRIBUTIONS_SHEET, repr=False, compare=False)
+
+    @property
+    def distribution(self) -> Distribution:
+        from .blocks import _KINDS
+
+        return Distribution(_KINDS[self.distribucion], self.minimo, self.maximo, self.media, self.desviacion)
+
+
+def _tramo_distribution(vals, n, sheet):
+    from .blocks import _check_distribution
+
+    # sin rango propio: el dominio lo decide el núcleo al muestrear (error que nombra la variable)
+    _check_distribution(vals, n, sheet, "id_tramo", TRAMO_DISTRIBUTION_VARIABLES, {})
+    return TramoDistributionRow(**vals, fila=n, hoja=sheet)
+
+
+def load_tramo_distributions(path, *, sheet: str = DISTRIBUTIONS_SHEET,
+                             column_map: Mapping[str, str] | None = None) -> list[TramoDistributionRow]:
+    """Lee `Distribuciones` por `id_tramo` (una variable aleatoria por fila); un par (id_tramo, variable) no se repite."""
+    from .blocks import load_distribution_rows
+
+    return load_distribution_rows(path, sheet, column_map, "id_tramo", TRAMO_DISTRIBUTION_COLUMNS, _tramo_distribution)
 
 
 @dataclass(frozen=True)
@@ -125,10 +171,71 @@ def _classify(t: Tramo, lt: LaborTable) -> TramoResult:
     return TramoResult(**base, label=c.label, support=c.support, warnings=tuple(warns), support_order=order)
 
 
-def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable]) -> list[TramoResult]:
-    tables = list(tables)
+def _check_distributions(tramos: list[Tramo], distributions) -> dict[str, list[TramoDistributionRow]]:
+    """Cruza `Distribuciones` con `Tramos` antes de muestrear: los errores nombran hoja, fila y columna, nunca el id."""
+    by_id = {t.id_tramo: t for t in tramos}
+    per: dict[str, list[TramoDistributionRow]] = {}
+    for d in distributions:
+        d = _tramo_distribution({c: getattr(d, c) for c in TRAMO_DISTRIBUTION_COLUMNS}, d.fila, d.hoja)
+        t = by_id.get(d.id_tramo)
+        if t is None:
+            raise ValueError(f"{_where(d.hoja, d.fila, 'id_tramo')}: no tramo with this id_tramo")
+        if d.variable in _Q_PARAMS and t.q_valor is not None:
+            raise ValueError(f"{_where(d.hoja, d.fila, 'variable')}: {d.variable} cannot be sampled when q_valor is given")
+        if getattr(t, d.variable) is None:  # sin el valor, el resultado determinístico correría otro modelo
+            raise ValueError(f"{_where(TRAMOS_SHEET, t.fila, d.variable)}: required because it is sampled in {d.hoja}")
+        per.setdefault(d.id_tramo, []).append(d)
+    return per
+
+
+def _int_arg(v, name, lo):
+    if isinstance(v, bool) or not isinstance(v, int) or v < lo:
+        raise ValueError(f"{name} must be an integer >= {lo}")
+
+
+def _with_probabilities(r: TramoResult, lt: LaborTable, rows, iterations, sampling, seed) -> TramoResult:
+    t, tab = r.tramo, lt.table
+    for d in rows:
+        if d.variable not in _METHOD_VARIABLES.get(r.method, ()):
+            raise ValueError(f"{_where(d.hoja, d.fila, 'variable')}: not used by method {r.method}")
+    counts: Counter = Counter()
+
+    def one(draw):
+        if tab.method == "Q":
+            v = draw["q_valor"] if "q_valor" in draw else _tramo_q(replace(t, **draw), tab.base_edition, [])
+        else:
+            v = draw["rmr_valor" if tab.method == "RMR" else "gsi_valor"]
+        try:
+            counts[lt.classify(v).label] += 1
+        except ValueError:
+            raise ValueError("a sampled result falls outside every class of the table; "
+                             "widen the table or narrow the variables") from None
+        return {"value": v}, []
+
+    try:
+        ms = sample_model(one, {d.variable: d.distribution for d in rows}, n=iterations, sampling=sampling, seed=seed)
+    except ValueError as e:
+        raise ValueError(f"sheet '{TRAMOS_SHEET}', row {t.fila}: {e}") from None
+    k = ms.n_valid
+    labels = dict.fromkeys(c.label for c in tab.classes)
+    return replace(r, probabilities={lb: counts[lb] / k for lb in labels}, n_valid=k)
+
+
+def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable], *,
+                    distributions: Iterable[TramoDistributionRow] | None = None, iterations: int = 2000,
+                    sampling: str = "lhs", seed: int = 1) -> list[TramoResult]:
+    """Clasifica cada tramo. Con `distributions` agrega, a los tramos que las tienen, la probabilidad de cada clase de su
+    tabla (Monte Carlo o LHS sobre la clasificación de cada muestra); la clase determinística no cambia."""
+    tables, tramos = list(tables), list(tramos)
     if not tables:
         raise ValueError("tables: at least one labor table is required")
+    per: dict[str, list[TramoDistributionRow]] = {}
+    if distributions is not None:
+        _int_arg(iterations, "iterations", 1)
+        _int_arg(seed, "seed", 0)
+        if sampling not in ("lhs", "monte_carlo"):
+            raise ValueError("sampling must be 'lhs' or 'monte_carlo'")
+        per = _check_distributions(tramos, distributions)
     out = []
     for t in tramos:
         try:
@@ -136,7 +243,10 @@ def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable]) -> li
         except ValueError as e:
             out.append(TramoResult(tramo=t, warnings=(f"no table for this labor/span: {e}",)))
             continue
-        out.append(_classify(t, lt))
+        r = _classify(t, lt)
+        if t.id_tramo in per and r.label is not None:
+            r = _with_probabilities(r, lt, per[t.id_tramo], iterations, sampling, seed)
+        out.append(r)
     return out
 
 
@@ -150,13 +260,31 @@ def summarize(results: Iterable[TramoResult]) -> BatchSummary:
         warnings_count=sum(len(r.warnings) for r in results))
 
 
-def _fila(r: TramoResult, with_q: bool = False):
+def _percent_text(probs: dict[str, float]) -> str:
+    """`III 59 %; IV 41 %`: de mayor a menor, enteros que suman 100 (resto repartido por mayor fracción)."""
+    items = [(lb, p) for lb, p in probs.items() if p > 0]
+    pct = {lb: int(p * 100 + 1e-9) for lb, p in items}
+    for lb, _ in sorted(items, key=lambda x: x[1] * 100 - pct[x[0]], reverse=True)[:100 - sum(pct.values())]:
+        pct[lb] += 1
+    return "; ".join(f"{lb} {pct[lb]} %" for lb, _ in sorted(items, key=lambda x: -x[1]))
+
+
+def _fila_p(r: TramoResult):
+    if r.probabilities is None:
+        return [None] * 5
+    top, p = max(r.probabilities.items(), key=lambda x: x[1])
+    return [top, p, r.probabilities.get(r.label), _percent_text(r.probabilities), r.n_valid]
+
+
+def _fila(r: TramoResult, with_q: bool = False, with_p: bool = False):
     t, s = r.tramo, r.span_m
     fila = [t.id_tramo, t.tipo_labor, t.luz_m, s[0] if s else None, s[1] if s else None, r.method, r.base_edition,
             r.input_value, r.input_cell, r.label, r.support.code if r.support else None, r.support_order,
             t.sost_instalado, " | ".join(r.warnings)]
     if with_q:
         fila += _fila_q(r)
+    if with_p:
+        fila += _fila_p(r)
     return fila
 
 
@@ -280,4 +408,5 @@ def save_results(results: Iterable[TramoResult], path) -> Path:
     """Escribe .xlsx (con [io]) o .csv (en el formato numérico de este computador). Solo lleva id_tramo como identificador."""
     results = list(results)
     cols = _columns(results)
-    return write_table(path, cols, [_fila(r, len(cols) > len(_COLUMNS)) for r in results])
+    with_q, with_p = len(cols) > len(_COLUMNS), any(r.probabilities is not None for r in results)
+    return write_table(path, cols + (_P_COLUMNS if with_p else ()), [_fila(r, with_q, with_p) for r in results])

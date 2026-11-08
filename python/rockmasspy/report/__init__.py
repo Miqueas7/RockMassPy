@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .. import __version__
 from .. import _rockmasspy_core as rm
-from ..batch import _COLUMNS, _columns, _fila, q_chart_crosstab, summarize
+from ..batch import _COLUMNS, _columns, _fila, _fila_p, q_chart_crosstab, summarize
 from ..cell_table import CellTable
 from ..gsi_charts import GSI_CHARTS
 from ..labor_table import LaborTable, _key
@@ -321,6 +321,12 @@ def build_memoria(results, tables, *, title: str, lang: str = "es", author: str 
     s4 = Section("4", t("s4", lang), (Table(
         t("cap_results", lang), cols,
         tuple(tuple(_str(v) for v in _fila(r, len(cols) > len(_COLUMNS))) for r in results)),))
+    prob = tuple(r for r in results if r.probabilities is not None)
+    if prob:  # solo con distribuciones; el id_tramo va aquí, como en la tabla de resultados
+        head = tuple(t(k, lang) for k in ("h_class_probable", "h_prob_probable", "h_prob_assigned", "h_probabilities",
+                                          "h_valid_samples"))
+        s4 = replace(s4, blocks=s4.blocks + (Table(t("cap_class_prob", lang), ("id_tramo",) + head, tuple(
+            tuple(_str(v) for v in (r.tramo.id_tramo, *_fila_p(r))) for r in prob)),))
     # avisos únicos con la cantidad de tramos que los tienen; nunca qué id_tramo
     counts = Counter(w for r in results for w in set(r.warnings))
     if counts:
