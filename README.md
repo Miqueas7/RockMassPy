@@ -9,21 +9,30 @@ and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Mique
 
 **Status:** version 0.1.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench). The library recommends, the engineer decides.
 
-## Install
+## Installation
 
-From PyPI, with all the optional extras (Excel/YAML, charts, Word report, predictive module); prebuilt wheels for Linux x86_64, Windows and macOS arm64, no compiler needed:
+```bash
+pip install rockmasspy
+```
+
+Prebuilt wheels are published for Python 3.10 to 3.14 on Linux (x86_64), Windows and macOS (Apple Silicon), so no
+compiler or CMake is required. The base install has no Python dependencies: the calculations live in the compiled core.
+
+Optional extras add what is not pure calculation:
+
+| Extra | Adds | For |
+|---|---|---|
+| `io` | `pyyaml`, `openpyxl` | Tables in YAML and Excel; sections, stope faces, slopes and the history template in Excel |
+| `viz` | `matplotlib` | Q chart, stability graphs, stereonets, field charts, profiles and maps |
+| `report` | `python-docx` | Word report (the HTML report needs nothing extra) |
+| `ml` | `numpy`, `scipy` | Predictive module |
 
 ```bash
 pip install "rockmasspy[io,viz,report,ml]"
 ```
 
-From source (needs Python >= 3.10 and a C++20 compiler):
-
-```bash
-git clone https://github.com/Miqueas7/RockMassPy.git
-cd RockMassPy
-pip install ".[io,viz,report,ml]"
-```
+On other platforms (Linux ARM, Intel Macs) `pip` builds the C++ core from the source distribution, which needs a C++20
+compiler.
 
 ## Minimal example
 

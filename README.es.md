@@ -12,19 +12,28 @@ La librería recomienda, el ingeniero decide.
 
 ## Instalación
 
-Desde PyPI, con todos los extras opcionales (Excel/YAML, gráficos, informe Word, módulo predictivo); trae ruedas ya compiladas para Linux x86_64, Windows y macOS arm64, sin compilador:
+```bash
+pip install rockmasspy
+```
+
+Hay ruedas ya compiladas para Python 3.10 a 3.14 en Linux (x86_64), Windows y macOS (Apple Silicon), así que no hace
+falta compilador ni CMake. La instalación base no trae dependencias de Python: el cálculo vive en el núcleo compilado.
+
+Los extras opcionales agregan lo que no es cálculo puro:
+
+| Extra | Agrega | Para |
+|---|---|---|
+| `io` | `pyyaml`, `openpyxl` | Tablas en YAML y Excel; tramos, caras de tajeo, taludes y la plantilla del histórico en Excel |
+| `viz` | `matplotlib` | Carta Q, gráficos de estabilidad, estereogramas, cartillas, perfiles y mapas |
+| `report` | `python-docx` | Informe Word (el informe HTML no necesita nada extra) |
+| `ml` | `numpy`, `scipy` | Módulo predictivo |
 
 ```bash
 pip install "rockmasspy[io,viz,report,ml]"
 ```
 
-Desde el código (necesitas Python >= 3.10 y un compilador C++20):
-
-```bash
-git clone https://github.com/Miqueas7/RockMassPy.git
-cd RockMassPy
-pip install ".[io,viz,report,ml]"
-```
+En otras plataformas (Linux ARM, Mac con Intel) `pip` compila el núcleo C++ desde la distribución de código fuente, y
+para eso hace falta un compilador de C++20.
 
 ## Ejemplo mínimo
 
