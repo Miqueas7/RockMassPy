@@ -26,7 +26,7 @@ def ctab():
 
 def test_classify_range():
     c = lab().classify(40)  # límite: la clase peor
-    assert (c.label, c.support.code, c.base_edition, c.warnings) == ("poor", "III", "RMR89", ())
+    assert (c.label, c.support.code, c.base_edition, c.warnings) == ("poor", "III", "RMR89", ("near the boundary between classes poor and fair",))
 
 
 def test_classify_cells():

@@ -137,3 +137,10 @@ def test_save_csv(tmp_path):
 def test_save_bad_extension(tmp_path):
     with pytest.raises(ValueError):
         rm.save_results(results(), tmp_path / "r.txt")
+
+
+def test_near_boundary_reaches_result_and_summary():
+    rs = rm.classify_tramos([tr("T1", rmr_valor=41), tr("T2", rmr_valor=70), tr("T3", rmr_valor=39)], TABLES)
+    w = "near the boundary between classes poor and fair"
+    assert w in rs[0].warnings and w in rs[2].warnings and w not in rs[1].warnings
+    assert rm.summarize(rs).warnings_count == 2

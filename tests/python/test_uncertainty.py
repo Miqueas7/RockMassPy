@@ -51,7 +51,7 @@ def test_rmr_continuous_reproducible_and_samplings():
     assert abs(o.mean - b.outputs["rmr"].mean) < 0.5
 
 
-def test_gsi_hb_and_near_boundary():
+def test_gsi_hb():
     r = cu("HB", {"gsi": 50, "mi": 10, "d": 0}, {"gsi": pb.uniform(40, 60)}, n=200)
     assert set(r.outputs) == {"mb", "s", "a"}
     t = lab("GSI", "GSI-2013", (0, 50, 100))
@@ -87,3 +87,11 @@ def test_no_input_values_in_errors():
     with pytest.raises(ValueError) as e:
         cu("Q", q_base(rqd_pct=777.7), {"jn": pb.uniform(-1, 1)}, n=100)
     assert "777.7" not in str(e.value)
+
+
+def test_near_boundary_warning_rmr_gsi():
+    t = lab("GSI", "GSI-2013", (0, 50, 100))
+    near = cu("GSI", {"jcond89": 15, "rqd_pct": 70}, {"rqd_pct": pb.uniform(60, 80)}, table=t, n=200)
+    assert any(w.startswith("near the boundary between classes B and A") for w in near.warnings)
+    far = cu("RMR89", rmr_base(), {"ucs_mpa": pb.uniform(80, 100)}, table=lab("RMR", "RMR89", (0, 20, 100)), n=200)
+    assert not any("near the boundary" in w for w in far.warnings)

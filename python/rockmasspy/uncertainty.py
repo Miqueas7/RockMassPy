@@ -21,8 +21,6 @@ _VARS = {"RMR89": ("ucs_mpa", "is50_mpa", "rqd_pct", "spacing_m", "joint_conditi
          "GSI": ("jcond89", "rqd_pct"),
          "HB": ("gsi", "mi", "d")}
 _TABLE_METHOD = {"RMR89": "RMR", "Q": "Q", "GSI": "GSI"}
-_NEAR_POINTS = 3.0  # P6, valor provisional
-_NEAR_Q = math.log10(1.25)
 
 
 @dataclass(frozen=True)
@@ -62,18 +60,6 @@ def _missing(x) -> bool:
     return x is None or (isinstance(x, float) and math.isnan(x))
 
 
-def _boundaries(table):
-    """Límites comunes de clases vecinas: (valor, etiqueta_inferior, etiqueta_superior)."""
-    cs = sorted(table.classes, key=lambda c: c.lo)
-    return [(b.lo, a.label, b.label) for a, b in zip(cs, cs[1:])]
-
-
-def _near(method, value, edge) -> bool:
-    if method == "Q":
-        return value > 0 and edge > 0 and abs(math.log10(value / edge)) <= _NEAR_Q
-    return abs(value - edge) <= _NEAR_POINTS
-
-
 def classification_uncertainty(method: str, base, variables: Mapping[str, Distribution], *, table=None,
                                edition=None, n: int = 5000, sampling: str = "lhs",
                                seed: int = 1) -> UncertaintyResult:
@@ -108,7 +94,6 @@ def classification_uncertainty(method: str, base, variables: Mapping[str, Distri
     if method == "Q" and edition is None:
         edition = rm.QEdition.NGI2025
     out_key = {"RMR89": "rmr", "Q": "q", "GSI": "gsi"}.get(method)
-    edges = _boundaries(table.table) if table is not None else []
     labels = [c.label for c in table.table.classes] if table is not None else []
     counts, supports = Counter(), Counter()
     work = rm.Rmr89Input() if method == "RMR89" else None
@@ -143,7 +128,7 @@ def classification_uncertainty(method: str, base, variables: Mapping[str, Distri
             counts[c.label] += 1
             if c.support is not None:
                 supports[c.support.code] += 1
-            ws += [f"near the boundary between classes {a} and {b}" for e, a, b in edges if _near(method, v, e)]
+            ws += c.warnings
         return outs, ws
 
     ms = sample_model(one, variables, n=n, sampling=sampling, seed=seed)

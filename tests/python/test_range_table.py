@@ -68,3 +68,32 @@ def test_label_required_and_support_as_text():
     assert (c.label, c.support) == ("V", "3")
     assert rm.RangeClass(0, 20, "V", " ").support is None
     assert rm.CellClass("F/R", 3, label=None) == rm.CellClass("F/R", "3")
+
+
+def _two(method, edition, edge, lo, hi):
+    return rm.RangeTable(method, edition, [rm.RangeClass(lo, edge, "IV", "I"), rm.RangeClass(edge, hi, "III", "I")])
+
+
+def _near_cl(t, v):
+    return rm.LaborTable("g", rm.SupportCatalog([rm.SupportType("I", 1)]), t).classify(v)
+
+
+def test_near_boundary_points():
+    t = _two("RMR", "RMR89", 40, 0, 100)
+    for v in (37, 43, 40):
+        assert t.near_boundary(v) == ("IV", "III")
+        assert "near the boundary between classes IV and III" in _near_cl(t, v).warnings
+    for v in (36.9, 43.1):
+        assert t.near_boundary(v) is None and _near_cl(t, v).warnings == ()
+    assert _near_cl(t, 40).label == "IV"
+
+
+def test_near_boundary_q_factor():
+    t = _two("Q", "Q-NGI-2025", 4, 0.001, 1000)
+    assert t.near_boundary(3.2) and t.near_boundary(5.0)
+    assert t.near_boundary(3.1) is None and t.near_boundary(5.1) is None
+
+
+def test_near_boundary_gap_is_not_a_boundary():
+    t = rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 38, "IV", "I"), rm.RangeClass(42, 100, "III", "I")])
+    assert t.near_boundary(40) is None and t.near_boundary(38) is None

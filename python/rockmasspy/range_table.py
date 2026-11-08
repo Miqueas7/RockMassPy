@@ -29,6 +29,10 @@ EDITION_BOUNDARIES = {
     "Q-NGI-2015": (0.01, 0.1, 1, 4, 10, 40, 100, 400),
 }
 
+# P6 (valores provisionales): cercanía a un borde de clase; "points" = diferencia absoluta, "factor" = cociente
+NEAR_BOUNDARY = {"RMR": ("points", 3.0), "GSI": ("points", 3.0), "Q": ("factor", 1.25)}
+_NEAR_EPS = 1e-9  # a favor de avisar
+
 
 @dataclass(frozen=True)
 class RangeClass:
@@ -79,6 +83,23 @@ class RangeTable:
         if not hits:
             raise ValueError(f"value {value:g} is outside every class of the table")
         return min(hits, key=lambda c: c.lo)
+
+    def near_boundary(self, value: float) -> tuple[str, str] | None:
+        """Etiquetas (inferior, superior) del borde común más cercano si `value` está dentro de la tolerancia de P6."""
+        kind, tol = NEAR_BOUNDARY[self._method]
+        if kind == "factor":
+            if not value > 0:
+                return None
+            tol = math.log10(tol)
+        cs = sorted(self._classes, key=lambda c: c.lo)
+        best = None
+        for a, b in zip(cs, cs[1:]):
+            if not math.isclose(a.hi, b.lo, rel_tol=1e-9, abs_tol=1e-12):  # un hueco o solape no es un borde
+                continue
+            d = abs(math.log10(value / b.lo)) if kind == "factor" else abs(value - b.lo)
+            if d <= tol + _NEAR_EPS and (best is None or d < best[0]):
+                best = (d, a.label, b.label)
+        return None if best is None else (best[1], best[2])
 
     def validate(self, catalog: SupportCatalog | None = None) -> list[TableIssue]:
         ed = self._edition

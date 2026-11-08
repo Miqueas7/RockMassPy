@@ -60,6 +60,7 @@ class LaborTable:
                 raise ValueError("a range table is classified with 'value' only")
             c = self.table.lookup(value)
             label = c.label
+            near = self.table.near_boundary(value)
         else:
             if value is not None or structure is None or condition is None:
                 raise ValueError("a cells table is classified with 'structure' and 'condition' only")
@@ -67,6 +68,8 @@ class LaborTable:
             label = c.label or c.cell
         warnings: list[str] = []
         support = None
+        if isinstance(self.table, RangeTable) and near is not None:
+            warnings.append(f"near the boundary between classes {near[0]} and {near[1]}")
         if c.support is not None and c.support in self.catalog:  # las clases ya guardan el código limpio
             support = self.catalog.get(c.support)
         else:
