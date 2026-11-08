@@ -4,6 +4,16 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
+## [0.1.1] - 2026-11-07
+
+Packaging and documentation only: the calculations are the same as in 0.1.0.
+
+### Changed
+
+- The PyPI page shows the README in English followed by the Spanish one.
+- Installation in both READMEs starts with `pip install rockmasspy`, with the optional extras in a table; building
+  from source is only needed on platforms without a wheel, and `pip` does it by itself.
+
 ## [0.1.0] - 2026-11-07
 
 First public release. Every result records the method and edition it follows; the library recommends, the engineer
@@ -52,4 +62,5 @@ decides. Full documentation: <https://miqueas.dev/rockmasspy>.
   optional extras `io`, `viz`, `report` and `ml`; type stubs (`py.typed`).
 - Thirteen worked examples in `examples/` with synthetic data only.
 
+[0.1.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.0

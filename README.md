@@ -7,7 +7,7 @@ regulatory profiles, open-pit slope analysis and data-driven support prediction.
 **Documentation: <https://miqueas.dev/rockmasspy>** (guide, methods, worked examples and API reference, in English
 and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md).
 
-**Status:** version 0.1.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench). The library recommends, the engineer decides.
+**Status:** version 0.1.1 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench). The library recommends, the engineer decides.
 
 ## Installation
 
@@ -741,7 +741,7 @@ If RockMassPy helps your work, please cite it. GitHub shows a "Cite this reposit
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (version 0.1.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (version 0.1.1) [Computer software]. https://github.com/Miqueas7/RockMassPy
 
 Each result also records the method and edition it follows (`result.info`); cite that original source as well.
 

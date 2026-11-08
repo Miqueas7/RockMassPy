@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "rockmasspy"
 dynamic = ["readme"]
-version = "0.1.0"
+version = "0.1.1"
 description = "Rock mass classifications, Hoek-Brown strength and mining geomechanics (C++ core, Python API)"
 license = "MIT"
 license-files = ["LICENSE"]
