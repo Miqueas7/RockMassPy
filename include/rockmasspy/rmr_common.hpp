@@ -16,6 +16,8 @@ namespace rockmasspy {
 enum class Water { Dry, Damp, Wet, Dripping, Flowing };
 enum class OrientationClass { VeryFavourable, Favourable, Fair, Unfavourable, VeryUnfavourable };
 enum class Application { Tunnel, Foundation, Slope };
+/// Puntajes por tabla (escalones) o por curvas continuas.
+enum class RmrFunctions { Discrete, Continuous };
 enum class StrikeRelation { PerpendicularDriveWithDip, PerpendicularDriveAgainstDip, Parallel };
 
 struct RmrClass {

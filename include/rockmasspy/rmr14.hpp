@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
@@ -30,6 +31,14 @@ enum class Roughness14 { VeryRough, Rough, Smooth, Slickensided };
 enum class Infilling14 { HardUnder5mm, HardOver5mm, SoftUnder5mm, SoftOver5mm };
 enum class Alteration14 { Unaltered, Moderately, Highly, Decomposed };
 enum class Excavation { DrillAndBlast, Tbm };
+
+/// Ayudas con las curvas continuas de Kundu et al. (2020), IJRMMS 129:104280; el RMR14 sigue recibiendo puntajes.
+inline double rmr14_strength_rating(double ucs_mpa) { return rating_ucs89_continuous(ucs_mpa); }
+
+inline double rmr14_joints_per_m_rating(double n_per_m) {
+    validation::require_non_negative(n_per_m, "n_per_m");
+    return std::clamp(42.35 - 7.4 * std::pow(n_per_m, 0.442), 0.0, 40.0);
+}
 
 inline int rating_continuity14(double m) {
     validation::require_non_negative(m, "continuity_m");

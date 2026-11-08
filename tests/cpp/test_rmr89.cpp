@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "error_of.hpp"
+#include "rockmasspy/rmr14.hpp"
 #include "rockmasspy/rmr89.hpp"
 
 using namespace rockmasspy;
@@ -126,4 +127,39 @@ TEST(Rmr89, HugeUcsWarnsAboutUnits) {
     EXPECT_EQ(r.warnings[0], "ucs_mpa > 400: check the unit is MPa (not kg/cm2)");
     in.ucs_mpa = 400;
     EXPECT_TRUE(rmr89(in).warnings.empty());
+}
+
+// Curvas continuas de Kundu et al. (2020); valores calculados con las ecuaciones.
+TEST(Rmr89Continuous, CurveValues) {
+    EXPECT_NEAR(rating_ucs89_continuous(1), 0.3173, 1e-4);    EXPECT_NEAR(rating_ucs89_continuous(50), 5.2398, 1e-4);
+    EXPECT_NEAR(rating_ucs89_continuous(90), 7.7248, 1e-4);   EXPECT_NEAR(rating_ucs89_continuous(100), 8.2796, 1e-4);
+    EXPECT_NEAR(rating_ucs89_continuous(250), 15.0, 1e-4);    EXPECT_NEAR(rating_ucs89_continuous(300), 15.0, 1e-4);
+    EXPECT_NEAR(rating_ucs89_continuous(0), 0.0, 1e-12);
+    EXPECT_NEAR(rating_rqd89_continuous(25), 5.7094, 1e-4);   EXPECT_NEAR(rating_rqd89_continuous(65), 13.5400, 1e-4);
+    EXPECT_NEAR(rating_rqd89_continuous(100), 19.9687, 1e-4);
+    EXPECT_NEAR(rating_spacing89_continuous(0.2), 8.8497, 1e-4);  EXPECT_NEAR(rating_spacing89_continuous(0.25), 9.6058, 1e-4);
+    EXPECT_NEAR(rating_spacing89_continuous(0.6), 13.1453, 1e-4); EXPECT_NEAR(rating_spacing89_continuous(3), 20.0, 1e-4);
+    EXPECT_NEAR(rating_spacing89_continuous(0), 0.0, 1e-12);      EXPECT_LE(rating_spacing89_continuous(5), 20.0);
+    EXPECT_NEAR(rating_is50_89_continuous(2), 5.3630, 1e-4);  EXPECT_NEAR(rating_is50_89_continuous(10), 14.1026, 1e-4);
+}
+TEST(Rmr89Continuous, Rmr14Helpers) {
+    EXPECT_NEAR(rmr14_joints_per_m_rating(0), 40.0, 1e-12);   EXPECT_NEAR(rmr14_joints_per_m_rating(5), 27.2778, 1e-4);
+    EXPECT_NEAR(rmr14_joints_per_m_rating(40), 4.5630, 1e-4); EXPECT_NEAR(rmr14_strength_rating(90), 7.7248, 1e-4);
+}
+TEST(Rmr89Continuous, ErrorsNameTheParameter) {
+    EXPECT_NE(error_of([] { rating_ucs89_continuous(-1); }).find("ucs_mpa"), std::string::npos);
+    EXPECT_NE(error_of([] { rating_rqd89_continuous(-1); }).find("rqd_pct"), std::string::npos);
+    EXPECT_NE(error_of([] { rating_spacing89_continuous(-1); }).find("spacing_m"), std::string::npos);
+    EXPECT_NE(error_of([] { rating_is50_89_continuous(-1); }).find("is50_mpa"), std::string::npos);
+    EXPECT_NE(error_of([] { rating_is50_89_continuous(1); }).find("Is50 <= 1 MPa"), std::string::npos);
+    EXPECT_NE(error_of([] { rmr14_joints_per_m_rating(-1); }).find("n_per_m"), std::string::npos);
+}
+TEST(Rmr89Continuous, ReadmeExample) {
+    Rmr89Input in; in.ucs_mpa = 90; in.rqd_pct = 65; in.spacing_m = 0.25; in.joint_condition_rating = 18;
+    in.water = Water::Damp; in.orientation = OrientationClass::Fair; in.application = Application::Tunnel;
+    EXPECT_NEAR(rmr89(in).rmr, 53.0, 1e-9);
+    EXPECT_EQ(rmr89(in).info.method_id, "RMR89");
+    in.functions = RmrFunctions::Continuous;
+    auto r = rmr89(in);
+    EXPECT_NEAR(r.rmr, 53.8707, 1e-4); EXPECT_EQ(r.info.method_id, "RMR89-continuous"); EXPECT_EQ(r.rmr_class.roman, "III");
 }

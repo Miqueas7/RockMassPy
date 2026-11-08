@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -72,6 +74,32 @@ inline int rating_spacing89(double spacing_m) {
     return 5;
 }
 
+// Curvas continuas ajustadas a las cartas de Bieniawski (1989): Kundu et al. (2020), IJRMMS 129:104280.
+// Sin redondeo ni saltos: solo se recorta al rango del puntaje.
+inline double rating_ucs89_continuous(double ucs_mpa) {
+    validation::require_non_negative(ucs_mpa, "ucs_mpa");
+    return std::clamp(0.42 * std::pow(std::fabs(ucs_mpa - 0.01), 0.65) - 0.1, 0.0, 15.0);
+}
+
+/// Is50 <= 1 MPa no tiene puntaje, igual que en la tabla.
+inline double rating_is50_89_continuous(double is50_mpa) {
+    validation::require_non_negative(is50_mpa, "is50_mpa");
+    if (is50_mpa <= 1.0)
+        throw std::invalid_argument("Domain error [RockMassPy]: parameter 'is50_mpa': Is50 <= 1 MPa: use UCS instead");
+    return std::clamp(-13.0 + 28.0 / (1.0 + std::pow(10.0, 0.02 - 0.15 * is50_mpa)), 0.0, 15.0);
+}
+
+inline double rating_rqd89_continuous(double rqd_pct) {
+    validation::require_in_range(rqd_pct, 0.0, 100.0, "rqd_pct");
+    return std::clamp(0.317 * std::pow(std::fabs(rqd_pct - 0.07), 0.9) - 0.02, 0.0, 20.0);
+}
+
+/// La ecuación original usa mm; aquí el espaciamiento entra en m.
+inline double rating_spacing89_continuous(double spacing_m) {
+    validation::require_non_negative(spacing_m, "spacing_m");
+    return std::clamp(1.94 * std::pow(1000.0 * spacing_m, 0.316) - 1.5, 0.0, 20.0);
+}
+
 /// Suma de persistencia, apertura, rugosidad, relleno e intemperismo (0-30).
 inline int jcond89(const JointCondition89& j) {
     validation::require_non_negative(j.persistence_m, "persistence_m");
@@ -102,10 +130,11 @@ struct Rmr89Input {
     std::optional<Water> water;
     std::optional<OrientationClass> orientation;
     Application application = Application::Tunnel;
+    RmrFunctions functions = RmrFunctions::Discrete;
 };
 
 struct Rmr89Result {
-    int r_strength, r_rqd, r_spacing;
+    double r_strength, r_rqd, r_spacing;
     double r_condition;
     int r_water;
     double basic;
@@ -124,9 +153,16 @@ inline Rmr89Result rmr89(const Rmr89Input& in) {
             "Domain error [RockMassPy]: give exactly one of 'joint_condition' or 'joint_condition_rating'");
 
     Rmr89Result r{};
-    r.r_strength = in.ucs_mpa ? rating_ucs89(*in.ucs_mpa) : rating_is50_89(*in.is50_mpa);
-    r.r_rqd = rating_rqd89(in.rqd_pct);
-    r.r_spacing = rating_spacing89(in.spacing_m);
+    const bool cont = in.functions == RmrFunctions::Continuous;
+    if (cont) {
+        r.r_strength = in.ucs_mpa ? rating_ucs89_continuous(*in.ucs_mpa) : rating_is50_89_continuous(*in.is50_mpa);
+        r.r_rqd = rating_rqd89_continuous(in.rqd_pct);
+        r.r_spacing = rating_spacing89_continuous(in.spacing_m);
+    } else {
+        r.r_strength = in.ucs_mpa ? rating_ucs89(*in.ucs_mpa) : rating_is50_89(*in.is50_mpa);
+        r.r_rqd = rating_rqd89(in.rqd_pct);
+        r.r_spacing = rating_spacing89(in.spacing_m);
+    }
     if (in.joint_condition) {
         r.r_condition = jcond89(*in.joint_condition);
     } else {
@@ -149,7 +185,11 @@ inline Rmr89Result rmr89(const Rmr89Input& in) {
     r.rmr = r.basic + r.adjustment;
     if (r.rmr < 0.0 || r.rmr > 100.0) r.warnings.push_back("rmr outside 0-100 after adjustments");
     r.rmr_class = rmr_class(r.rmr);
-    r.info = {"RMR89", Verification::Secondary, "Bieniawski (1989), as transcribed in Osinergmin (2017), Annex A.15"};
+    if (cont)
+        r.info = {"RMR89-continuous", Verification::Secondary,
+                  "Kundu et al. (2020), continuous functions fitted to Bieniawski (1989) charts"};
+    else
+        r.info = {"RMR89", Verification::Secondary, "Bieniawski (1989), as transcribed in Osinergmin (2017), Annex A.15"};
     return r;
 }
 

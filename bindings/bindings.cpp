@@ -114,6 +114,8 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_rw("infilling", &JointCondition89::infilling)
         .def_rw("weathering", &JointCondition89::weathering);
 
+    nb::enum_<RmrFunctions>(m, "RmrFunctions", "Discrete (table) or continuous (Kundu et al. 2020) RMR ratings.")
+        .value("Discrete", RmrFunctions::Discrete).value("Continuous", RmrFunctions::Continuous);
     nb::class_<Rmr89Input>(m, "Rmr89Input", "RMR89 inputs (exactly one of ucs/is50 and of joint condition forms).")
         .def(nb::init<>())
         .def_rw("ucs_mpa", &Rmr89Input::ucs_mpa)
@@ -124,7 +126,8 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_rw("joint_condition_rating", &Rmr89Input::joint_condition_rating)
         .def_rw("water", &Rmr89Input::water)
         .def_rw("orientation", &Rmr89Input::orientation)
-        .def_rw("application", &Rmr89Input::application);
+        .def_rw("application", &Rmr89Input::application)
+        .def_rw("functions", &Rmr89Input::functions);
 
     nb::class_<Rmr89Result>(m, "Rmr89Result")
         .def_ro("r_strength", &Rmr89Result::r_strength).def_ro("r_rqd", &Rmr89Result::r_rqd)
@@ -138,6 +141,12 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("orientation_adjustment", &orientation_adjustment, nb::arg("c"), nb::arg("app"));
     m.def("rmr_class", &rmr_class, nb::arg("rmr"));
     m.def("jcond89", &jcond89, nb::arg("joint"));
+    m.def("rating_ucs89_continuous", &rating_ucs89_continuous, nb::arg("ucs_mpa"));
+    m.def("rating_is50_89_continuous", &rating_is50_89_continuous, nb::arg("is50_mpa"));
+    m.def("rating_rqd89_continuous", &rating_rqd89_continuous, nb::arg("rqd_pct"));
+    m.def("rating_spacing89_continuous", &rating_spacing89_continuous, nb::arg("spacing_m"));
+    m.def("rmr14_strength_rating", &rmr14_strength_rating, nb::arg("ucs_mpa"));
+    m.def("rmr14_joints_per_m_rating", &rmr14_joints_per_m_rating, nb::arg("n_per_m"));
     m.def("rmr89", &rmr89, nb::arg("input"), "RMR89 (Bieniawski 1989) with optional orientation adjustment.");
 
     nb::enum_<JointCondition76>(m, "JointCondition76")
