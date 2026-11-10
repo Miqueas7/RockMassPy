@@ -4,7 +4,7 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
-## [Unreleased]
+## [0.2.1] - 2026-11-10
 
 Fixes found while writing the complete notebook.
 
@@ -110,6 +110,7 @@ decides. Full documentation: <https://miqueas.dev/rockmasspy>.
   optional extras `io`, `viz`, `report` and `ml`; type stubs (`py.typed`).
 - Thirteen worked examples in `examples/` with synthetic data only.
 
+[0.2.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.0
