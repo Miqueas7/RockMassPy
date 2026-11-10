@@ -53,5 +53,6 @@ def write_html(report, path) -> Path:
            f"<h1>{escape(report.title)}</h1>{sub}{disc}"
            + "".join(_section(s, lang) for s in report.sections) + foot + "</body></html>")
     p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(doc, encoding="utf-8")
     return p

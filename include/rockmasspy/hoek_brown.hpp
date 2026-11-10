@@ -36,6 +36,7 @@ inline HbParams hb_params(double gsi, double mi, double d, HbEdition edition = H
     require_positive(mi, "mi");
     require_in_range(d, 0.0, 1.0, "d");
     HbParams p{};
+    // Las mismas ecuaciones en las dos ediciones: Hoek y Brown (2019) repiten las de 2002 (ec. 4 a 6)
     p.mb = mi * std::exp((gsi - 100.0) / (28.0 - 14.0 * d));
     p.s = std::exp((gsi - 100.0) / (9.0 - 3.0 * d));
     p.a = 0.5 + (std::exp(-gsi / 15.0) - std::exp(-20.0 / 3.0)) / 6.0;

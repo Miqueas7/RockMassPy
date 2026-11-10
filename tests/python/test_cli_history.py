@@ -178,7 +178,7 @@ def test_errors_exit_1(hist, tmp_path, capsys):
 
 
 def test_outputs_checked_before_reading(hist, tmp_path, capsys, monkeypatch):
-    """--report sin carpeta y --output que es un archivo fallan con 1 antes de leer el histórico, sin la ruta."""
+    """--output que es un archivo falla con 1 antes de leer el histórico, sin la ruta."""
     def no_leer(*a, **k):
         raise AssertionError("the history was read before checking the outputs")
 
@@ -186,10 +186,15 @@ def test_outputs_checked_before_reading(hist, tmp_path, capsys, monkeypatch):
     archivo = tmp_path / f"{SENT}.csv"
     archivo.write_text("x", encoding="utf-8")
     assert main(["history", str(hist["limpio"]), "--correlations", "-o", str(archivo)]) == 1
-    assert main(["history", str(hist["limpio"]), "--report", str(tmp_path / SENT / "informe.html")]) == 1
     cap = sin_centinela(capsys)
-    assert cap.out == "" and cap.err.splitlines() == ["error: --output must be a folder, not a file",
-                                                      "error: --report: its folder does not exist"]
+    assert cap.out == "" and cap.err.splitlines() == ["error: --output must be a folder, not a file"]
+
+
+def test_report_creates_its_folder(hist, tmp_path):
+    """--report en una carpeta que no existe la crea (hallazgo del notebook, 0.2.1)."""
+    out = tmp_path / "nueva" / "sub" / "informe.html"
+    assert main(["history", str(hist["limpio"]), "--correlations", "--report", str(out)]) in (0, 2)
+    assert out.is_file()
 
 
 def test_locked_history_exit_1(hist, tmp_path, capsys):

@@ -6,6 +6,7 @@ no llevan valores de columnas de identificación (solo códigos de sostenimiento
 
 from collections import Counter
 import math
+import zlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -193,6 +194,12 @@ def _int_arg(v, name, lo):
         raise ValueError(f"{name} must be an integer >= {lo}")
 
 
+def _tramo_seed(seed: int, id_tramo: str) -> int:
+    """Semilla propia de cada tramo: con una sola semilla para todos, todos los tramos usarían las mismas muestras.
+    Depende solo de la semilla y del id (no del orden de las filas), así que se reproduce."""
+    return zlib.crc32(f"{seed}/{id_tramo}".encode("utf-8"))
+
+
 def _with_probabilities(r: TramoResult, lt: LaborTable, rows, iterations, sampling, seed, sheet=TRAMOS_SHEET) -> TramoResult:
     t, tab = r.tramo, lt.table
     for d in rows:
@@ -245,7 +252,8 @@ def classify_tramos(tramos: Iterable[Tramo], tables: Iterable[LaborTable], *,
             continue
         r = _classify(t, lt)
         if t.id_tramo in per and r.label is not None:
-            r = _with_probabilities(r, lt, per[t.id_tramo], iterations, sampling, seed, tramos_sheet)
+            r = _with_probabilities(r, lt, per[t.id_tramo], iterations, sampling, _tramo_seed(seed, t.id_tramo),
+                                    tramos_sheet)
         out.append(r)
     return out
 
@@ -261,11 +269,13 @@ def summarize(results: Iterable[TramoResult]) -> BatchSummary:
 
 
 def _percent_text(probs: dict[str, float]) -> str:
-    """`III 59 %; IV 41 %`: de mayor a menor, enteros que suman 100 (resto repartido por mayor fracción)."""
-    items = [(lb, p) for lb, p in probs.items() if p >= 0.005]
-    tiny = [lb for lb, p in probs.items() if 0 < p < 0.005]
+    """`III 59 %; IV 41 %`: de mayor a menor, en enteros (resto repartido por mayor fracción); bajo 1 % dice `<1 %`,
+    nunca `0 %`. Los enteros suman 100 menos lo que se fue a las clases de `<1 %`."""
+    items = [(lb, p) for lb, p in probs.items() if p >= 0.01]
+    tiny = [lb for lb, p in probs.items() if 0 < p < 0.01]
     pct = {lb: int(p * 100 + 1e-9) for lb, p in items}
-    for lb, _ in sorted(items, key=lambda x: x[1] * 100 - pct[x[0]], reverse=True)[:100 - sum(pct.values())]:
+    target = round(100 * math.fsum(p for _, p in items))
+    for lb, _ in sorted(items, key=lambda x: x[1] * 100 - pct[x[0]], reverse=True)[:target - sum(pct.values())]:
         pct[lb] += 1
     return "; ".join([f"{lb} {pct[lb]} %" for lb, _ in sorted(items, key=lambda x: -x[1])] + [f"{lb} <1 %" for lb in tiny])
 

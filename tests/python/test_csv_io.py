@@ -180,3 +180,9 @@ def test_puntajes_con_tildes_y_mayusculas(tmp_path):
     f.write_text(txt.replace(",numerico,", ",Numérico,").replace(",mayor,", ",Mayor,").replace(",menor,", ",MENOR,"),
                  encoding="utf-8-sig")
     assert rm.load_csv_dir(tmp_path) == t
+
+
+def test_support_catalog_csv_rejects_a_folder(tmp_path):
+    """Una carpeta da un mensaje claro, no el PermissionError de Windows (hallazgo del notebook, 0.2.1)."""
+    with pytest.raises(ValueError, match="CSV file, not a folder"):
+        rm.load_support_catalog_csv(tmp_path)

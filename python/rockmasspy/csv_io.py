@@ -107,6 +107,9 @@ def _csv_files(path, hojas) -> dict:
 def load_support_catalog_csv(path) -> SupportCatalog:
     """Lee un solo CSV de tipos de sostenimiento (el archivo, no la carpeta)."""
     p = Path(path)
+    if p.is_dir():  # en Windows abrir una carpeta da PermissionError, que no dice qué falta
+        raise ValueError("load_support_catalog_csv expects the path of the CSV file, not a folder "
+                         "(use load_csv_dir for a folder)")
     return _catalog(_CsvSource({p.stem: p}), p.stem)[1]
 
 

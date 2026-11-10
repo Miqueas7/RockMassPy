@@ -4,6 +4,24 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
+## [Unreleased]
+
+Fixes found while writing the complete notebook.
+
+### Fixed
+
+- With `--distributions`, each tramo now draws its own samples: its seed comes from `--seed` and its `id_tramo`, so
+  results are reproducible and no longer correlated across tramos. Probabilities change slightly for the same seed.
+- The probability text no longer shows `0 %` for classes between 0.5 and 1 %: anything under 1 % shows `<1 %`.
+- `load_support_catalog_csv` given a folder now says it expects the CSV file (on Windows it raised `PermissionError`).
+- `rockmass history --report` and the Word and HTML report writers create the destination folder if it is missing.
+
+### Documented
+
+- `hb_params` gives the same mb, s and a for `HB2002` and `HB2018`: Hoek & Brown (2019) keep the 2002 equations; the
+  2018 edition changes the method id and adds the warning on D.
+- `available_profiles()` returns the path of each profile's JSON file; use `sorted(available_profiles())` for the ids.
+
 ## [0.2.0] - 2026-11-08
 
 Uncertainty in classifications.

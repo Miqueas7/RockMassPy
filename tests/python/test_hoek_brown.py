@@ -68,3 +68,11 @@ def test_normal_shear_just_above_tensile_is_finite():
     st = rm.hb_tensile(50, p)
     r = rm.hb_normal_shear(st + 1e-9 * max(1.0, abs(st)), 50, p)
     assert math.isfinite(r.sigma_n_mpa) and math.isfinite(r.tau_mpa) and r.tau_mpa > 0
+
+
+def test_ediciones_2002_y_2018_mismos_parametros():
+    """Hoek y Brown (2019) repiten las ec. de 2002: cambian el id y el aviso de D, no mb, s ni a."""
+    a, b = rm.hb_params(45, 10, 0.5, rm.HbEdition.HB2002), rm.hb_params(45, 10, 0.5, rm.HbEdition.HB2018)
+    assert (a.mb, a.s, a.a) == (b.mb, b.s, b.a)
+    assert (a.info.method_id, b.info.method_id) == ("HB-2002", "HB-2018")
+    assert not a.warnings and b.warnings

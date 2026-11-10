@@ -232,3 +232,18 @@ def test_cli_error_names_real_sheet(tmp_path, capsys):
                  "-o", str(tmp_path / "r.csv")])
     cap = capsys.readouterr()
     assert code == 1 and "sheet 'Hoja1', row 2" in cap.err and "ZZSENT" not in cap.err
+
+
+def test_probability_between_half_and_one_percent_shows_less_than_one():
+    """Entre 0.5 y 1 % salía «0 %» (hallazgo del notebook, 0.2.1)."""
+    from rockmasspy.batch import _percent_text
+    assert _percent_text({"III": 0.497, "IV": 0.497, "V": 0.006}) == "III 50 %; IV 49 %; V <1 %"
+
+
+def test_each_tramo_gets_its_own_samples():
+    """Dos tramos con la misma distribución no comparten las muestras (semilla propia por tramo, 0.2.1)."""
+    from rockmasspy.batch import _tramo_seed
+    assert _tramo_seed(3, "T1") != _tramo_seed(3, "T2") and _tramo_seed(3, "T1") == _tramo_seed(3, "T1")
+    a, b = run([tr(rmr_valor=41), tr("T2", rmr_valor=41)], [drow(), drow("T2", fila=3)], iterations=300, seed=3,
+               sampling="monte_carlo")
+    assert a.probabilities != b.probabilities

@@ -284,7 +284,11 @@ def _profiles_dir():
 
 
 def available_profiles() -> dict:
-    """profile_id -> archivo JSON de la carpeta `profiles/` del paquete."""
+    """profile_id -> archivo JSON de la carpeta `profiles/` del paquete.
+
+    Los valores son rutas absolutas dentro del paquete instalado (para leer el perfil con `load_profile`). Para
+    mostrar solo los perfiles disponibles: `sorted(available_profiles())`.
+    """
     found: dict = {}
     for entry in sorted(_profiles_dir().iterdir(), key=lambda e: e.name):
         if not entry.name.endswith(".json"):

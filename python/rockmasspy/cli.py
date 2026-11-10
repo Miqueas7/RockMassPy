@@ -769,8 +769,6 @@ def _history(a) -> int:
     if a.report and ext not in (".docx", ".html"):
         raise ValueError("report must end in .docx or .html")
     # las salidas se validan antes de leer y ajustar; los mensajes no llevan la ruta (puede nombrar la mina)
-    if a.report and not Path(a.report).resolve().parent.is_dir():
-        raise ValueError("--report: its folder does not exist")
     if a.output and Path(a.output).is_file():
         raise ValueError("--output must be a folder, not a file")
     level3_only = [f for f, v in (("--quality", a.quality), ("--model-output", a.model_output),

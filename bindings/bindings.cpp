@@ -381,7 +381,9 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("value", &ModulusResult::value).def_ro("unit", &ModulusResult::unit)
         .def_ro("info", &ModulusResult::info).def_ro("warnings", &ModulusResult::warnings);
     m.def("hb_params", &hb_params, nb::arg("gsi"), nb::arg("mi"), nb::arg("d"), nb::arg("edition") = HbEdition::HB2018,
-          "Hoek-Brown mb, s, a from GSI, mi and D.");
+          "Hoek-Brown mb, s, a from GSI, mi and D. HB2002 and HB2018 give the same mb, s and a: Hoek & Brown "
+          "(2019) keep the 2002 equations (eqs. 4-6); the 2018 edition changes the method id and adds the warning "
+          "that D applies only to the blast-damaged zone (Table 2).");
     m.def("hb_sigma1", &hb_sigma1, nb::arg("sigma3_mpa"), nb::arg("sigma_ci_mpa"), nb::arg("params"));
     nb::class_<NormalShear>(m, "NormalShear", "Normal and shear stress (MPa) on the Hoek-Brown envelope.")
         .def_ro("sigma_n_mpa", &NormalShear::sigma_n_mpa).def_ro("tau_mpa", &NormalShear::tau_mpa);

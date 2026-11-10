@@ -103,5 +103,6 @@ def write_docx(report, path, *, author: str = "") -> Path:
     footer.paragraphs[0].text = report.disclaimer
     footer.add_paragraph(f"{t('version', lang)} {report.version} · {t('date', lang)} {report.date}")
     p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(p))
     return p
