@@ -5,16 +5,16 @@ import rockmasspy as rm
 
 
 @pytest.mark.parametrize("fn,x,y", [
-    (rm.rating_ucs89_continuous, 1, 0.3173), (rm.rating_ucs89_continuous, 50, 5.2398),
-    (rm.rating_ucs89_continuous, 90, 7.7248), (rm.rating_ucs89_continuous, 100, 8.2796),
+    (rm.rating_ucs89_continuous, 1, 0.4073), (rm.rating_ucs89_continuous, 50, 5.3298),
+    (rm.rating_ucs89_continuous, 90, 7.8148), (rm.rating_ucs89_continuous, 100, 8.3696),
     (rm.rating_ucs89_continuous, 250, 15.0), (rm.rating_ucs89_continuous, 300, 15.0),
     (rm.rating_rqd89_continuous, 25, 5.7094), (rm.rating_rqd89_continuous, 65, 13.5400),
     (rm.rating_rqd89_continuous, 100, 19.9687),
     (rm.rating_spacing89_continuous, 0.2, 8.8497), (rm.rating_spacing89_continuous, 0.25, 9.6058),
     (rm.rating_spacing89_continuous, 0.6, 13.1453), (rm.rating_spacing89_continuous, 3, 20.0),
     (rm.rating_is50_89_continuous, 2, 5.3630), (rm.rating_is50_89_continuous, 10, 14.1026),
-    (rm.rmr14_joints_per_m_rating, 0, 40.0), (rm.rmr14_joints_per_m_rating, 5, 27.2778),
-    (rm.rmr14_joints_per_m_rating, 40, 4.5630), (rm.rmr14_strength_rating, 90, 7.7248),
+    (rm.rmr14_joints_per_m_rating, 0, 40.0), (rm.rmr14_joints_per_m_rating, 5, 27.2535),
+    (rm.rmr14_joints_per_m_rating, 40, 4.4234), (rm.rmr14_strength_rating, 90, 7.8148),
 ])
 def test_values(fn, x, y):
     assert fn(x) == pytest.approx(y, abs=1e-4)
@@ -47,7 +47,7 @@ def test_rmr89_modes():
     d = rm.rmr89(_input(rm.RmrFunctions.Discrete))
     assert d.rmr == 53.0 and d.info.method_id == "RMR89" and d.r_strength == 7.0
     c = rm.rmr89(_input(rm.RmrFunctions.Continuous))
-    assert c.rmr == pytest.approx(53.8707, abs=1e-4)
+    assert c.rmr == pytest.approx(53.9607, abs=1e-4)
     assert c.info.method_id == "RMR89-continuous" and c.rmr_class.roman == "III"
 
 

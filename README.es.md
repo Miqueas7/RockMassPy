@@ -163,7 +163,7 @@ table = rm.LaborTable("gallery", rm.SupportCatalog([rm.SupportType("I", 1), rm.S
                       rm.RangeTable("RMR", "RMR89", [rm.RangeClass(0, 68, "fair", "II"), rm.RangeClass(68, 100, "good", "I")]))
 u = rm.classification_uncertainty("RMR89", base, {"ucs_mpa": pb.normal(90, 15, 50, 130), "rqd_pct": pb.uniform(55, 85)},
                                   table=table, n=2000, seed=1)
-print(round(u.outputs["rmr"].mean, 1), u.class_probabilities)   # 67.4 {'fair': 0.5995, 'good': 0.4005}
+print(round(u.outputs["rmr"].mean, 1), u.class_probabilities)   # 67.5 {'fair': 0.583, 'good': 0.417}
 ```
 
 `RmrFunctions.Continuous` usa funciones continuas ajustadas a las gráficas de Bieniawski (1989) (Kundu et al., 2020;

@@ -77,9 +77,10 @@ inline int rating_spacing89(double spacing_m) {
 // Curvas continuas ajustadas a las cartas de Bieniawski (1989): Kundu et al. (2020), IJRMMS 129:104280.
 // Sin redondeo ni saltos: solo se recorta al rango del puntaje.
 // La ecuación publicada usa |x - c|; max(x - c, 0) mantiene la curva monótona y es idéntico para x >= c.
+// Constantes de la Tabla 3 del artículo; QuickRMR 1.0.0 usa -0.1 en el UCS y 0.442 en las juntas/m del RMR14.
 inline double rating_ucs89_continuous(double ucs_mpa) {
     validation::require_non_negative(ucs_mpa, "ucs_mpa");
-    return std::clamp(0.42 * std::pow(std::max(ucs_mpa - 0.01, 0.0), 0.65) - 0.1, 0.0, 15.0);
+    return std::clamp(0.42 * std::pow(std::max(ucs_mpa - 0.01, 0.0), 0.65) - 0.01, 0.0, 15.0);
 }
 
 /// Is50 <= 1 MPa no tiene puntaje, igual que en la tabla.

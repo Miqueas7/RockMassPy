@@ -131,8 +131,8 @@ TEST(Rmr89, HugeUcsWarnsAboutUnits) {
 
 // Curvas continuas de Kundu et al. (2020); valores calculados con las ecuaciones.
 TEST(Rmr89Continuous, CurveValues) {
-    EXPECT_NEAR(rating_ucs89_continuous(1), 0.3173, 1e-4);    EXPECT_NEAR(rating_ucs89_continuous(50), 5.2398, 1e-4);
-    EXPECT_NEAR(rating_ucs89_continuous(90), 7.7248, 1e-4);   EXPECT_NEAR(rating_ucs89_continuous(100), 8.2796, 1e-4);
+    EXPECT_NEAR(rating_ucs89_continuous(1), 0.4073, 1e-4);    EXPECT_NEAR(rating_ucs89_continuous(50), 5.3298, 1e-4);
+    EXPECT_NEAR(rating_ucs89_continuous(90), 7.8148, 1e-4);   EXPECT_NEAR(rating_ucs89_continuous(100), 8.3696, 1e-4);
     EXPECT_NEAR(rating_ucs89_continuous(250), 15.0, 1e-4);    EXPECT_NEAR(rating_ucs89_continuous(300), 15.0, 1e-4);
     EXPECT_NEAR(rating_ucs89_continuous(0), 0.0, 1e-12);
     EXPECT_NEAR(rating_rqd89_continuous(25), 5.7094, 1e-4);   EXPECT_NEAR(rating_rqd89_continuous(65), 13.5400, 1e-4);
@@ -143,8 +143,8 @@ TEST(Rmr89Continuous, CurveValues) {
     EXPECT_NEAR(rating_is50_89_continuous(2), 5.3630, 1e-4);  EXPECT_NEAR(rating_is50_89_continuous(10), 14.1026, 1e-4);
 }
 TEST(Rmr89Continuous, Rmr14Helpers) {
-    EXPECT_NEAR(rmr14_joints_per_m_rating(0), 40.0, 1e-12);   EXPECT_NEAR(rmr14_joints_per_m_rating(5), 27.2778, 1e-4);
-    EXPECT_NEAR(rmr14_joints_per_m_rating(40), 4.5630, 1e-4); EXPECT_NEAR(rmr14_strength_rating(90), 7.7248, 1e-4);
+    EXPECT_NEAR(rmr14_joints_per_m_rating(0), 40.0, 1e-12);   EXPECT_NEAR(rmr14_joints_per_m_rating(5), 27.2535, 1e-4);
+    EXPECT_NEAR(rmr14_joints_per_m_rating(40), 4.4234, 1e-4); EXPECT_NEAR(rmr14_strength_rating(90), 7.8148, 1e-4);
 }
 TEST(Rmr89Continuous, ErrorsNameTheParameter) {
     EXPECT_NE(error_of([] { rating_ucs89_continuous(-1); }).find("ucs_mpa"), std::string::npos);
@@ -161,7 +161,7 @@ TEST(Rmr89Continuous, ReadmeExample) {
     EXPECT_EQ(rmr89(in).info.method_id, "RMR89");
     in.functions = RmrFunctions::Continuous;
     auto r = rmr89(in);
-    EXPECT_NEAR(r.rmr, 53.8707, 1e-4); EXPECT_EQ(r.info.method_id, "RMR89-continuous"); EXPECT_EQ(r.rmr_class.roman, "III");
+    EXPECT_NEAR(r.rmr, 53.9607, 1e-4); EXPECT_EQ(r.info.method_id, "RMR89-continuous"); EXPECT_EQ(r.rmr_class.roman, "III");
 }
 TEST(Rmr89Continuous, MonotoneAtBottomOfRange) {
     for (double x : {0.0, 0.03, 0.07}) EXPECT_EQ(rating_rqd89_continuous(x), 0.0);

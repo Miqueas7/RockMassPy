@@ -24,7 +24,7 @@ python main.py salida/
 - **Cerca de un borde** la clasificación avisa `near the boundary between classes ...` (RMR y GSI a 3 puntos o
   menos; Q dentro de un factor 1.25). Son valores provisionales por confirmar.
 - **Las curvas continuas** (`RMR89-continuous`) no redondean ni saltan entre clases de puntaje; son un ajuste a las
-  gráficas de Bieniawski (1989), por confirmar contra el artículo.
+  gráficas de Bieniawski (1989), verificado contra la Tabla 3 del artículo de Kundu et al. (2020).
 - **Las distribuciones las eliges tú.** La librería solo propaga lo que le das.
 - Si una muestra cae fuera del dominio del cálculo (RQD mayor que 100, Jn igual a 0) hay un error que nombra la
   variable; acota su mínimo y su máximo.

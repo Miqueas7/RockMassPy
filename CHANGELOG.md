@@ -4,12 +4,15 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
-## [0.2.1] - 2026-11-10
+## [0.2.1] - 2026-11-11
 
-Fixes found while writing the complete notebook.
+Fixes found while writing the complete notebook, and the continuous RMR curves checked against the paper.
 
 ### Fixed
 
+- Continuous RMR89 strength from UCS subtracts 0.01, not 0.1, and the RMR14 joints-per-metre rating uses the exponent
+  0.443, not 0.442, as in Table 3 of Kundu et al. (2020); the values came from QuickRMR 1.0.0. Continuous strength
+  ratings rise by 0.09 points (up to the cap of 15).
 - With `--distributions`, each tramo now draws its own samples: its seed comes from `--seed` and its `id_tramo`, so
   results are reproducible and no longer correlated across tramos. Probabilities change slightly for the same seed.
 - The probability text no longer shows `0 %` for classes between 0.5 and 1 %: anything under 1 % shows `<1 %`.
