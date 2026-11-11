@@ -197,3 +197,69 @@ def test_rmr14_data_and_rating_not_both(field, value, msg):
     setattr(i, field, value)
     with pytest.raises(ValueError, match=f"'{msg}', not both"):
         rm.rmr14(i)
+
+
+# QuickRMR 1.0.0 (Kundu et al., GPL): valores que da el programa, que redondea a 0.1. Solo se guardan los números;
+# coinciden con los nuestros salvo el redondeo.
+@pytest.mark.parametrize("fn,x,quick", [
+    (rm.rating_is50_89_continuous, 2, 5.4), (rm.rating_is50_89_continuous, 8, 13.3),
+    (rm.rating_rqd89_continuous, 30, 6.7), (rm.rating_rqd89_continuous, 80, 16.3),
+    (rm.rating_spacing89_continuous, 0.1, 6.8), (rm.rating_spacing89_continuous, 1.0, 15.7),
+    (rm.rmr14_joints_per_m_rating, 5, 27.3), (rm.rmr14_joints_per_m_rating, 20, 14.5),
+    (rm.rating_inflow89_continuous, 5, 10.3), (rm.rating_inflow89_continuous, 50, 2.7),
+    (rm.rating_water_pressure89_continuous, 0.1, 8.6), (rm.rating_water_pressure89_continuous, 0.4, 3.4),
+    (rm.rating_persistence89_continuous, 2, 3.8), (rm.rating_persistence89_continuous, 8, 1.8),
+    (rm.rating_aperture89_continuous, 0.5, 3.4), (rm.rating_aperture89_continuous, 3, 1.1),
+    (rm.rating_roughness89_continuous, 7, 2.1),
+    (rm.rating_infilling89_continuous, 3, 5.0), (rm.rating_infilling89_continuous, 8, 2.2),
+    (_soft89, 2, 4.6), (_soft89, 4, 1.8),
+    (rm.rating_weathering89_continuous, 25, 4.8), (rm.rating_weathering89_continuous, 55, 1.6),
+    (rm.rmr14_continuity_rating, 3, 3.5), (rm.rmr14_roughness_rating, 7, 1.8), (rm.rmr14_infilling_rating, 3, 3.6),
+    (_soft14, 2, 1.7), (rm.rmr14_weathering_rating, 30, 3.6), (rm.rmr14_alterability_rating, 40, 3.7),
+])
+def test_matches_quickrmr(fn, x, quick):
+    assert abs(fn(x) - quick) <= 0.05 + 1e-9
+
+
+def test_known_differences_with_quickrmr():
+    # QuickRMR resta 0.1 en la UCS (el artículo, 0.01): 7.7 frente a 7.81
+    assert rm.rating_ucs89_continuous(90) == pytest.approx(7.8148, abs=1e-4)
+    # exponente 0.442 en las juntas/m (el artículo, 0.443): con 40 juntas/m QuickRMR da 4.6
+    assert rm.rmr14_joints_per_m_rating(40) == pytest.approx(4.4234, abs=1e-4)
+    # QuickRMR corta la alterabilidad en 5; la Fig. 6f del artículo llega a 10, el máximo de la tabla
+    assert rm.rmr14_alterability_rating(95) == pytest.approx(9.6595, abs=1e-4)
+    assert rm.rmr14_alterability_rating(100) == 10.0
+
+
+# En el centro de cada rango de la tabla, la curva cae entre los puntajes de los rangos vecinos (así ajustaron los
+# autores: la curva pasa por los escalones). (x, puntajes del rango anterior y siguiente); centro geométrico donde
+# la carta es logarítmica. El espaciado bajo 60 mm queda fuera: la propia carta de Bieniawski baja de 5 ahí.
+@pytest.mark.parametrize("fn,x,a,b", [
+    (rm.rating_ucs89_continuous, 3, 0, 2), (rm.rating_ucs89_continuous, 15, 1, 4),
+    (rm.rating_ucs89_continuous, 37.5, 2, 7), (rm.rating_ucs89_continuous, 75, 4, 12),
+    (rm.rating_ucs89_continuous, 175, 7, 15),
+    (rm.rating_rqd89_continuous, 12.5, 3, 8), (rm.rating_rqd89_continuous, 37.5, 3, 13),
+    (rm.rating_rqd89_continuous, 62.5, 8, 17), (rm.rating_rqd89_continuous, 82.5, 13, 20),
+    (rm.rating_rqd89_continuous, 95, 17, 20),
+    (rm.rating_spacing89_continuous, 0.13, 5, 10), (rm.rating_spacing89_continuous, 0.4, 8, 15),
+    (rm.rating_spacing89_continuous, 1.3, 10, 20),
+    (rm.rating_persistence89_continuous, 0.5, 4, 6), (rm.rating_persistence89_continuous, 2, 2, 6),
+    (rm.rating_persistence89_continuous, 6.5, 1, 4), (rm.rating_persistence89_continuous, 15, 0, 2),
+    (rm.rating_persistence89_continuous, 30, 0, 1),
+    (rm.rating_aperture89_continuous, 0.05, 4, 6), (rm.rating_aperture89_continuous, 0.5, 1, 5),
+    (rm.rating_aperture89_continuous, 3, 0, 4), (rm.rating_aperture89_continuous, 10, 0, 1),
+    (rm.rating_infilling89_continuous, 2.5, 2, 6), (rm.rating_infilling89_continuous, 10, 2, 4),
+    (_soft89, 2.5, 0, 6), (_soft89, 10, 0, 2),
+    (rm.rating_weathering89_continuous, 10, 4, 6), (rm.rating_weathering89_continuous, 30, 2, 5.5),
+    (rm.rating_weathering89_continuous, 50, 0.5, 4), (rm.rating_weathering89_continuous, 80, 0, 2),
+    (rm.rating_inflow89_continuous, 5, 7, 15), (rm.rating_inflow89_continuous, 17.5, 4, 10),
+    (rm.rating_inflow89_continuous, 56, 0, 7), (rm.rating_inflow89_continuous, 250, 0, 4),
+    (rm.rating_water_pressure89_continuous, 0.05, 7, 15), (rm.rating_water_pressure89_continuous, 0.15, 4, 10),
+    (rm.rating_water_pressure89_continuous, 0.35, 0, 7), (rm.rating_water_pressure89_continuous, 1, 0, 4),
+    (rm.rmr14_continuity_rating, 0.5, 4, 5), (rm.rmr14_continuity_rating, 2, 2, 5),
+    (rm.rmr14_continuity_rating, 6.5, 0, 4),
+    (rm.rmr14_alterability_rating, 15, 0, 4), (rm.rmr14_alterability_rating, 45, 0, 8),
+    (rm.rmr14_alterability_rating, 72.5, 4, 10), (rm.rmr14_alterability_rating, 92.5, 8, 10),
+])
+def test_continuous_between_neighbouring_table_ratings(fn, x, a, b):
+    assert a <= fn(x) <= b

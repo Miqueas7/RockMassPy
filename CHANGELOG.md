@@ -39,6 +39,10 @@ while writing the complete notebook.
 
 ### Documented
 
+- The continuous ratings were compared with QuickRMR 1.0.0, the authors' program: they match to its rounding (0.1)
+  except the two constants above and alterability, which QuickRMR cuts at 5 while Fig. 6f of the paper reaches 10.
+  At the centre of each range of the discrete tables, every curve falls between the ratings of the neighbouring
+  ranges, except spacing under 60 mm, where Bieniawski's own chart is below 5.
 - `hb_params` gives the same mb, s and a for `HB2002` and `HB2018`: Hoek & Brown (2019) keep the 2002 equations; the
   2018 edition changes the method id and adds the warning on D.
 - `available_profiles()` returns the path of each profile's JSON file; use `sorted(available_profiles())` for the ids.
