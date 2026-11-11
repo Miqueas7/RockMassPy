@@ -102,6 +102,66 @@ inline double rating_spacing89_continuous(double spacing_m) {
     return std::clamp(1.94 * std::pow(1000.0 * spacing_m, 0.316) - 1.5, 0.0, 20.0);
 }
 
+// Condición de juntas y agua (Tabla 3 del artículo). La rugosidad entra como JRC (Barton y Choubey) y el
+// intemperismo como índice *I5 (Matthews et al.), porque la tabla de Bieniawski los describe solo con palabras.
+inline double rating_persistence89_continuous(double persistence_m) {
+    validation::require_non_negative(persistence_m, "persistence_m");
+    return std::clamp(1.0 / (0.166 + 0.05 * persistence_m), 0.0, 6.0);
+}
+
+inline double rating_aperture89_continuous(double aperture_mm) {
+    validation::require_non_negative(aperture_mm, "aperture_mm");
+    return std::clamp(1.0 / (0.166 + 0.25 * aperture_mm), 0.0, 6.0);
+}
+
+inline double rating_roughness89_continuous(double jrc) {
+    validation::require_in_range(jrc, 0.0, 20.0, "jrc");
+    return 0.3 * jrc;
+}
+
+/// Espesor del relleno en mm (0 = sin relleno); `soft` elige la curva de relleno blando.
+inline double rating_infilling89_continuous(double infilling_mm, bool soft) {
+    validation::require_non_negative(infilling_mm, "infilling_mm");
+    const double x = infilling_mm;
+    return std::clamp(soft ? 162.0 / (27.0 + x * x * x) : 6.0 - 4.0 * std::pow(x, 4) / (256.0 + std::pow(x, 4)),
+                      0.0, 6.0);
+}
+
+/// *I5 en %: 100·(Ru5 − Rw1)/Ru5 con el martillo Schmidt tipo N.
+inline double rating_weathering89_continuous(double i5_pct) {
+    validation::require_in_range(i5_pct, 0.0, 100.0, "i5_pct");
+    return std::clamp(6.3 / (1.0 + std::pow(10.0, 0.032 * i5_pct - 1.3)), 0.0, 6.0);
+}
+
+/// Caudal por cada 10 m de túnel, en l/min.
+inline double rating_inflow89_continuous(double inflow_l_min) {
+    validation::require_non_negative(inflow_l_min, "inflow_l_min");
+    return std::clamp(165.0 / (inflow_l_min + 11.0), 0.0, 15.0);
+}
+
+/// Presión de agua en la junta entre el esfuerzo principal mayor. El eje de la Fig. 5e dice MPa, pero sus
+/// escalones (0.1, 0.2, 0.5) son los de esa razón en Bieniawski (1989).
+inline double rating_water_pressure89_continuous(double pressure_ratio) {
+    validation::require_non_negative(pressure_ratio, "pressure_ratio");
+    return std::clamp(2.4 / (pressure_ratio + 0.15) - 1.0, 0.0, 15.0);
+}
+
+struct JointCondition89Continuous {
+    double persistence_m = validation::unset;
+    double aperture_mm = validation::unset;
+    double jrc = validation::unset;
+    double infilling_mm = validation::unset;
+    bool soft_infilling = false;
+    double i5_pct = validation::unset;
+};
+
+/// Suma de las cinco curvas (0-30): se pasa a Rmr89Input.joint_condition_rating.
+inline double jcond89_continuous(const JointCondition89Continuous& j) {
+    return rating_persistence89_continuous(j.persistence_m) + rating_aperture89_continuous(j.aperture_mm) +
+           rating_roughness89_continuous(j.jrc) + rating_infilling89_continuous(j.infilling_mm, j.soft_infilling) +
+           rating_weathering89_continuous(j.i5_pct);
+}
+
 /// Suma de persistencia, apertura, rugosidad, relleno e intemperismo (0-30).
 inline int jcond89(const JointCondition89& j) {
     validation::require_non_negative(j.persistence_m, "persistence_m");
@@ -122,7 +182,8 @@ inline int rating_water89(Water w) {
     return table[static_cast<int>(w)];
 }
 
-/// Exactamente uno de ucs_mpa/is50_mpa y uno de joint_condition/joint_condition_rating (0-30).
+/// Exactamente uno de ucs_mpa/is50_mpa, uno de joint_condition/joint_condition_rating (0-30) y uno de
+/// water/water_rating (0-15).
 struct Rmr89Input {
     std::optional<double> ucs_mpa, is50_mpa;
     double rqd_pct = validation::unset;
@@ -130,6 +191,7 @@ struct Rmr89Input {
     std::optional<JointCondition89> joint_condition;
     std::optional<double> joint_condition_rating;
     std::optional<Water> water;
+    std::optional<double> water_rating;
     std::optional<OrientationClass> orientation;
     Application application = Application::Tunnel;
     RmrFunctions functions = RmrFunctions::Discrete;
@@ -138,7 +200,7 @@ struct Rmr89Input {
 struct Rmr89Result {
     double r_strength, r_rqd, r_spacing;
     double r_condition;
-    int r_water;
+    double r_water;
     double basic;
     double adjustment;
     double rmr;
@@ -171,7 +233,14 @@ inline Rmr89Result rmr89(const Rmr89Input& in) {
         validation::require_in_range(*in.joint_condition_rating, 0.0, 30.0, "joint_condition_rating");
         r.r_condition = *in.joint_condition_rating;
     }
-    r.r_water = rating_water89(validation::require_set(in.water, "water"));
+    if (in.water && in.water_rating)
+        throw std::invalid_argument("Domain error [RockMassPy]: give exactly one of 'water' or 'water_rating'");
+    if (in.water_rating) {
+        validation::require_in_range(*in.water_rating, 0.0, 15.0, "water_rating");
+        r.r_water = *in.water_rating;
+    } else {
+        r.r_water = rating_water89(validation::require_set(in.water, "water"));
+    }
     r.basic = r.r_strength + r.r_rqd + r.r_spacing + r.r_condition + r.r_water;
 
     if (in.ucs_mpa && *in.ucs_mpa > 400.0)

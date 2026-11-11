@@ -164,7 +164,18 @@ print(round(u.outputs["rmr"].mean, 1), u.class_probabilities)   # 67.5 {'fair': 
 ```
 
 `RmrFunctions.Continuous` uses continuous functions fitted to the Bieniawski (1989) charts (Kundu et al., 2020; method
-`RMR89-continuous`), so a small change in UCS, RQD or spacing moves the rating smoothly. Classification against a
+`RMR89-continuous`), so a small change in UCS, RQD or spacing moves the rating smoothly. The same paper gives curves
+for the joint condition (roughness as JRC, weathering as the Schmidt-hammer index *I5) and for groundwater; pass their
+sums as ratings:
+
+```python
+j = rm.JointCondition89Continuous(persistence_m=2, aperture_mm=0.5, jrc=10, infilling_mm=2, i5_pct=30)
+base.joint_condition_rating = rm.jcond89_continuous(j)              # 20.3 of 30
+base.water, base.water_rating = None, rm.rating_inflow89_continuous(25)   # 25 l/min per 10 m: 4.6 of 15
+```
+
+For RMR14, `jcond14_continuous`, `rmr14_alterability_rating` and the other `rmr14_*_rating` helpers feed
+`Rmr14Input.joint_condition_rating`, `water_rating` and `alterability_rating`. Classification against a
 range table warns `near the boundary between classes {a} and {b}` when the value is within 3 points of the edge
 (RMR, GSI) or within a factor of 1.25 (Q); these two margins are provisional. In batch, a `Distribuciones` sheet per
 `id_tramo` adds `clase_probable`, `prob_clase_probable`, `prob_clase`, `probabilidades` and `n_validas` to the results

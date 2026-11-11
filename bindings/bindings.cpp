@@ -114,9 +114,29 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_rw("infilling", &JointCondition89::infilling)
         .def_rw("weathering", &JointCondition89::weathering);
 
+    nb::class_<JointCondition89Continuous>(m, "JointCondition89Continuous",
+                                           "RMR89 joint condition as measurements for the continuous curves "
+                                           "(Kundu et al. 2020): JRC for roughness, *I5 (%) for weathering.")
+        .def(nb::init<>())
+        .def("__init__",
+             [](JointCondition89Continuous* self, double persistence_m, double aperture_mm, double jrc,
+                double infilling_mm, double i5_pct, bool soft_infilling) {
+                 new (self) JointCondition89Continuous{persistence_m, aperture_mm, jrc, infilling_mm, soft_infilling,
+                                                       i5_pct};
+             },
+             nb::arg("persistence_m"), nb::arg("aperture_mm"), nb::arg("jrc"), nb::arg("infilling_mm"),
+             nb::arg("i5_pct"), nb::arg("soft_infilling") = false)
+        .def_rw("persistence_m", &JointCondition89Continuous::persistence_m)
+        .def_rw("aperture_mm", &JointCondition89Continuous::aperture_mm)
+        .def_rw("jrc", &JointCondition89Continuous::jrc)
+        .def_rw("infilling_mm", &JointCondition89Continuous::infilling_mm)
+        .def_rw("soft_infilling", &JointCondition89Continuous::soft_infilling)
+        .def_rw("i5_pct", &JointCondition89Continuous::i5_pct);
+
     nb::enum_<RmrFunctions>(m, "RmrFunctions", "Discrete (table) or continuous (Kundu et al. 2020) RMR ratings.")
         .value("Discrete", RmrFunctions::Discrete).value("Continuous", RmrFunctions::Continuous);
-    nb::class_<Rmr89Input>(m, "Rmr89Input", "RMR89 inputs (exactly one of ucs/is50 and of joint condition forms).")
+    nb::class_<Rmr89Input>(m, "Rmr89Input",
+                           "RMR89 inputs (exactly one of ucs/is50, of the joint condition forms and of water/water_rating).")
         .def(nb::init<>())
         .def_rw("ucs_mpa", &Rmr89Input::ucs_mpa)
         .def_rw("is50_mpa", &Rmr89Input::is50_mpa)
@@ -125,6 +145,7 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_rw("joint_condition", &Rmr89Input::joint_condition)
         .def_rw("joint_condition_rating", &Rmr89Input::joint_condition_rating)
         .def_rw("water", &Rmr89Input::water)
+        .def_rw("water_rating", &Rmr89Input::water_rating)
         .def_rw("orientation", &Rmr89Input::orientation)
         .def_rw("application", &Rmr89Input::application)
         .def_rw("functions", &Rmr89Input::functions);
@@ -145,6 +166,20 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("rating_is50_89_continuous", &rating_is50_89_continuous, nb::arg("is50_mpa"));
     m.def("rating_rqd89_continuous", &rating_rqd89_continuous, nb::arg("rqd_pct"));
     m.def("rating_spacing89_continuous", &rating_spacing89_continuous, nb::arg("spacing_m"));
+    m.def("rating_persistence89_continuous", &rating_persistence89_continuous, nb::arg("persistence_m"));
+    m.def("rating_aperture89_continuous", &rating_aperture89_continuous, nb::arg("aperture_mm"));
+    m.def("rating_roughness89_continuous", &rating_roughness89_continuous, nb::arg("jrc"),
+          "Roughness rating from the joint roughness coefficient (JRC 0-20, Barton & Choubey): 0.3*JRC.");
+    m.def("rating_infilling89_continuous", &rating_infilling89_continuous, nb::arg("infilling_mm"),
+          nb::arg("soft") = false, "Infilling rating from its thickness in mm (0 = none); soft=True for soft infilling.");
+    m.def("rating_weathering89_continuous", &rating_weathering89_continuous, nb::arg("i5_pct"),
+          "Weathering rating from the *I5 index (%), 100*(Ru5 - Rw1)/Ru5 with an N-type Schmidt hammer.");
+    m.def("rating_inflow89_continuous", &rating_inflow89_continuous, nb::arg("inflow_l_min"),
+          "Groundwater rating from the inflow per 10 m of tunnel (l/min).");
+    m.def("rating_water_pressure89_continuous", &rating_water_pressure89_continuous, nb::arg("pressure_ratio"),
+          "Groundwater rating from joint water pressure / major principal stress.");
+    m.def("jcond89_continuous", &jcond89_continuous, nb::arg("joint"),
+          "Sum of the five continuous joint condition ratings (0-30), for Rmr89Input.joint_condition_rating.");
     m.def("rmr14_strength_rating", &rmr14_strength_rating, nb::arg("ucs_mpa"));
     m.def("rmr14_joints_per_m_rating", &rmr14_joints_per_m_rating, nb::arg("n_per_m"));
     m.def("rmr89", &rmr89, nb::arg("input"), "RMR89 (Bieniawski 1989) with optional orientation adjustment.");
@@ -184,13 +219,33 @@ NB_MODULE(_rockmasspy_core, m) {
         .value("Decomposed", Alteration14::Decomposed);
     nb::enum_<Excavation>(m, "Excavation").value("DrillAndBlast", Excavation::DrillAndBlast)
         .value("Tbm", Excavation::Tbm);
-    nb::class_<Rmr14Input>(m, "Rmr14Input", "RMR14 inputs (strength and joint-frequency ratings read from the charts).")
+    nb::class_<JointCondition14Continuous>(m, "JointCondition14Continuous",
+                                           "RMR14 joint condition as measurements for the continuous curves "
+                                           "(Kundu et al. 2020): JRC for roughness, *I5 (%) for alteration.")
+        .def(nb::init<>())
+        .def("__init__",
+             [](JointCondition14Continuous* self, double continuity_m, double jrc, double infilling_mm, double i5_pct,
+                bool soft_infilling) {
+                 new (self) JointCondition14Continuous{continuity_m, jrc, infilling_mm, soft_infilling, i5_pct};
+             },
+             nb::arg("continuity_m"), nb::arg("jrc"), nb::arg("infilling_mm"), nb::arg("i5_pct"),
+             nb::arg("soft_infilling") = false)
+        .def_rw("continuity_m", &JointCondition14Continuous::continuity_m)
+        .def_rw("jrc", &JointCondition14Continuous::jrc)
+        .def_rw("infilling_mm", &JointCondition14Continuous::infilling_mm)
+        .def_rw("soft_infilling", &JointCondition14Continuous::soft_infilling)
+        .def_rw("i5_pct", &JointCondition14Continuous::i5_pct);
+    nb::class_<Rmr14Input>(m, "Rmr14Input",
+                           "RMR14 inputs (strength and joint-frequency ratings read from the charts; joint condition, "
+                           "water and alterability by their data or by their ratings).")
         .def(nb::init<>())
         .def_rw("strength_rating", &Rmr14Input::strength_rating)
         .def_rw("joints_per_m_rating", &Rmr14Input::joints_per_m_rating)
         .def_rw("continuity_m", &Rmr14Input::continuity_m).def_rw("roughness", &Rmr14Input::roughness)
         .def_rw("infilling", &Rmr14Input::infilling).def_rw("alteration", &Rmr14Input::alteration)
-        .def_rw("water", &Rmr14Input::water).def_rw("id2_pct", &Rmr14Input::id2_pct)
+        .def_rw("joint_condition_rating", &Rmr14Input::joint_condition_rating)
+        .def_rw("water", &Rmr14Input::water).def_rw("water_rating", &Rmr14Input::water_rating)
+        .def_rw("id2_pct", &Rmr14Input::id2_pct).def_rw("alterability_rating", &Rmr14Input::alterability_rating)
         .def_rw("orientation", &Rmr14Input::orientation).def_rw("excavation", &Rmr14Input::excavation)
         .def_rw("ice", &Rmr14Input::ice);
     nb::class_<Rmr14Result>(m, "Rmr14Result")
@@ -199,6 +254,17 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("info", &Rmr14Result::info).def_ro("warnings", &Rmr14Result::warnings);
     m.def("rating_continuity14", &rating_continuity14, nb::arg("m"));
     m.def("rating_id2_14", &rating_id2_14, nb::arg("id2_pct"));
+    m.def("rmr14_continuity_rating", &rmr14_continuity_rating, nb::arg("continuity_m"));
+    m.def("rmr14_roughness_rating", &rmr14_roughness_rating, nb::arg("jrc"),
+          "Roughness rating from the joint roughness coefficient (JRC 0-20): 0.25*JRC.");
+    m.def("rmr14_infilling_rating", &rmr14_infilling_rating, nb::arg("infilling_mm"), nb::arg("soft") = false,
+          "Infilling rating from its thickness in mm (0 = none); soft=True for soft infilling.");
+    m.def("rmr14_weathering_rating", &rmr14_weathering_rating, nb::arg("i5_pct"),
+          "Joint surface alteration rating from the *I5 index (%).");
+    m.def("rmr14_alterability_rating", &rmr14_alterability_rating, nb::arg("id2_pct"),
+          "Alterability rating from the slake durability index Id2 (%).");
+    m.def("jcond14_continuous", &jcond14_continuous, nb::arg("joint"),
+          "Sum of the four continuous joint condition ratings (0-20), for Rmr14Input.joint_condition_rating.");
     m.def("ice_bieniawski_celada", &ice_bieniawski_celada, nb::arg("rmr"), nb::arg("sigma_ci_mpa"), nb::arg("k0"),
           nb::arg("depth_m"), nb::arg("shape_factor_f"), "Elastic behaviour index (Bieniawski & Celada).");
     m.def("fs_face", &fs_face, nb::arg("ice"));

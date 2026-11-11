@@ -19,7 +19,7 @@ UNCERTAINTY_INFO = rm.MethodInfo(
     "Uncertainty-MC-LHS", rm.Verification.Secondary,
     "Hoek (2023) PRE ch. 9; sampling as in Probabilistic-MC-LHS")
 
-_VARS = {"RMR89": ("ucs_mpa", "is50_mpa", "rqd_pct", "spacing_m", "joint_condition_rating"),
+_VARS = {"RMR89": ("ucs_mpa", "is50_mpa", "rqd_pct", "spacing_m", "joint_condition_rating", "water_rating"),
          "Q": ("rqd_pct", "jn", "jr", "ja", "jw", "srf"),
          "GSI": ("jcond89", "rqd_pct"),
          "HB": ("gsi", "mi", "d")}
@@ -107,7 +107,7 @@ def classification_uncertainty(method: str, base, variables: Mapping[str, Distri
     work = rm.Rmr89Input() if method == "RMR89" else None
     if work is not None:  # copia de trabajo: la base no se toca
         for k in ("application", "functions", "is50_mpa", "joint_condition", "joint_condition_rating",
-                  "orientation", "rqd_pct", "spacing_m", "ucs_mpa", "water"):
+                  "orientation", "rqd_pct", "spacing_m", "ucs_mpa", "water", "water_rating"):
             setattr(work, k, getattr(base, k))
 
     def one(draw):

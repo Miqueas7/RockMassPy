@@ -11,7 +11,7 @@ authors:
   - family-names: "Quintanilla Ventura"
     given-names: "Miqueas"
     email: "miqueasq@gmail.com"
-version: "0.2.1"
+version: "0.3.0"
 date-released: "2026-11-11"
 license: MIT
 repository-code: "https://github.com/Miqueas7/RockMassPy"

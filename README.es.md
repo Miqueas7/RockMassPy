@@ -167,8 +167,18 @@ print(round(u.outputs["rmr"].mean, 1), u.class_probabilities)   # 67.5 {'fair': 
 ```
 
 `RmrFunctions.Continuous` usa funciones continuas ajustadas a las gráficas de Bieniawski (1989) (Kundu et al., 2020;
-método `RMR89-continuous`), así que un cambio pequeño de UCS, RQD o espaciamiento mueve el puntaje sin saltos. La
-clasificación con una tabla por rangos avisa `near the boundary between classes {a} and {b}` cuando el valor está a
+método `RMR89-continuous`), así que un cambio pequeño de UCS, RQD o espaciamiento mueve el puntaje sin saltos. El
+mismo artículo trae curvas para la condición de juntas (rugosidad por JRC, intemperismo por el índice *I5 del martillo
+Schmidt) y para el agua; sus sumas entran como puntajes:
+
+```python
+j = rm.JointCondition89Continuous(persistence_m=2, aperture_mm=0.5, jrc=10, infilling_mm=2, i5_pct=30)
+base.joint_condition_rating = rm.jcond89_continuous(j)              # 20.3 de 30
+base.water, base.water_rating = None, rm.rating_inflow89_continuous(25)   # 25 l/min cada 10 m: 4.6 de 15
+```
+
+En el RMR14, `jcond14_continuous`, `rmr14_alterability_rating` y las demás ayudas `rmr14_*_rating` alimentan
+`Rmr14Input.joint_condition_rating`, `water_rating` y `alterability_rating`. La clasificación con una tabla por rangos avisa `near the boundary between classes {a} and {b}` cuando el valor está a
 3 puntos o menos del borde (RMR, GSI) o dentro de un factor 1.25 (Q); estos dos márgenes son provisionales. En el lote,
 una hoja `Distribuciones` por `id_tramo` agrega `clase_probable`, `prob_clase_probable`, `prob_clase`,
 `probabilidades` y `n_validas` a los resultados (`rockmass classify ... --distributions ARCHIVO`, también en `report`).

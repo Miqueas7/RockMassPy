@@ -4,9 +4,27 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
-## [0.2.1] - 2026-11-11
+## [0.3.0] - 2026-11-11
 
-Fixes found while writing the complete notebook, and the continuous RMR curves checked against the paper.
+The rest of the continuous RMR curves of Kundu et al. (2020), the curves checked against the paper, and fixes found
+while writing the complete notebook.
+
+### Added
+
+- Continuous RMR89 ratings for joint condition and groundwater: `rating_persistence89_continuous`,
+  `rating_aperture89_continuous`, `rating_roughness89_continuous` (JRC), `rating_infilling89_continuous` (hard or soft),
+  `rating_weathering89_continuous` (*I5 index), `rating_inflow89_continuous` (l/min per 10 m) and
+  `rating_water_pressure89_continuous` (pressure / major principal stress), with `JointCondition89Continuous` and
+  `jcond89_continuous` for the 0-30 sum.
+- RMR14 helpers `rmr14_continuity_rating`, `rmr14_roughness_rating`, `rmr14_infilling_rating`,
+  `rmr14_weathering_rating` and `rmr14_alterability_rating`, with `JointCondition14Continuous` and `jcond14_continuous`.
+- `Rmr89Input.water_rating`, and `Rmr14Input.joint_condition_rating`, `water_rating` and `alterability_rating`: each
+  takes a rating in place of its data (one or the other, not both). `water_rating` can be sampled in
+  `classification_uncertainty`.
+
+### Changed
+
+- `Rmr89Result.r_water` is a float (it can come from `water_rating`).
 
 ### Fixed
 
@@ -113,7 +131,7 @@ decides. Full documentation: <https://miqueas.dev/rockmasspy>.
   optional extras `io`, `viz`, `report` and `ml`; type stubs (`py.typed`).
 - Thirteen worked examples in `examples/` with synthetic data only.
 
-[0.2.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.1
+[0.3.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.0

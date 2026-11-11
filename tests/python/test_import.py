@@ -4,7 +4,7 @@ import rockmasspy as rm
 
 
 def test_version():
-    assert rm.__version__ == "0.2.1"
+    assert rm.__version__ == "0.3.0"
     assert version("rockmasspy") == rm.__version__  # pyproject.toml y __init__.py no se desfasan
 
 

@@ -168,3 +168,26 @@ TEST(Rmr89Continuous, MonotoneAtBottomOfRange) {
     for (double x : {0.0, 0.005}) { EXPECT_EQ(rating_ucs89_continuous(x), 0.0); EXPECT_EQ(rmr14_strength_rating(x), 0.0); }
     EXPECT_LE(rating_rqd89_continuous(0.0), rating_rqd89_continuous(0.001));
 }
+TEST(Rmr89Continuous, JointConditionAndWater) {
+    JointCondition89Continuous j{2.0, 0.5, 10.0, 2.0, false, 30.0};
+    EXPECT_NEAR(jcond89_continuous(j), 20.2842, 1e-4);
+    EXPECT_NEAR(rating_infilling89_continuous(10.0, true), 0.1577, 1e-4);
+    EXPECT_NEAR(rating_water_pressure89_continuous(0.15), 7.0, 1e-12);
+    EXPECT_NE(error_of([] { jcond89_continuous(JointCondition89Continuous{}); }).find("persistence_m"), std::string::npos);
+
+    Rmr89Input in; in.ucs_mpa = 90; in.rqd_pct = 65; in.spacing_m = 0.25; in.joint_condition_rating = 18;
+    in.water = Water::Damp; in.water_rating = 7.0;
+    EXPECT_NE(error_of([&] { rmr89(in); }).find("exactly one of 'water' or 'water_rating'"), std::string::npos);
+    in.water.reset();
+    EXPECT_NEAR(rmr89(in).r_water, 7.0, 1e-12);
+}
+TEST(Rmr89Continuous, Rmr14RatingsReplaceTheirData) {
+    JointCondition14Continuous j{2.0, 10.0, 1.0, true, 20.0};
+    EXPECT_NEAR(jcond14_continuous(j), 13.2746, 1e-4);
+    EXPECT_NEAR(rmr14_alterability_rating(50), 4.9031, 1e-4);
+    Rmr14Input in; in.strength_rating = 10; in.joints_per_m_rating = 30;
+    in.joint_condition_rating = 12.5; in.water_rating = 11.0; in.alterability_rating = 4.0;
+    EXPECT_NEAR(rmr14(in).basic, 67.5, 1e-12);
+    in.id2_pct = 90;
+    EXPECT_NE(error_of([&] { rmr14(in); }).find("not both"), std::string::npos);
+}
