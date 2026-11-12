@@ -7,7 +7,7 @@ normativos por país, análisis de taludes en roca (cinemática, estereografía,
 **Documentación: <https://miqueas.dev/rockmasspy>** (guía, métodos, casos resueltos y referencia de la API, en
 español e inglés). Los cambios de cada versión están en [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md) (en inglés).
 
-**Estado:** versión 0.2.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones).
+**Estado:** versión 0.3.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones; 0.3.0: todas las curvas continuas del RMR89 y del RMR14 de Kundu et al. (2020), comprobadas contra la Tabla 3 del artículo).
 La librería recomienda, el ingeniero decide.
 
 ## Instalación
@@ -774,7 +774,8 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 | RQD-P2005 | RQD desde Jv (Palmström 2005) | Secondary |
 | RMR76 | Bieniawski 1976 | Secondary |
 | RMR89 | Bieniawski 1989 | Secondary |
-| RMR14 | Celada et al. 2014 | Secondary |
+| RMR89-continuous | Puntajes continuos ajustados a las gráficas de Bieniawski (1989) (Kundu et al. 2020): resistencia, RQD, espaciamiento, condición de juntas y agua; comprobados contra la Tabla 3 del artículo | Secondary |
+| RMR14 | Celada et al. 2014; ayudas continuas `rmr14_*_rating` y `jcond14_continuous` según Kundu et al. (2020) | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Sistema Q, ediciones NGI (2025 por defecto) | Primary |
 | Q-NGI-2025-chart / Q-NGI-2015-chart | Regiones de la carta de sostenimiento Q, digitalizadas por RockMassPy (error máximo medido 0.017 / 0.008 década, con los empalmes) | Primary |
 | Q-Barton1980 | Fórmulas de luz máxima sin sostén y longitud de perno (Hoek, según Barton et al. 1980) | Secondary |
@@ -809,7 +810,7 @@ Si RockMassPy te sirve en tu trabajo, cítalo. GitHub muestra el botón «Cite t
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (versión 0.2.0) [Software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (versión 0.3.0) [Software]. https://github.com/Miqueas7/RockMassPy
 
 Cada resultado registra además el método y la edición que sigue (`result.info`); cita también esa fuente original.
 

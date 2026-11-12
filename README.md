@@ -7,7 +7,7 @@ regulatory profiles, rock slope analysis (kinematics, stereonets, block and limi
 **Documentation: <https://miqueas.dev/rockmasspy>** (guide, methods, worked examples and API reference, in English
 and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md).
 
-**Status:** version 0.2.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications). The library recommends, the engineer decides.
+**Status:** version 0.3.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications; 0.3.0: every continuous RMR89 and RMR14 curve of Kundu et al. (2020), checked against Table 3 of the paper). The library recommends, the engineer decides.
 
 ## Installation
 
@@ -747,7 +747,8 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | RQD-P2005 | RQD from Jv (Palmstrom 2005) | Secondary |
 | RMR76 | Bieniawski 1976 | Secondary |
 | RMR89 | Bieniawski 1989 | Secondary |
-| RMR14 | Celada et al. 2014 | Secondary |
+| RMR89-continuous | Continuous ratings fitted to the Bieniawski (1989) charts (Kundu et al. 2020): strength, RQD, spacing, joint condition and groundwater; checked against Table 3 of the paper | Secondary |
+| RMR14 | Celada et al. 2014; continuous helpers `rmr14_*_rating` and `jcond14_continuous` after Kundu et al. (2020) | Secondary |
 | Q-NGI-2015 / Q-NGI-2025 | Q system, NGI editions (2025 is the default) | Primary |
 | Q-NGI-2025-chart / Q-NGI-2015-chart | Q support chart regions, digitized by RockMassPy (max. measured error 0.017 / 0.008 decade, including junctions) | Primary |
 | Q-Barton1980 | Maximum unsupported span and bolt length formulas (Hoek, after Barton et al. 1980) | Secondary |
@@ -782,7 +783,7 @@ If RockMassPy helps your work, please cite it. GitHub shows a "Cite this reposit
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (version 0.2.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (version 0.3.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
 
 Each result also records the method and edition it follows (`result.info`); cite that original source as well.
 
