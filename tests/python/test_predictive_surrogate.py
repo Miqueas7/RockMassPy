@@ -160,3 +160,54 @@ def test_validation_deterministic_and_small_fold_error():
     assert validate_surrogate(d, seed=7) == validate_surrogate(d, seed=7)
     with pytest.raises(ValueError, match="runs"):
         validate_surrogate(SurrogateData(d.X[:14], d.y[:14], d.names), kind="poly2")
+
+
+# ---------- PoF con el sustituto contra la verdad (tarea 3) ----------
+
+from rockmasspy import probabilistic as pb  # noqa: E402
+from rockmasspy.predictive.surrogate import OOD_WARN_FRACTION, surrogate_pof  # noqa: E402
+from rockmasspy.predictive.surrogate_bench import planar_base  # noqa: E402
+
+# c y φ dentro del rango de entrenamiento (2-25 kPa/MPa y 20-45°); la geometría y el agua quedan en la media de
+# entrenamiento del sustituto, y la verdad usa esa misma geometría
+POF_VARS = {"cohesion": pb.normal(10, 4, 2, 25), "friction_deg": pb.normal(33, 3, 20, 45)}
+
+
+def _truth(s, n=20000):
+    base = planar_base()
+    for k in ("plane_dip_deg", "height_m", "water_fill"):
+        setattr(base, k, float(s.mean[s.names.index(k)]))
+    return pb.run_probabilistic("planar", base, POF_VARS, n=n, sampling="lhs", seed=1).pof
+
+
+# con los rangos completos poly2 queda a ~8 puntos de la verdad (la superficie cuadrática no sigue la curvatura del
+# FS en 5 dimensiones); con estos rangos más estrechos llega a ±4. La tolerancia de rbf nunca se afloja (±2).
+POLY2_RANGES = {"cohesion": (3, 20), "friction_deg": (24, 42), "plane_dip_deg": (32, 43), "height_m": (45, 65)}
+
+
+@pytest.mark.parametrize("kind,tol,ranges", [("rbf", 0.02, None), ("poly2", 0.04, POLY2_RANGES)])
+def test_pof_matches_truth(kind, tol, ranges):
+    s = fit_surrogate(planar_runs(300, seed=1, ranges=ranges), kind=kind)
+    ref, r = _truth(s), surrogate_pof(s, POF_VARS, n=20000, seed=1)
+    assert 0.05 <= ref <= 0.30
+    assert abs(r.pof - ref) <= tol
+    assert r.n_valid + r.n_out_of_domain == r.n == 20000
+    assert "unsampled inputs fixed at their training mean" in r.notes
+    assert surrogate_pof(s, POF_VARS, n=2000, seed=3) == surrogate_pof(s, POF_VARS, n=2000, seed=3)
+
+
+def test_pof_with_tails_out_of_domain():
+    s = fit_surrogate(planar_runs(300, seed=1), kind="rbf")
+    wide = {"cohesion": pb.normal(10, 8, -5, 60), "friction_deg": pb.normal(33, 6, 5, 60)}
+    r = surrogate_pof(s, wide, n=5000, seed=1)
+    assert r.n_out_of_domain > 0 and r.n_valid == 5000 - r.n_out_of_domain
+    assert r.n_out_of_domain / 5000 > OOD_WARN_FRACTION
+    assert any("many samples outside the surrogate domain" in w for w in r.warnings)
+    assert 0 <= r.pof <= 1
+
+
+def test_pof_unknown_variable_names_parameter():
+    s = fit_surrogate(planar_runs(300, seed=1), kind="rbf")
+    with pytest.raises(ValueError, match="variables") as e:
+        surrogate_pof(s, {"zzz": pb.uniform(0, 1)})
+    assert "zzz" not in str(e.value)

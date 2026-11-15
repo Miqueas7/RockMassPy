@@ -261,3 +261,47 @@ def validate_surrogate(data: SurrogateData, *, kind: str = "poly2", k: int = 5, 
     return SurrogateValidation(kind, folds_kind, len(folds), rmse, float(np.mean(np.abs(e))),
                                float(np.max(np.abs(e))), 1 - float(np.sum(e ** 2)) / sst if sst > 0 else math.nan,
                                ood, rmse0, bool(rmse < USEFUL_RMSE_RATIO * rmse0), warns, tuple(notes))
+
+
+# ---------- PoF con el sustituto (Fase 8D, tarea 3) ----------
+
+@dataclass(frozen=True)
+class SurrogatePof:
+    """PoF = fracción de muestras válidas (dentro del dominio) con FS < umbral; `n_out_of_domain` se excluyen."""
+
+    pof: float
+    n: int
+    n_valid: int
+    n_out_of_domain: int
+    fs_mean: float
+    fs_p05: float
+    fs_p50: float
+    fs_p95: float
+    warnings: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+def surrogate_pof(surrogate: Surrogate, variables, *, n: int = 20000, sampling: str = "lhs", seed: int = 1,
+                  threshold: float = 1.0) -> SurrogatePof:
+    from ..probabilistic import sample
+
+    if not set(variables) <= set(surrogate.names):
+        raise ValueError("variables: every name must be an input of the surrogate")
+    if not variables:
+        raise ValueError("variables: at least one input must be sampled")
+    draws = sample(variables, n, sampling=sampling, seed=seed)
+    X = np.tile(surrogate.mean, (n, 1))  # las no muestreadas quedan en la media de entrenamiento
+    for name, v in draws.items():
+        X[:, surrogate.names.index(name)] = v
+    pred = surrogate.predict(X)
+    fs = pred.y[pred.in_domain]
+    n_valid = len(fs)
+    if n_valid == 0:
+        raise ValueError("variables: no sample fell inside the surrogate domain")
+    n_ood = n - n_valid
+    notes = ("unsampled inputs fixed at their training mean",) if len(variables) < len(surrogate.names) else ()
+    warns = ("many samples outside the surrogate domain; the PoF covers only the sampled domain",) \
+        if n_ood / n > OOD_WARN_FRACTION else ()
+    p05, p50, p95 = np.percentile(fs, [5, 50, 95])
+    return SurrogatePof(float(np.mean(fs < threshold)), n, n_valid, n_ood, float(fs.mean()), float(p05), float(p50),
+                        float(p95), warns, notes)
