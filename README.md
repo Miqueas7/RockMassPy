@@ -755,6 +755,29 @@ mb, s, a and Erm those of GSI, mi and D?), the shotcrete and steel M-N capacity 
 `rm.check_capacity`), the Einstein-Schwartz lining forces, `plot_tunnel`, a tunnel report and the `rockmass tunnel`
 command. See `examples/15-tuneles-convergencia-confinamiento/`.
 
+## Boundary elements 2D
+
+`analyze_bem` computes the stresses around 2D excavations (circle, ellipse, rectangle, horseshoe or your own polygons)
+with the displacement discontinuity method, and the strength factor (SF) of each point. Compression is positive,
+units are MPa and m.
+
+```python
+from rockmasspy import bem
+
+mat = bem.BemMaterial("HB", sigma_ci_mpa=60, gsi=50, mi=10, d=0.0)
+r = bem.analyze_bem([bem.horseshoe(0, 0, 5, 3)], sigma1_mpa=20, sigma3_mpa=8, alpha_deg=90,
+                    e_mpa=20000, nu=0.25, material=mat)
+print(r.min_sf, r.tension_count, r.warnings)
+```
+
+Scope: elastic, one material, plane strain, infinite medium, no gravity and no stages. An SF below 1 marks overstress,
+not the extent of failure (the output carries that note). The default SF is the RS2 one (3D: it uses the out-of-plane
+stress); `sf_mode="examine2d"` gives the Examine2D-style 2D SF. On the published example (sigma1 40, sigma3 10,
+sigma_z 10) Mohr-Coulomb gives 1.146 (RS2) vs 1.122 (2D) and Hoek-Brown 2.457 vs 2.075. If the elements are too coarse
+for the narrowest pillar, the points next to its walls are flagged (`min_sf_coarse`) and a warning says so. It does not
+replace RS2 or Examine2D. See `examples/17-elementos-de-contorno/`, `plot_bem`, `build_bem_report` and the
+`rockmass bem` command.
+
 ## Results from Slide2, RS2 and FLAC3D
 
 `load_external` reads the numbers a program exported (CSV or Excel, long or wide table) into one record per value:

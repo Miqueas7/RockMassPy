@@ -782,6 +782,29 @@ mb, s, a y Erm declarados son los de GSI, mi y D?), la capacidad M-N de shotcret
 `rm.check_capacity`), los esfuerzos del revestimiento de Einstein y Schwartz, `plot_tunnel`, un informe de túnel y el
 comando `rockmass tunnel`. Ver `examples/15-tuneles-convergencia-confinamiento/`.
 
+## Elementos de contorno 2D
+
+`analyze_bem` calcula los esfuerzos alrededor de excavaciones 2D (círculo, elipse, rectángulo, herradura o tus propios
+polígonos) con el método de discontinuidad de desplazamiento, y el strength factor (SF) de cada punto. Compresión
+positiva, unidades en MPa y m.
+
+```python
+from rockmasspy import bem
+
+mat = bem.BemMaterial("HB", sigma_ci_mpa=60, gsi=50, mi=10, d=0.0)
+r = bem.analyze_bem([bem.horseshoe(0, 0, 5, 3)], sigma1_mpa=20, sigma3_mpa=8, alpha_deg=90,
+                    e_mpa=20000, nu=0.25, material=mat)
+print(r.min_sf, r.tension_count, r.warnings)
+```
+
+Alcance: elástico, un material, deformación plana, medio infinito, sin gravedad y sin etapas. Un SF menor que 1 marca
+sobreesfuerzo, no la extensión de la falla (la salida lleva esa nota). El SF por omisión es el de RS2 (3D: usa el
+esfuerzo fuera del plano); `sf_mode="examine2d"` da el SF 2D al estilo de Examine2D. En el ejemplo publicado (sigma1 40,
+sigma3 10, sigma_z 10) Mohr-Coulomb da 1,146 (RS2) frente a 1,122 (2D) y Hoek-Brown 2,457 frente a 2,075. Si los
+elementos son muy gruesos para el pilar más angosto, los puntos junto a sus paredes se marcan (`min_sf_coarse`) y un
+aviso lo dice. No reemplaza a RS2 ni a Examine2D. Ver `examples/17-elementos-de-contorno/`, `plot_bem`,
+`build_bem_report` y el comando `rockmass bem`.
+
 ## Resultados de Slide2, RS2 y FLAC3D
 
 `load_external` lee lo que un programa exportó (CSV o Excel, tabla larga o ancha) como un registro por valor:

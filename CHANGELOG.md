@@ -4,6 +4,26 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
+## [Unreleased]
+
+Phase 8C: 2D boundary elements (stresses around excavations).
+
+### Added
+
+- `bem2d` core (displacement discontinuity method, elastic infinite plane strain medium), strength factor
+  (`strength_factor`, RS2 3D mode and Examine2D-style 2D mode), `analyze_bem` with the shapes `circle`, `ellipse`,
+  `rectangle` and `horseshoe`, `load_excavations`, scope warnings and notes.
+- `rockmass bem` command, `plot_bem` and `plot_bem_boundary`, `build_bem_report`.
+- Example 17 (`examples/17-elementos-de-contorno/`).
+
+### Values to confirm
+
+- Default of 128 elements (smallest perimeter / 128) and the curvature-warning threshold of 0.05 times the radius of
+  curvature (the plan said 0.04, but 128 elements on a circle give 0.049).
+- Near-boundary remedy with c = 1.
+- The exact Examine2D SF formula is [NV] (not verified); the 2D mode is an approximation.
+- The generalized Hoek-Brown SF (a other than 0.5) is numeric and has no published oracle.
+
 ## [0.4.0] - 2026-11-14
 
 Phase 8B: analytical tunnel excavations (convergence-confinement). Phase 8A: results from external programs
