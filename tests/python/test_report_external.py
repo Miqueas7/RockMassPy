@@ -62,7 +62,7 @@ def test_en_no_spanish_and_keys(parts, tmp_path):
     txt = " ".join(b.text if isinstance(b, rp.Paragraph) else " ".join([b.caption, *b.header, *(c for r in b.rows for c in r)])
                    for s in rep.sections for b in s.blocks if not isinstance(b, rp.Figure))
     txt += " ".join(s.title for s in rep.sections)
-    assert not [v for v in es_vals if len(v) > 3 and re.search(rf"b{re.escape(v)}b", txt)]
+    assert not [v for v in es_vals if len(v) > 3 and re.search(rf"{re.escape(v)}", txt)]
     for k, v in REPORT_TEXTS.items():
         if k.startswith("ex_"):
             assert set(v) == {"es", "en"} and all(v.values()), k

@@ -1,6 +1,7 @@
 """CLI `rockmass ext` (Fase 8A, Tarea 4)."""
 import pytest
 
+from rockmasspy import limit_equilibrium as rm_le
 from rockmasspy.cli import main
 from rockmasspy.criteria import _threshold
 from rockmasspy.normative import get_profile
@@ -103,8 +104,7 @@ def test_ext_method_spread_and_monitoring(tmp_path, capsys):
 @pytest.mark.parametrize("lang", ["es", "en"])
 @pytest.mark.parametrize("ext", ["html", "docx"])
 def test_ext_report_files(tmp_path, capsys, lang, ext):
-    if ext == "docx":
-        pytest.importorskip("docx")
+    docx = pytest.importorskip("docx") if ext == "docx" else None
     p = _csv(tmp_path, [_srf(FS_REQ)])
     out = tmp_path / f"o.{ext}"
     assert main(["ext", "--results", p, "--criteria", "READ-STACEY-2009", "--report", str(out), "--lang", lang]) == 2
@@ -112,8 +112,27 @@ def test_ext_report_files(tmp_path, capsys, lang, ext):
     if ext == "html":
         txt = out.read_text(encoding="utf-8")
         assert f'lang="{lang}"' in txt
-        if lang == "en":
-            assert "Criterios" not in txt and "Alcance" not in txt
+    else:
+        d = docx.Document(str(out))
+        txt = " ".join(p_.text for p_ in d.paragraphs) + " ".join(c.text for tb in d.tables for r in tb.rows
+                                                                    for c in r.cells)
+    probe = ("Alcance", "Scope")
+    assert probe[0 if lang == "es" else 1] in txt and probe[1 if lang == "es" else 0] not in txt
+
+
+def test_ext_le_workbook_adds_rockmasspy_methods(tmp_path, capsys):
+    import test_limit_equilibrium as tl
+
+    wb = tl.libro(tmp_path, tl.fk_data())
+    (oid,) = [r.id_analisis for r in rm_le.assess_le(wb)]
+    p = _csv(tmp_path, [f"Slide2,9,M1,est,section,{oid},fs,bishop,1.3,global,alta"])
+    html = tmp_path / "le.html"
+    assert main(["ext", "--results", p, "--le", str(wb), "--report", str(html)]) in (0, 2)
+    out = capsys.readouterr().out
+    assert "method comparisons: 1" in out and S not in out
+    assert "rockmasspy:" in html.read_text(encoding="utf-8")
+    assert main(["ext", "--results", p]) == 0
+    assert "method comparisons: 0" in capsys.readouterr().out
 
 
 def test_ext_bad_report_extension(tmp_path, capsys):
