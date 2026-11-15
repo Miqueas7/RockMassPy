@@ -89,3 +89,6 @@ from .hb_consistency import HbConsistency, check_hoek_brown, check_k_ratio  # no
 from .excavation import TunnelInput, TunnelResult, analyze_tunnel, tunnel_uncertainty  # noqa: E402,F401
 from .external import (QUANTITIES, ExternalRecord, ExternalSet, HbRow, MethodComparison,  # noqa: E402,F401
                        check_rocdata, compare_methods, load_external, load_rocdata_table)
+from .bem import (  # noqa: E402,F401
+    BemBoundaryResult, BemFieldResult, BemMaterial, BemResult, analyze_bem,
+)
