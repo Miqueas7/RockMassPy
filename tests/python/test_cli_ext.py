@@ -114,10 +114,12 @@ def test_ext_report_files(tmp_path, capsys, lang, ext):
         assert f'lang="{lang}"' in txt
     else:
         d = docx.Document(str(out))
-        txt = " ".join(p_.text for p_ in d.paragraphs) + " ".join(c.text for tb in d.tables for r in tb.rows
-                                                                    for c in r.cells)
-    probe = ("Alcance", "Scope")
-    assert probe[0 if lang == "es" else 1] in txt and probe[1 if lang == "es" else 0] not in txt
+        txt = " ".join([p_.text for p_ in d.paragraphs] + [c.text for tb in d.tables for r in tb.rows
+                                                           for c in r.cells])
+    mine, other = ("Alcance", "Scope") if lang == "es" else ("Scope", "Alcance")
+    assert mine in txt and other not in txt
+    mine, other = ("Criterios", "Criteria") if lang == "es" else ("Criteria", "Criterios")
+    assert mine in txt and other not in txt
 
 
 def test_ext_le_workbook_adds_rockmasspy_methods(tmp_path, capsys):
@@ -127,9 +129,9 @@ def test_ext_le_workbook_adds_rockmasspy_methods(tmp_path, capsys):
     (oid,) = [r.id_analisis for r in rm_le.assess_le(wb)]
     p = _csv(tmp_path, [f"Slide2,9,M1,est,section,{oid},fs,bishop,1.3,global,alta"])
     html = tmp_path / "le.html"
-    assert main(["ext", "--results", p, "--le", str(wb), "--report", str(html)]) in (0, 2)
+    assert main(["ext", "--results", p, "--le", str(wb), "--report", str(html)]) == 2  # FS 1.3 vs ~1.0 de F&K: dispersión > 10 %
     out = capsys.readouterr().out
-    assert "method comparisons: 1" in out and S not in out
+    assert "method comparisons: 1" in out and oid not in out
     assert "rockmasspy:" in html.read_text(encoding="utf-8")
     assert main(["ext", "--results", p]) == 0
     assert "method comparisons: 0" in capsys.readouterr().out
