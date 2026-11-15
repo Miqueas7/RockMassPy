@@ -50,3 +50,10 @@ def test_garcia_aquino_table32(gsi, mi, mb, s, a, emr):
     # García Aquino (2024), tabla 32, p. 69: D = 0 y Emr de Hoek-Diederichs simplificado
     r = check_hoek_brown(gsi=gsi, mi=mi, d=0, mb=mb, s=s, a=a, erm_mpa=emr)
     assert r.mismatches == ()
+
+
+def test_errors_do_not_repeat_values():
+    for kw in ({"gsi": 777.7}, {"d": 777.7}, {"mi": -777.7}):
+        with pytest.raises(ValueError) as e:
+            check_hoek_brown(**{"gsi": 35, "mi": 32, "d": 0, **kw})
+        assert "777.7" not in str(e.value) and "Received" not in str(e.value)

@@ -814,12 +814,13 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 | HB-2002 | Módulo del macizo Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Módulo del macizo (Hoek y Diederichs) | Primary |
 | Kirsch-1898 / Ellipse-Inglis-1913 / Reed-1986 | Esfuerzos en el borde y a distancia de una abertura circular o elíptica (Kirsch, Inglis) y esfuerzos elastoplásticos de Reed | PrimaryLaterAuthors |
+| HB-1982-brittle | Radio plástico y esfuerzos alrededor de una abertura circular en roca de Hoek-Brown con resistencia residual (frágil), Hoek y Brown 1982 (`hb1982_plastic_radius`, `hb1982_stress`) | PrimaryLaterAuthors |
 | GRC-MC-Salencon-1969 | Curva de reacción del terreno de Mohr-Coulomb con dilatancia (Salençon; Duncan Fama con psi = 0): pcr, radio plástico, desplazamiento en la pared | PrimaryLaterAuthors |
 | GRC-HB-Carranza-Torres-Fairhurst-2000 | Curva de reacción de Hoek-Brown con a = 0.5 | PrimaryLaterAuthors |
-| GRC-HB-equivalent-MC | Hoek-Brown con a distinto de 0.5 vía Mohr-Coulomb equivalente, al estilo RocSupport (σcm global con el φ del ajuste del túnel) | Secondary |
+| GRC-HB-equivalent-MC | Hoek-Brown con `a` distinto de 0.5 vía Mohr-Coulomb equivalente, al estilo RocSupport (σcm global con el φ del ajuste del túnel) | Secondary |
 | LDP-Panet-1995 / LDP-Unlu-Gercek-2003 / LDP-Chern-1998 / LDP-Vlachopoulos-Diederichs-2009 | Perfil de deformación longitudinal: Panet 1995, Unlu-Gercek 2003, Chern 1998, Vlachopoulos-Diederichs 2009 (por omisión) | PrimaryLaterAuthors |
 | Support-interaction | Curva del sostenimiento elástica-perfectamente plástica (psm, εsm) con la tabla de presiones de Hoek; combinación por rigidez (por omisión) o los modos de RocSupport; FS en el cruce GRC-SCC | PrimaryLaterAuthors (modos RocSupport: Secondary) |
-| Rigidez de anillo grueso | Rigidez de un anillo grueso de shotcrete u hormigón | Secondary |
+| (ninguno: `thick_ring_stiffness` es una función que devuelve un número, sin `info`) | Rigidez de un anillo grueso de shotcrete u hormigón | Secondary |
 | Squeezing-Hoek-Marinos-2000 | Deformación y relación de radio plástico, clases A-E | PrimaryLaterAuthors |
 | Lining-capacity-Carranza-Torres-Diederichs-2009 | Capacidad M-N y Q-N de shotcrete y cerchas | PrimaryLaterAuthors |
 | Lining-Einstein-Schwartz-1979 | Esfuerzos de un revestimiento elástico en campo hidrostático o no hidrostático | PrimaryLaterAuthors |

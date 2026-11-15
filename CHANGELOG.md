@@ -16,8 +16,10 @@ Phase 8B: analytical tunnel excavations (convergence-confinement). The version n
 - `tunnel_uncertainty` (Monte Carlo over the tunnel inputs), `check_hoek_brown` and `check_k_ratio` (consistency of
   declared Hoek-Brown tables), `load_support_capacity` (capacity sheet, Spanish or Phase2 English headers, decimal
   comma) and Hoek's support pressure table (`HOEK_SUPPORT_TABLE`, `hoek_psm`).
-- Core: Kirsch and elliptical-opening boundary stresses, Reed (stresses), M-N and Q-N capacity of linings
-  (`capacity_mn`, `check_capacity`), and the Einstein-Schwartz lining forces.
+- Core: Kirsch and elliptical-opening boundary stresses, Reed (stresses), Hoek and Brown (1982) brittle plastic
+  radius and stresses (`hb1982_plastic_radius`, `hb1982_stress`, method `HB-1982-brittle`), M-N and Q-N capacity of
+  linings (`capacity_mn`, `check_capacity`), the Einstein-Schwartz lining forces and `thick_ring_stiffness` (a
+  number, without `info`).
 - `plot_tunnel`, `build_tunnel_report` and the `rockmass tunnel` command.
 - Example 15 (`examples/15-tuneles-convergencia-confinamiento/`).
 
@@ -30,10 +32,17 @@ Phase 8B: analytical tunnel excavations (convergence-confinement). The version n
   (0.1 %) carry one; for the rest you give it.
 - The squeezing correlation is used outside its fitted range (sigma_cm/p0 or pi/p0 above 0.5) with a note, not an
   error; that band is still to be confirmed.
-- Hoek-Brown with a other than 0.5 uses the equivalent Mohr-Coulomb in the RocSupport style, which mixes the global
+- Hoek-Brown with `a` other than 0.5 uses the equivalent Mohr-Coulomb in the RocSupport style, which mixes the global
   sigma_cm with the friction angle of the tunnel fit; the output says so in a note. A rigorous solution is pending.
 - The RocSupport combination modes (`rocsupport3`, `rocsupport`) are checked against RocSupport help text only
   (Secondary).
+- In `tunnel_uncertainty`, `support_probabilities["no_crossing"]` counts the samples whose support was installed
+  after full convergence (no crossing, no load); `fs_below_1` counts only crossings with FS below 1.
+
+### Fixed
+
+- `fisher_stats`: a horizontal pole perpendicular to the principal axis no longer changes the mean depending on how
+  it was written (0/0 or 180/0); a warning says when the mean direction is not unique.
 
 ## [0.3.0] - 2026-11-11
 

@@ -54,3 +54,30 @@ def test_diameter_changes_fs(capsys):
     a = capsys.readouterr().out
     main(base + ["--diameter", "10"])
     assert capsys.readouterr().out.split("FS ")[1][:4] != a.split("FS ")[1][:4]
+
+
+def test_eps_sm_only_for_items_without_published_value(capsys):
+    base = RST1[:RST1.index("--support")] + ["--support", "Concrete or shotcrete lining 50 mm 28 days 35 MPa",
+                                            "--install-distance", "3"]
+    main(base)
+    a = capsys.readouterr().out
+    main(base + ["--eps-sm", "0.005"])  # el shotcrete de 50 mm a 28 días conserva su εsm publicada (0.001)
+    assert capsys.readouterr().out.split("FS ")[1][:4] == a.split("FS ")[1][:4]
+    bolt = RST1[:RST1.index("--support")] + ["--support", "25 mm rockbolt:1.0", "--install-distance", "3"]
+    assert main(bolt) == 1 and "eps_sm" in capsys.readouterr().err  # sin εsm publicada: --eps-sm sí hace falta
+    assert main(bolt + ["--eps-sm", "0.002"]) in (0, 2) and "FS " in capsys.readouterr().out
+
+
+def test_input_errors_do_not_repeat_values(capsys):
+    argv = RST1[:RST1.index("--gsi")] + ["--gsi", "777.7"] + RST1[RST1.index("--mi"):]
+    assert main(argv) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "gsi" in err and "777.7" not in err
+
+
+def test_phi_90_is_input_error(capsys):
+    argv = ["tunnel", "--radius", "3", "--p0", "10", "--nu", "0.3", "--criterion", "MC", "--e", "2000", "--c", "0.5",
+            "--phi", "90"]
+    assert main(argv) == 1
+    cap = capsys.readouterr()
+    assert cap.err.startswith("error: ") and "phi_deg" in cap.err and "Traceback" not in cap.err

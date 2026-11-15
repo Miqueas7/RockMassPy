@@ -1,6 +1,6 @@
 """Ejemplo 15: túneles, convergencia-confinamiento (GRC, LDP, sostenimiento), coherencia de Hoek-Brown y capacidad M-N.
 
-Todo es sintético, salvo el RST Ejemplo 1, que es un caso publicado (RocScience, RocSupport Tutorial).
+Todo es sintético, salvo el RST Ejemplo 1, que es un caso publicado (Rocscience, RocSupport Tutorial).
 Uso: python main.py [carpeta_de_salida]
 """
 import sys
@@ -14,12 +14,13 @@ from rockmasspy.support_capacity import hoek_psm, load_support_capacity
 
 HOJA = """codigo;tipo;psm_mpa;eps_sm;espesor_m;e_mpa;nu;sigma_c_mpa;sigma_t_mpa;espaciamiento_m;item_hoek
 ZZSENT-PB;bolt;;;;;;;;1.0;34 mm rockbolt
-ZZSENT-SC;shotcrete;;;0.05;25000;0.2;35;3.5;;Concrete or shotcrete lining 50 mm 28 days 35 MPa
+ZZSENT-SC;shotcrete;;;0.05;25000;0.2;35;-3.5;;Concrete or shotcrete lining 50 mm 28 days 35 MPa
 """
 
 
 def resumen(titulo: str, r) -> None:
-    fs = "sin cruce" if r.interaction is None or r.interaction.fs is None else f"{r.interaction.fs:.2f}"
+    i = r.interaction
+    fs = "sin sostenimiento" if i is None else "sin cruce" if i.fs is None else f"{i.fs:.2f}"
     print(f"{titulo}: FS {fs}, rp {r.rp_m:.2f} m, ε {r.strain_pct:.2f} %, clase {r.squeezing.squeezing_class}")
     for aviso in (*r.warnings, *r.notes):
         print(f"  aviso: {aviso}")
@@ -42,6 +43,9 @@ def main(carpeta: Path) -> int:
     for nombre, soporte in (("Perno + shotcrete", [caps["ZZSENT-PB"], caps["ZZSENT-SC"]]), ("Solo perno", [perno])):
         resumen(f"MC sintético, {nombre}", analyze_tunnel(mc, supports=soporte, install_distance_m=2,
                                                           support_diameter_m=8))
+    print("  Con rigidez sumada cada elemento carga según su rigidez: el shotcrete, más rígido (εsm 0.001 frente a"
+          " 0.002 del perno), llega antes a su capacidad y gobierna; por eso perno + shotcrete da menor FS que el"
+          " perno solo.")
     resumen("MC sintético, sin sostenimiento", analyze_tunnel(mc))
     print(f"  psm del perno de la hoja: {hoek_psm('34 mm rockbolt', spacing_m=1.0):.3f} MPa")
 

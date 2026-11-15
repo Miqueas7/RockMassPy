@@ -787,12 +787,13 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Rock mass modulus (Hoek & Diederichs) | Primary |
 | Kirsch-1898 / Ellipse-Inglis-1913 / Reed-1986 | Boundary and far-field stresses of a circular or elliptical opening (Kirsch, Inglis) and Reed elastic-plastic stresses | PrimaryLaterAuthors |
+| HB-1982-brittle | Plastic radius and stresses around a circular opening in Hoek-Brown rock with residual (brittle) strength, Hoek and Brown 1982 (`hb1982_plastic_radius`, `hb1982_stress`) | PrimaryLaterAuthors |
 | GRC-MC-Salencon-1969 | Mohr-Coulomb ground reaction curve with dilatancy (Salencon; Duncan Fama when psi = 0): pcr, plastic radius, wall displacement | PrimaryLaterAuthors |
 | GRC-HB-Carranza-Torres-Fairhurst-2000 | Hoek-Brown ground reaction curve for a = 0.5 | PrimaryLaterAuthors |
-| GRC-HB-equivalent-MC | Hoek-Brown with a other than 0.5 through the equivalent Mohr-Coulomb, RocSupport style (global sigma_cm with the tunnel-fit phi) | Secondary |
+| GRC-HB-equivalent-MC | Hoek-Brown with `a` other than 0.5 through the equivalent Mohr-Coulomb, RocSupport style (global sigma_cm with the tunnel-fit phi) | Secondary |
 | LDP-Panet-1995 / LDP-Unlu-Gercek-2003 / LDP-Chern-1998 / LDP-Vlachopoulos-Diederichs-2009 | Longitudinal deformation profile: Panet 1995, Unlu-Gercek 2003, Chern 1998, Vlachopoulos-Diederichs 2009 (default) | PrimaryLaterAuthors |
 | Support-interaction | Elastic-perfectly plastic support curve (psm, epsilon_sm) with Hoek's pressure table; combination by stiffness (default) or the RocSupport modes; FS at the GRC-SCC crossing | PrimaryLaterAuthors (RocSupport modes: Secondary) |
-| Thick-ring stiffness | Stiffness of a thick shotcrete or concrete ring | Secondary |
+| (none: `thick_ring_stiffness` is a function that returns a number, without `info`) | Stiffness of a thick shotcrete or concrete ring | Secondary |
 | Squeezing-Hoek-Marinos-2000 | Strain and plastic radius ratio, classes A-E | PrimaryLaterAuthors |
 | Lining-capacity-Carranza-Torres-Diederichs-2009 | M-N and Q-N capacity of shotcrete and steel sets | PrimaryLaterAuthors |
 | Lining-Einstein-Schwartz-1979 | Forces of an elastic lining in a hydrostatic or non-hydrostatic field | PrimaryLaterAuthors |

@@ -107,6 +107,16 @@ TEST(Squeezing, HoekMarinosPRE) {
     EXPECT_EQ(s.info.method_id, "Squeezing-Hoek-Marinos-2000");
 }
 
+TEST(Squeezing, FueraDelAjusteAcotado) {
+    const auto s = hoek_marinos(1, 4, 3.6, 2);  // pi/p0 = 0.9: la ecuación 8 daría ε < 0
+    EXPECT_EQ(s.strain_pct, 0.0);
+    EXPECT_EQ(s.wall_displacement_m, 0.0);
+    EXPECT_EQ(s.squeezing_class, 'A');
+    EXPECT_FALSE(s.in_fit_range);
+    EXPECT_GE(s.plastic_radius_m, 2.0);
+    EXPECT_EQ(hoek_marinos(12, 4, 0, 2).plastic_radius_m, 2.0);  // σcm/p0 = 3: la ecuación 9 daría rp < R
+}
+
 TEST(Squeezing, Errores) {
     EXPECT_NE(error_of([] { hoek_marinos(1, 0, 0, 2); }).find("'p0_mpa'"), std::string::npos);
     EXPECT_NE(error_of([] { hoek_marinos(1, 4, -1, 2); }).find("'pi_mpa'"), std::string::npos);
@@ -356,7 +366,8 @@ TEST(Interaccion, CruceMasAllaDelLimiteElastico) {  // D6: se prolonga la recta 
     ASSERT_TRUE(r.found);
     EXPECT_FALSE(r.elastic);
     ASSERT_TRUE(r.fs.has_value());
-    EXPECT_LT(*r.fs, 1.0);
+    // FS con la recta elástica prolongada (D6), recalculado aparte por bisección de 500·(u(p) − u_in)/R = p
+    EXPECT_NEAR(*r.fs, 0.46355, 1e-5);
     EXPECT_NEAR(r.p_eq_mpa, 0.1, 1e-9);  // el equilibrio real cae en la meseta plástica
     EXPECT_NEAR(r.u_eq_m, grc_mc_displacement(rst1(), 0.1), 1e-9);
 }

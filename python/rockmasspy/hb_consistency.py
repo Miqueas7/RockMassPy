@@ -28,9 +28,12 @@ def _implied_d(gsi, mi, mb, edition):
 
 def check_hoek_brown(*, gsi, mi, d, mb=None, s=None, a=None, erm_mpa=None, ei_mpa=None, sigma_ci_mpa=None,
                      edition=_rm.HbEdition.HB2002, rel_tol=0.01) -> HbConsistency:
-    p = _rm.hb_params(gsi, mi, d, edition)
-    erm = (_rm.erm_hoek_diederichs_generalized(gsi, d, ei_mpa) if ei_mpa is not None
-           else _rm.erm_hoek_diederichs_simplified(gsi, d)).value
+    try:  # los mensajes del núcleo traen «Received: valor»; aquí no se repiten valores de entrada
+        p = _rm.hb_params(gsi, mi, d, edition)
+        erm = (_rm.erm_hoek_diederichs_generalized(gsi, d, ei_mpa) if ei_mpa is not None
+               else _rm.erm_hoek_diederichs_simplified(gsi, d)).value
+    except ValueError as e:
+        raise ValueError(str(e).split("Received:")[0].strip()) from None
     expected = {"mb": p.mb, "s": p.s, "a": p.a, "erm_mpa": erm}
     declared = {k: v for k, v in (("mb", mb), ("s", s), ("a", a), ("erm_mpa", erm_mpa), ("ei_mpa", ei_mpa),
                                   ("sigma_ci_mpa", sigma_ci_mpa)) if v is not None}

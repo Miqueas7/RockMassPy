@@ -190,8 +190,9 @@ inline Squeezing hoek_marinos(double sigma_cm_mpa, double p0_mpa, double pi_mpa,
     non_negative(pi_mpa, "pi_mpa");
     positive(radius_m, "radius_m");
     const double x = sigma_cm_mpa / p0_mpa, y = pi_mpa / p0_mpa;
-    const double pct = (0.2 - 0.25 * y) * std::pow(x, 2.4 * y - 2.0);  // la ecuación 8 ya da ε en %
-    const double rp = (1.25 - 0.625 * y) * std::pow(x, y - 0.57);
+    // la ecuación 8 ya da ε en %; con pi/p0 >= 0.8 saldría negativa: el sostenimiento detiene el squeezing (ε = 0)
+    const double pct = std::max(0.0, (0.2 - 0.25 * y) * std::pow(x, 2.4 * y - 2.0));
+    const double rp = std::max(1.0, (1.25 - 0.625 * y) * std::pow(x, y - 0.57));  // la zona plástica no baja de R
     const char cls = pct < 1 ? 'A' : pct < 2.5 ? 'B' : pct < 5 ? 'C' : pct < 10 ? 'D' : 'E';
     return {pct, rp * radius_m, pct / 100.0 * radius_m, cls, x <= 0.5 && y <= 0.5,
             {"Squeezing-Hoek-Marinos-2000", Verification::PrimaryLaterAuthors,

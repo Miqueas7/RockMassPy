@@ -250,7 +250,7 @@ def _tunnel(a) -> int:
     inp = TunnelInput(radius_m=a.radius, p0_mpa=a.p0, nu=a.nu, criterion=a.criterion, e_mpa=a.e, c_mpa=a.c,
                       phi_deg=a.phi, sigma_ci_mpa=a.sigci, gsi=a.gsi, mi=a.mi, d=a.d, psi_deg=a.psi,
                       k_ratio=a.k_ratio, shape=a.shape)
-    hoek = {i.name for i in HOEK_SUPPORT_TABLE}
+    hoek = {i.name: i for i in HOEK_SUPPORT_TABLE}
     supports = []
     for spec in a.support or ():
         name, sep, spacing = spec.rpartition(":")
@@ -262,7 +262,9 @@ def _tunnel(a) -> int:
             raise ValueError("--support spacing must be a number: NAME[:SPACING]") from None
         if name not in hoek:
             raise ValueError("unknown Hoek support item in --support; see HOEK_SUPPORT_TABLE")
-        supports.append(SupportCapacity(name, "hoek", hoek_item=name, spacing_m=sp, eps_sm=a.eps_sm))
+        # --eps-sm solo completa los ítems sin εsm publicada (el shotcrete de 50 mm a 28 días conserva su 0.001)
+        eps = a.eps_sm if hoek[name].eps_sm is None else None
+        supports.append(SupportCapacity(name, "hoek", hoek_item=name, spacing_m=sp, eps_sm=eps))
     if a.support_code:
         if not a.capacity:
             raise ValueError("--support-code needs --capacity")
@@ -1117,7 +1119,8 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--support", action="append", metavar="NAME[:SPACING]", help="Hoek table item, repeatable")
     c.add_argument("--capacity", metavar="FILE", help="capacity sheet (.xlsx or .csv)")
     c.add_argument("--support-code", action="append", metavar="CODE", help="row of --capacity, repeatable")
-    c.add_argument("--eps-sm", type=float, metavar="F", help="maximum average strain of the --support items")
+    c.add_argument("--eps-sm", type=float, metavar="F",
+                   help="maximum average strain of the --support items that have no published one")
     c.add_argument("--install-distance", type=float, metavar="M")
     c.add_argument("--diameter", type=float, metavar="M", help="tunnel diameter D for Hoek support items; default 2R")
     c.add_argument("--ldp", choices=("PANET1995", "UNLU_GERCEK2003", "CHERN1998", "VD2009"), default="VD2009")

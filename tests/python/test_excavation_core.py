@@ -56,6 +56,9 @@ def test_hoek_marinos():
     assert s.strain_pct == pytest.approx(1.96, abs=0.01) and s.squeezing_class == "B"
     assert not rm.hoek_marinos(2.4, 4, 0, 2).in_fit_range
     assert s.info.method_id == "Squeezing-Hoek-Marinos-2000"
+    s = rm.hoek_marinos(1, 4, 3.6, 2)  # pi/p0 = 0.9: la ecuación 8 daría ε < 0
+    assert s.strain_pct == 0 and s.squeezing_class == "A" and not s.in_fit_range and s.plastic_radius_m >= 2
+    assert rm.hoek_marinos(12, 4, 0, 2).plastic_radius_m == 2  # la ecuación 9 daría rp < R
     with pytest.raises(ValueError, match="p0_mpa"):
         rm.hoek_marinos(1, 0, 0, 2)
     with pytest.raises(ValueError, match="pi_mpa"):
@@ -171,7 +174,9 @@ def test_interaction_beyond_elastic_limit():
     inp = _rst1()
     weak = [rm.SupportElement(code="weak", psm_mpa=0.1, stiffness_mpa=500)]
     r = rm.interaction_mc(inp, weak, _u_install(inp, rm.Ldp.CHERN1998), rm.Combination.STIFFNESS)
-    assert r.found and not r.elastic and r.fs < 1
+    assert r.found and not r.elastic
+    # FS con la recta elástica prolongada (D6), recalculado aparte por bisección de 500·(u(p) − u_in)/R = p
+    assert r.fs == pytest.approx(0.46355, abs=1e-5)
     assert r.p_eq_mpa == pytest.approx(0.1)
 
 

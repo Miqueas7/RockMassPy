@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 import rockmasspy as rm
@@ -86,6 +88,81 @@ def test_tunnel_uncertainty_bad_sample():
     msg = str(e.value)
     assert "narrow" in msg and "minimum" in msg and "maximum" in msg
     assert not any(t in msg for t in ("90", "110", "Received"))
+
+
+N_ERM = "Erm from Hoek-Carranza-Corkum (2002)"
+
+
+def test_hb_d2_uses_user_e_mpa():
+    base = analyze_tunnel(_rst1())
+    assert N_ERM in base.notes
+    r = analyze_tunnel(_rst1(e_mpa=5000))
+    assert r.u_max_m < base.u_max_m / 5 and N_ERM not in r.notes
+    assert "e_mpa given by the user replaces Erm from Hoek-Carranza-Corkum (2002)" in r.notes
+    u = tunnel_uncertainty(_rst1(), {"e_mpa": pb.uniform(100, 5000)}, n=20)
+    assert u.outputs["strain_pct"].sd > 0
+
+
+def test_hb_ignored_inputs_get_notes():
+    r = analyze_tunnel(_rst1(a=0.7, mb=9.0, s=0.5))
+    assert "parameter 'a' is ignored: it comes from 'gsi', 'mi' and 'd'" in r.notes
+    assert "parameters 'mb' and 's' are ignored: they come from 'gsi', 'mi' and 'd'" in r.notes
+    assert r.u_max_m == pytest.approx(analyze_tunnel(_rst1()).u_max_m, rel=1e-12)
+
+
+def test_hb_gsi_100_has_no_jump():
+    def run(gsi):
+        return analyze_tunnel(TunnelInput(radius_m=6, p0_mpa=1.62, nu=0.3, criterion="HB", sigma_ci_mpa=100, gsi=gsi,
+                                          mi=10))
+    a, b = run(99.99), run(100)  # a = 0.5 exacto en GSI = 100: antes pedía e_mpa
+    assert b.method == "GRC-HB-Carranza-Torres-Fairhurst-2000" and N_ERM in b.notes
+    assert b.u_max_m == pytest.approx(a.u_max_m, rel=0.01)
+
+
+def test_hb_a_half_squeezing_uses_global_strength():
+    # σcm global de Hoek (2002) con a = 0.5: 30·(1.7 + 4s − 0.5(1.7 − 8s))·(1.7/4 + s)^−0.5/7.5 = 5.382 MPa;
+    # ε = 0.2·(5.382/30)^−2 = 6.214 % (clase D). Con σci·√s salía 51 % (E).
+    inp = TunnelInput(radius_m=3.82, p0_mpa=30, nu=0.25, criterion="HB", e_mpa=2500, sigma_ci_mpa=30, mb=1.7,
+                      s=3.9e-3)
+    sq = analyze_tunnel(inp).squeezing
+    assert sq.strain_pct == pytest.approx(6.2138, abs=1e-4) and sq.squeezing_class == "D"
+
+
+def test_errors_do_not_repeat_values():
+    for kw in ({"gsi": 777.7}, {"sigma_ci_mpa": -777.7}, {"d": 777.7}):
+        with pytest.raises(ValueError) as e:
+            analyze_tunnel(dataclasses.replace(_rst1(), **kw))
+        assert "777.7" not in str(e.value) and "Received" not in str(e.value)
+    bad = SupportCapacity("ZZSENT", "bolt", psm_mpa=-777.7, eps_sm=0.002)
+    with pytest.raises(ValueError) as e:
+        analyze_tunnel(_rst1(), supports=[bad], install_distance_m=3)
+    assert "ZZSENT" not in str(e.value) and "777.7" not in str(e.value)
+
+
+def test_phi_90_is_a_value_error():
+    with pytest.raises(ValueError, match="phi_deg"):
+        analyze_tunnel(TunnelInput(radius_m=3, p0_mpa=10, nu=0.3, criterion="MC", e_mpa=2000, c_mpa=0.5, phi_deg=90))
+
+
+def test_u_install_exact_and_no_crossing_needs_attention():
+    r = analyze_tunnel(_rst1(), supports=[_bolt()], install_distance_m=3, ldp="CHERN1998", combination="rocsupport3")
+    # Chern (1998) en X/R = 0.5: (1 + e^(−0.5/1.10))^−1.7 = 0.433649 de u_max
+    assert r.u_install_m == pytest.approx(0.0528311, abs=1e-7)
+    late = analyze_tunnel(_rst1(), supports=[_bolt()], install_distance_m=1000)
+    assert not late.interaction.found and late.interaction.fs is None and late.needs_attention
+    assert "support does not intersect the ground reaction curve" in late.warnings
+
+
+def test_strain_above_100_pct_note():
+    r = analyze_tunnel(TunnelInput(radius_m=3, p0_mpa=10, nu=0.3, criterion="MC", e_mpa=100, c_mpa=0.05,
+                                   phi_deg=20))
+    assert r.strain_pct > 100 and "outside model validity (strain > 100 %)" in r.notes
+    assert "outside model validity (strain > 100 %)" not in analyze_tunnel(_rst1()).notes
+
+
+def test_uncertainty_counts_no_crossing_apart():
+    u = tunnel_uncertainty(_rst1(), {"gsi": pb.uniform(14, 16)}, supports=[_bolt()], install_distance_m=400, n=50)
+    assert u.support_probabilities == {"fs_below_1": 0.0, "no_crossing": 1.0}
 
 
 def test_support_diameter_changes_hoek_lining():
