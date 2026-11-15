@@ -58,5 +58,6 @@ __all__ += ["DOMAIN_BOX_MARGIN", "DOMAIN_CHI2_LEVEL", "Surrogate", "SurrogateDat
             "fit_surrogate", "load_runs"]
 from .surrogate import USEFUL_RMSE_RATIO, SurrogateValidation, validate_surrogate  # noqa: E402
 __all__ += ["USEFUL_RMSE_RATIO", "SurrogateValidation", "validate_surrogate"]
-from .surrogate import OOD_WARN_FRACTION, SurrogatePof, surrogate_pof  # noqa: E402
-__all__ += ["OOD_WARN_FRACTION", "SurrogatePof", "surrogate_pof"]
+from .surrogate import (OOD_WARN_FRACTION, SurrogatePof, load_points, load_variables,  # noqa: E402
+                        surrogate_pof)
+__all__ += ["OOD_WARN_FRACTION", "SurrogatePof", "surrogate_pof", "load_points", "load_variables"]

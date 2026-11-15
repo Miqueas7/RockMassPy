@@ -40,6 +40,7 @@ REPORT_TEXTS: dict[str, dict[str, str]] = {
     "h_description": {"es": "Elementos", "en": "Elements"},
     "h_labor": {"es": "Labor", "en": "Labor"},
     "h_count": {"es": "Tramos", "en": "Tramos"},
+    "h_times": {"es": "Veces", "en": "Times"},
     "h_warning": {"es": "Aviso", "en": "Warning"},
     "cap_classes": {"es": "Clases y sostenimiento", "en": "Classes and support"},
     "cap_catalog": {"es": "Catálogo de sostenimiento", "en": "Support catalog"},

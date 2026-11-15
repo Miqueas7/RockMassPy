@@ -18,6 +18,7 @@ from scipy.interpolate import RBFInterpolator
 from scipy.stats import chi2
 
 from .. import _rockmasspy_core as rm
+from ..probabilistic import Distribution
 from ..external import _blank, _number, _rows
 
 # decisiones de diseño (por confirmar, S3): margen de la caja y nivel de la chi cuadrada
@@ -70,17 +71,21 @@ def load_runs(path, *, sheet: str = "Corridas", output: str, group: str | None =
     rows = [r for r in rows if not all(_blank(v) for v in r)]
     cell = lambda r, i: r[i] if i < len(r) else None  # noqa: E731
 
-    def numeric(i):
+    def numeric(i, h):
         vals = [cell(r, i) for r in rows if not _blank(cell(r, i))]
-        try:
-            for v in vals:
+        ok = 0
+        for v in vals:
+            try:
                 _number(v, sheet, 0, "", dec)
-        except ValueError:
-            return False
-        return bool(vals)
+                ok += 1
+            except ValueError:
+                pass
+        if 0 < ok < len(vals):  # una celda con texto en una columna numérica suele ser un error de digitación
+            raise ValueError(f"sheet '{sheet}', column '{h}': mixed numeric and text cells")
+        return ok > 0
 
     if inputs is None:
-        inputs = [h for h, i in col.items() if h not in (output, group) and numeric(i)]
+        inputs = [h for h, i in col.items() if h not in (output, group) and numeric(i, h)]
     else:
         inputs = list(inputs)
         if any(h not in col for h in inputs):
@@ -162,6 +167,9 @@ class Surrogate:
 def fit_surrogate(data: SurrogateData, *, kind: str = "rbf", smoothing: float = 0.0) -> Surrogate:
     if kind not in KINDS:
         raise ValueError(f"kind: must be one of {', '.join(KINDS)}")
+    if not (isinstance(smoothing, (int, float)) and not isinstance(smoothing, bool) and math.isfinite(smoothing)
+            and smoothing >= 0):
+        raise ValueError("smoothing: must be a finite number >= 0")
     X, y = data.X, data.y
     n, p = X.shape
     if kind == "poly2" and n < (p + 1) * (p + 2) // 2 + 1:  # al menos un grado de libertad tras los coeficientes
@@ -222,6 +230,9 @@ def validate_surrogate(data: SurrogateData, *, kind: str = "rbf", k: int = 5, se
                        smoothing: float = 0.0) -> SurrogateValidation:
     from .validation import group_kfold, leave_one_group_out, random_kfold
 
+    if not (isinstance(smoothing, (int, float)) and not isinstance(smoothing, bool) and math.isfinite(smoothing)
+            and smoothing >= 0):
+        raise ValueError("smoothing: must be a finite number >= 0")
     n = len(data.y)
     notes: list[str] = []
     n_groups = len(set(data.groups)) if data.groups is not None else 0
@@ -270,7 +281,8 @@ class SurrogatePof:
     """`pof` = fracción de muestras válidas (dentro del dominio) con FS < umbral; las `n_out_of_domain` se excluyen.
 
     Es condicional al dominio del sustituto y puede quedar del lado inseguro (las colas excluidas suelen fallar más):
-    `pof_lower` (las excluidas no fallan) y `pof_upper` (todas fallan) acotan la PoF de la distribución completa.
+    `pof_lower` (las excluidas no fallan) y `pof_upper` (todas fallan) acotan el efecto de las excluidas, no el error
+    del sustituto.
     """
 
     pof: float
@@ -293,7 +305,6 @@ def surrogate_pof(surrogate: Surrogate, variables, *, n: int = 20000, sampling: 
 
     if not (isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and math.isfinite(threshold)):
         raise ValueError("threshold: must be a finite number")
-    from ..probabilistic import Distribution
     if not all(isinstance(d, Distribution) for d in variables.values()):
         raise ValueError("variables: every value must be a Distribution")
     if not set(variables) <= set(surrogate.names):
@@ -315,7 +326,8 @@ def surrogate_pof(surrogate: Surrogate, variables, *, n: int = 20000, sampling: 
         notes += ("PoF conditional on the surrogate domain; see pof_lower and pof_upper",)
     if surrogate.kind == "poly2":
         notes += ("a quadratic surface can bias the PoF near the threshold; check it with kind='rbf'",)
-    warns = ("many samples outside the surrogate domain; the PoF covers only the surrogate domain",)         if n_ood / n > OOD_WARN_FRACTION else ()
+    warns = (("many samples outside the surrogate domain; the PoF covers only the surrogate domain",)
+             if n_ood / n > OOD_WARN_FRACTION else ())
     n_fail = int(np.sum(fs < threshold))
     p05, p50, p95 = np.percentile(fs, [5, 50, 95])
     return SurrogatePof(n_fail / n_valid, n, n_valid, n_ood, float(fs.mean()), float(p05), float(p50),
@@ -351,7 +363,6 @@ def load_variables(path, names: Sequence[str], *, sheet: str = "Distribuciones")
     Reusa el lector común (validación de la 3B); el enlace es la propia `variable`, que debe ser una entrada del sustituto.
     """
     from ..blocks import _KINDS, _check_distribution, load_distribution_rows
-    from ..probabilistic import Distribution
 
     by_fold = {n.casefold(): n for n in names}  # el lector normaliza la variable a minúsculas
 

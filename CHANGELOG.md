@@ -30,8 +30,11 @@ Phase 8C: 2D boundary elements (stresses around excavations). Phase 8D: surrogat
 - The exact Examine2D SF formula is [NV] (not verified); the 2D mode is an approximation.
 - The generalized Hoek-Brown SF (a other than 0.5) is numeric and has no published oracle.
 - Surrogate: box margin 5 %, chi-squared level 0.99 for the domain, useful when RMSE < 0.5 times the mean model's,
-  out-of-domain warning above 5 % of samples, `rbf` as default (on the planar bench `poly2` gave 1.8 times the true
-  PoF on the full-range bench (1.55 in example 18) while its validation looked fine).
+  out-of-domain warning above 5 % of samples, and `rbf` as default: on the planar bench `poly2` validated well
+  (grouped) yet gave about 1.8 times the true PoF with cohesion and friction sampled (1.55 times in example 18, which
+  also samples the water fill).
+- Surrogate: the out-of-domain warning is triggered by the share of samples, not by their effect on the PoF (with
+  4.9 % excluded the conditional PoF was 11 % below the truth; the bounds are always printed).
 - In RS2 mode, tension is checked with the minimum of the three principal stresses (including sigma_z), which is
   conservative; RS2's text says "Sigma 3".
 

@@ -810,11 +810,13 @@ aviso lo dice. No reemplaza a RS2 ni a Examine2D. Ver `examples/17-elementos-de-
 Cuando cada corrida en Slide2, RS2 o FLAC3D es lenta, `fit_surrogate` ajusta un reemplazo rápido (por omisión `rbf`;
 `poly2` es opcional) a una tabla de corridas, `validate_surrogate` mide su error y `surrogate_pof` calcula la
 probabilidad de falla con miles de muestras. No extrapola: un punto fuera de la caja de las corridas (margen de 5 %) o
-muy lejos de ellas (nivel χ² de 0,99) se rechaza (`FS = nan`), y las muestras excluidas así se cuentan, con
-`pof_lower` y `pof_upper` como cotas de la PoF de la distribución completa. Valídalo agrupado por escenario (es lo
-que hace cuando das una columna de grupo): los pliegues aleatorios se ven mejor y engañan. Es «útil» si su RMSE es
-menor que 0,5 veces el del modelo de la media. Una buena validación no asegura una buena PoF: en el banco planar
-`poly2` valida bien y aun así da 1,55 veces la PoF verdadera en el ejemplo, hasta 1,8 en el banco de rango completo, por eso `rbf` es el valor por omisión. No
+muy lejos de ellas (nivel χ² de 0,99) se rechaza (`FS = nan`), y las muestras excluidas así se cuentan,
+con `pof_lower` y `pof_upper` como cotas de lo que pueden cambiar las muestras excluidas (no incluyen el error del
+propio sustituto). El dominio (caja y elipsoide) no detecta los vacíos entre escenarios. Valídalo agrupado por
+escenario (es lo que hace cuando das una columna de grupo): los pliegues aleatorios se ven mejor y engañan. Es «útil»
+si su RMSE es menor que 0,5 veces el del modelo de la media. Una buena validación no asegura una buena PoF: en el
+banco planar `poly2` valida bien y aun así da cerca de 1,8 veces la PoF verdadera cuando se muestrean la cohesión y
+la fricción (1,55 veces en el ejemplo 18, que también muestrea el agua), por eso `rbf` es el valor por omisión. No
 reemplaza la corrida final en el programa de origen.
 
 ```python

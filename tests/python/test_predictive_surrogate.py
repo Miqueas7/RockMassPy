@@ -237,3 +237,21 @@ def test_pof_poly2_note_and_input_checks():
     with pytest.raises(ValueError, match="variables") as e:
         surrogate_pof(s, {"cohesion": 7.5})
     assert "7.5" not in str(e.value)
+
+
+def test_load_runs_mixed_column_raises_and_text_column_skipped(tmp_path):
+    f = tmp_path / "c.csv"
+    rows = ["a,b,nota,fs"] + [f"{i},{'3O.5' if i == 4 else i},x,{i}" for i in range(8)]
+    f.write_text("\n".join(rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="sheet 'c', column 'b': mixed numeric and text cells") as e:
+        load_runs(f, sheet="c", output="fs")
+    assert "3O" not in str(e.value)
+    assert load_runs(f, sheet="c", output="fs", inputs=["a"]).names == ("a",)
+    f.write_text("\n".join(r.replace("3O.5", "3") for r in rows), encoding="utf-8")
+    assert load_runs(f, sheet="c", output="fs").names == ("a", "b")  # la columna de texto puro se salta
+
+
+@pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf")])
+def test_smoothing_validated(data, bad):
+    with pytest.raises(ValueError, match="smoothing: must be a finite number >= 0"):
+        fit_surrogate(data, smoothing=bad)

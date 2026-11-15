@@ -812,7 +812,7 @@ def _surrogate(a) -> int:
     if a.predict_output and Path(a.predict_output).suffix.lower() not in (".csv", ".xlsx"):
         raise ValueError("--predict-output must end in .csv or .xlsx")
     inputs = [c.strip() for c in a.inputs.split(",")] if a.inputs else None
-    data = load_runs(a.runs, output=a.output, group=a.group, inputs=inputs)
+    data = load_runs(a.runs, sheet=a.sheet, output=a.output, group=a.group, inputs=inputs)
     s = fit_surrogate(data, kind=a.kind, smoothing=a.smoothing)
     # todo se calcula antes del primer print: un error deja stdout vacío
     val = validate_surrogate(data, kind=a.kind, smoothing=a.smoothing) if (a.validate or a.report) else None
@@ -828,7 +828,7 @@ def _surrogate(a) -> int:
     print(f"inputs: {len(s.names)}")
     print(f"surrogate: {s.kind}")
     attn = bool(val) and not val.useful
-    if a.validate:
+    if val:
         print(f"validation: {val.folds_kind}, {val.n_folds} folds")
         print(f"rmse: {val.rmse:.4g}")
         print(f"rmse mean model: {val.rmse_mean_model:.4g}")

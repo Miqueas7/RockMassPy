@@ -630,7 +630,7 @@ def build_bem_report(results, *, title: str, lang: str = "es", author: str = "",
 
 def _ext_table(items, lang) -> Table:
     """Conteo de avisos agrupados por texto, sin ids."""
-    return Table(t("ex_cap_warnings", lang), (t("h_warning", lang), t("h_count", lang)),
+    return Table(t("ex_cap_warnings", lang), (t("h_warning", lang), t("h_times", lang)),
                  tuple((w, str(n)) for w, n in sorted(Counter(items).items(), key=lambda kv: (-kv[1], kv[0]))))
 
 

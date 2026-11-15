@@ -76,3 +76,24 @@ def test_errors_one_line_empty_stdout(runs_csv, tmp_path, capsys):
     assert main(["surrogate", "--runs", str(few), "--output", "fs"]) == 1
     cap = capsys.readouterr()
     assert cap.out == "" and "runs" in cap.err
+
+
+def test_sheet_flag_is_used(runs_csv, tmp_path, capsys):
+    openpyxl = pytest.importorskip("openpyxl")
+    f, d = runs_csv
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "MisCorridas"
+    ws.append([*d.names, "fs", "escenario"])
+    for x, y, g in zip(d.X, d.y, d.groups):
+        ws.append([*map(float, x), float(y), g])
+    xl = tmp_path / "r.xlsx"
+    wb.save(xl)
+    assert main([*BASE, "--runs", str(xl), "--sheet", "MisCorridas"]) == 0
+    assert "runs: 120" in capsys.readouterr().out
+
+
+def test_report_alone_prints_validation(runs_csv, tmp_path, capsys):
+    f, _ = runs_csv
+    main([*BASE, "--runs", str(f), "--report", str(tmp_path / "r.html")])
+    assert "rmse:" in capsys.readouterr().out

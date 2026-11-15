@@ -783,11 +783,13 @@ replace RS2 or Examine2D. See `examples/17-elementos-de-contorno/`, `plot_bem`, 
 When each run in Slide2, RS2 or FLAC3D is slow, `fit_surrogate` fits a fast stand-in (default `rbf`; `poly2` is an
 option) to a table of runs, `validate_surrogate` measures its error, and `surrogate_pof` computes the probability of
 failure on thousands of samples. It does not extrapolate: a point outside the box of the runs (5 % margin) or too
-far from them (chi-squared level 0.99) is refused (`FS = nan`), and samples excluded this way are counted, with
-`pof_lower` and `pof_upper` bounding the PoF of the full distribution. Validate it grouped by scenario (the default
-when you give a group column): random folds look better and mislead. It is "useful" when its RMSE is below 0.5 times
-that of the mean model. A good validation does not guarantee a good PoF: on the planar bench `poly2` validates well
-and still gives 1.55x the true PoF in the example, up to 1.8x on the full-range bench, which is why `rbf` is the default. It does not replace the final run
+far from them (chi-squared level 0.99) is refused (`FS = nan`), and samples excluded this way are counted,
+with `pof_lower` and `pof_upper` bounding what the excluded samples can change (they do not include the surrogate's
+own error). The domain (box plus ellipsoid) does not detect gaps between scenarios. Validate it grouped by scenario
+(the default when you give a group column): random folds look better and mislead. It is "useful" when its RMSE is
+below 0.5 times that of the mean model. A good validation does not guarantee a good PoF: on the planar bench `poly2`
+validates well and still gives about 1.8 times the true PoF when cohesion and friction are sampled (1.55 times in
+example 18, which also samples the water fill), which is why `rbf` is the default. It does not replace the final run
 in the source program.
 
 ```python
