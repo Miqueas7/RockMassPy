@@ -13,7 +13,8 @@ NAN = float("nan")
 @given(st.floats(0, 100), st.floats(0, 100))
 def test_rqd_priest_hudson_decreases(l1, l2):
     lo, hi = sorted((l1, l2))
-    assert rm.rqd_priest_hudson(lo).rqd_pct >= rm.rqd_priest_hudson(hi).rqd_pct
+    # tolerancia de redondeo: cerca de λ = 0 la fórmula difiere en un ulp
+    assert rm.rqd_priest_hudson(lo).rqd_pct >= rm.rqd_priest_hudson(hi).rqd_pct - 1e-9
 
 
 @settings(deadline=None)
