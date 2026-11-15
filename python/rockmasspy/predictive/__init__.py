@@ -52,3 +52,7 @@ __all__ += ["ExponentialHazardFit", "exponential_hazard_map_fit", "ngi_category"
 __all__ += ["FrailtyHazardFit", "frailty_hazard_map_fit", "poisson_deviance"]
 from .mine import SCENARIOS, MineScenario, MineTruth, synthetic_mine  # noqa: E402
 __all__ += ["SCENARIOS", "MineScenario", "MineTruth", "synthetic_mine"]
+from .surrogate import (DOMAIN_BOX_MARGIN, DOMAIN_CHI2_LEVEL, Surrogate, SurrogateData,  # noqa: E402
+                        SurrogatePrediction, fit_surrogate, load_runs)
+__all__ += ["DOMAIN_BOX_MARGIN", "DOMAIN_CHI2_LEVEL", "Surrogate", "SurrogateData", "SurrogatePrediction",
+            "fit_surrogate", "load_runs"]
