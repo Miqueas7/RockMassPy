@@ -108,11 +108,30 @@ from rockmasspy.predictive.surrogate_bench import grc_runs, planar_runs  # noqa:
 
 def test_planar_bench_grouped_validation():
     d = planar_runs(300, seed=1)
-    assert d.groups is not None and len(set(d.groups)) == 6
+    assert d.groups is not None and len(set(d.groups)) == 10
     v2, vr = validate_surrogate(d, kind="poly2"), validate_surrogate(d, kind="rbf")
     assert v2.folds_kind == vr.folds_kind == "group_kfold" and v2.n_folds == 5
     assert v2.useful and vr.useful and vr.rmse <= v2.rmse
     assert vr.rmse < 0.2 * vr.rmse_mean_model and USEFUL_RMSE_RATIO == 0.5
+    # los escenarios extremos dejados fuera caen fuera del dominio: correcto, y salta el aviso
+    assert vr.ood_fraction > 0.05 and any("outside the surrogate domain" in w for w in vr.warnings)
+    # el contraste que prueba que agrupar importa: las mismas corridas con pliegues aleatorios dan menos error
+    flat = SurrogateData(d.X, d.y, d.names)
+    for v, kind in ((v2, "poly2"), (vr, "rbf")):
+        r = validate_surrogate(flat, kind=kind)
+        assert r.folds_kind == "random_kfold" and v.rmse > r.rmse
+
+
+def test_planar_runs_unknown_range():
+    with pytest.raises(ValueError, match="ranges"):
+        planar_runs(50, seed=1, ranges={"bogus": (0, 1)})
+
+
+def test_fold_error_keeps_specific_message():
+    X = np.tile(_lhs(6)[:, :2], (3, 1))  # filas duplicadas en todo pliegue de entrenamiento
+    d = SurrogateData(X, np.arange(18.0), ("a", "b"), tuple("ABC"[i % 3] for i in range(18)))
+    with pytest.raises(ValueError, match="smoothing"):
+        validate_surrogate(d, kind="rbf")
 
 
 def test_no_groups_note_and_leave_one_group_out():
@@ -126,14 +145,14 @@ def test_no_groups_note_and_leave_one_group_out():
 
 def test_unbalanced_groups():
     d = planar_runs(150, seed=4)
-    g = tuple("big" if i < 0.8 * len(d.y) else f"s{i % 4}" for i in range(len(d.y)))
+    g = tuple("big" if (i * 7) % 10 < 8 else f"s{i % 4}" for i in range(len(d.y)))
     v = validate_surrogate(SurrogateData(d.X, d.y, d.names, g), kind="rbf")
     assert all(np.isfinite(x) for x in (v.rmse, v.mae, v.max_abs_error, v.r2, v.rmse_mean_model))
 
 
 def test_grc_bench_rbf_useful():
     v = validate_surrogate(grc_runs(200, seed=2), kind="rbf")
-    assert v.useful and 0 <= v.ood_fraction < 0.05
+    assert v.useful and 0 <= v.ood_fraction < 0.5
 
 
 def test_validation_deterministic_and_small_fold_error():

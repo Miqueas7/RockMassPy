@@ -227,7 +227,8 @@ def validate_surrogate(data: SurrogateData, *, kind: str = "poly2", k: int = 5, 
     n_groups = len(set(data.groups)) if data.groups is not None else 0
     if n_groups < 2:
         folds, folds_kind = random_kfold(n, k=k, seed=seed), "random_kfold"
-        notes.append("no groups given: random folds overestimate accuracy")
+        notes.append("no groups given: random folds overestimate accuracy" if n_groups == 0
+                     else "a single group: random folds used")
     elif n_groups >= k:
         folds, folds_kind = group_kfold(data.groups, k=k, seed=seed), "group_kfold"
     else:
@@ -238,10 +239,10 @@ def validate_surrogate(data: SurrogateData, *, kind: str = "poly2", k: int = 5, 
             s = fit_surrogate(SurrogateData(data.X[f.train], data.y[f.train], data.names), kind=kind,
                               smoothing=smoothing)
         except ValueError as e:
-            if not str(e).startswith("runs:"):
-                raise
-            raise ValueError("runs: a training fold has too few or degenerate runs for this surrogate; "
-                             "use fewer folds or more runs") from None
+            if str(e).startswith("runs:"):
+                raise  # conserva el mensaje específico (p. ej. "use smoothing > 0")
+            raise ValueError("runs: a training fold is degenerate for this surrogate; use fewer folds or "
+                             "more runs") from None
         pred = s.predict(data.X[f.test])
         ok = pred.in_domain
         n_ood += int((~ok).sum())
