@@ -33,6 +33,7 @@
 #include "rockmasspy/toppling.hpp"
 #include "rockmasspy/bench.hpp"
 #include "rockmasspy/newmark.hpp"
+#include "rockmasspy/excavation.hpp"
 #include "rockmasspy/slip_search.hpp"
 
 namespace nb = nanobind;
@@ -689,6 +690,43 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("info", &NewmarkResult::info).def_ro("warnings", &NewmarkResult::warnings)
         .def_ro("notes", &NewmarkResult::notes);
     m.def("newmark_rigid_block", &newmark_rigid_block, nb::arg("input"));
+
+    // Excavaciones: Kirsch, elipse, Einstein-Schwartz, squeezing
+    nb::class_<KirschStress>(m, "KirschStress", "Kirsch stresses (MPa) at (r, theta) around a circular opening.")
+        .def_ro("sigma_r", &KirschStress::sigma_r).def_ro("sigma_theta", &KirschStress::sigma_theta)
+        .def_ro("tau_r_theta", &KirschStress::tau_r_theta).def_ro("info", &KirschStress::info);
+    nb::class_<KirschBoundary>(m, "KirschBoundary", "Boundary hoop stress (MPa) at crown and sidewall of a circle.")
+        .def_ro("crown_mpa", &KirschBoundary::crown_mpa).def_ro("sidewall_mpa", &KirschBoundary::sidewall_mpa)
+        .def_ro("info", &KirschBoundary::info);
+    nb::class_<EllipseEnds>(m, "EllipseEnds", "Boundary stress (MPa) at crown and sidewall of an ellipse.")
+        .def_ro("crown_mpa", &EllipseEnds::crown_mpa).def_ro("sidewall_mpa", &EllipseEnds::sidewall_mpa)
+        .def_ro("info", &EllipseEnds::info);
+    nb::class_<EinsteinSchwartzInput>(m, "EinsteinSchwartzInput", "Field, rock, lining and position for Einstein-Schwartz.")
+        .def(nb::init<>())
+        .def_rw("sigma_v_mpa", &EinsteinSchwartzInput::sigma_v_mpa).def_rw("k_ratio", &EinsteinSchwartzInput::k_ratio)
+        .def_rw("e_rock_mpa", &EinsteinSchwartzInput::e_rock_mpa).def_rw("nu_rock", &EinsteinSchwartzInput::nu_rock)
+        .def_rw("e_lining_mpa", &EinsteinSchwartzInput::e_lining_mpa)
+        .def_rw("nu_lining", &EinsteinSchwartzInput::nu_lining)
+        .def_rw("thickness_m", &EinsteinSchwartzInput::thickness_m).def_rw("radius_m", &EinsteinSchwartzInput::radius_m)
+        .def_rw("theta_deg", &EinsteinSchwartzInput::theta_deg);
+    nb::class_<LiningForces>(m, "LiningForces", "Thrust N (MN) and moment M (MN m) per metre of tunnel.")
+        .def_ro("n_mn", &LiningForces::n_mn).def_ro("m_mnm", &LiningForces::m_mnm)
+        .def_ro("c_star", &LiningForces::c_star).def_ro("f_star", &LiningForces::f_star)
+        .def_ro("info", &LiningForces::info);
+    nb::class_<Squeezing>(m, "Squeezing", "Hoek-Marinos strain, plastic radius, wall displacement and class A-E.")
+        .def_ro("strain_pct", &Squeezing::strain_pct).def_ro("plastic_radius_m", &Squeezing::plastic_radius_m)
+        .def_ro("wall_displacement_m", &Squeezing::wall_displacement_m)
+        .def_ro("squeezing_class", &Squeezing::squeezing_class).def_ro("in_fit_range", &Squeezing::in_fit_range)
+        .def_ro("info", &Squeezing::info);
+    m.def("kirsch_stress", &kirsch_stress, nb::arg("p_mpa"), nb::arg("k_ratio"), nb::arg("radius_m"), nb::arg("r_m"),
+          nb::arg("theta_deg"));
+    m.def("kirsch_boundary", &kirsch_boundary, nb::arg("p_mpa"), nb::arg("k_ratio"));
+    m.def("ellipse_boundary_stress", &ellipse_boundary_stress, nb::arg("sigma1_mpa"), nb::arg("sigma3_mpa"),
+          nb::arg("a_m"), nb::arg("b_m"), nb::arg("theta_deg"));
+    m.def("ellipse_ends", &ellipse_ends, nb::arg("p_mpa"), nb::arg("k_ratio"), nb::arg("width_m"), nb::arg("height_m"));
+    m.def("einstein_schwartz", &einstein_schwartz, nb::arg("input"));
+    m.def("hoek_marinos", &hoek_marinos, nb::arg("sigma_cm_mpa"), nb::arg("p0_mpa"), nb::arg("pi_mpa"),
+          nb::arg("radius_m"));
 
     // Búsqueda de la superficie crítica (malla circular y bloque, con afinado)
     nb::class_<CircularGrid>(m, "CircularGrid", "Grid of circle centres (nx, ny intervals) and radii per centre.")
