@@ -85,7 +85,7 @@ def test_coarse_pillar_warning_and_min_sf_split():
     b = bem.rectangle(4.05, 0, 8, 8, n_per_side=1)
     res = bem.analyze_bem([a, b], sigma1_mpa=30, sigma3_mpa=15, e_mpa=10000, nu=0.2, material=mat, max_element_m=4,
                           points=[(0.0, 0.0), (0.0, 3.9), (0.0, 30.0)])
-    w = "elements too coarse for the pillar width; values next to the pillar walls are unreliable — use max_element_m below half the narrowest gap"
+    w = bem.WARN_COARSE
     assert any(res.field.coarse)
     assert w in res.warnings and res.needs_attention
     assert res.min_sf_coarse is not None
@@ -100,3 +100,15 @@ def test_ubc_lab_geometry_runs():
     res = bem.analyze_bem(ex, sigma1_mpa=40, sigma3_mpa=20, alpha_deg=0, sigma_z_mpa=30, e_mpa=30000, nu=0.2,
                           material=mat)
     assert res.min_sf is not None and math.isfinite(res.min_sf)
+
+
+def test_default_element_size_small_circle_next_to_large_rectangle():
+    res = bem.analyze_bem([bem.circle(0, 0, 1), bem.rectangle(30, 0, 40, 20)], sigma1_mpa=30, sigma3_mpa=15,
+                          e_mpa=10000, nu=0.2, points=[(10.0, 10.0)])
+    assert res.field.x == [10.0]
+
+
+def test_grid_non_integer_is_value_error_naming_grid():
+    with pytest.raises(ValueError, match="'grid'"):
+        bem.analyze_bem([bem.circle(0, 0, 1)], sigma1_mpa=30, sigma3_mpa=15, e_mpa=10000, nu=0.2,
+                        grid=(-3, 3, -3, 3, 10.5, 10))

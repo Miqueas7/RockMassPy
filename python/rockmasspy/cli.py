@@ -19,7 +19,7 @@ from .report.texts import t
 from .table_files import load_table
 from .tramos import load_tramos
 
-_INPUT_ERRORS = (ValueError, ImportError, OSError)
+_INPUT_ERRORS = (ValueError, ImportError, OSError, RuntimeError)
 
 
 def _column_map(path):
@@ -371,8 +371,8 @@ def _bem(a) -> int:
             return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else x
 
         rows = [[v(f.x[k]), v(f.y[k]), v(f.sigma1[k]), v(f.sigma3[k]), v(f.sigma_z[k]), v(f.angle1[k]), v(f.sf[k]),
-                 int(f.tension[k]), int(f.inside[k])] for k in range(len(f.x))]
-        print(f"output: {write_table(a.output, ('x', 'y', 'sigma1', 'sigma3', 'sigma_z', 'angle1_deg', 'sf', 'tension', 'inside'), rows, sheet='Campo')}")
+                 int(f.tension[k]), int(f.inside[k]), int(f.coarse[k]), int(f.corrected[k])] for k in range(len(f.x))]
+        print(f"output: {write_table(a.output, ('x', 'y', 'sigma1', 'sigma3', 'sigma_z', 'angle1_deg', 'sf', 'tension', 'inside', 'coarse', 'corrected'), rows, sheet='Campo')}")
     if a.chart:
         from .viz import plot_bem
 

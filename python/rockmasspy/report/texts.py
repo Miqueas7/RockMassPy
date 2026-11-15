@@ -1171,7 +1171,8 @@ REPORT_TEXTS.update({
                         "en": "Elements too coarse for the boundary curvature"},
     "bem_w_corrected": {"es": "Puntos cercanos al borde corregidos", "en": "Points near the boundary corrected"},
     "bem_w_tension": {"es": "Hay zona en tracción", "en": "Tension zone present"},
-    "bem_w_coarse": {"es": "Elementos demasiado gruesos para el ancho del pilar; los valores junto a sus paredes no "
-                           "son confiables",
-                     "en": "Elements too coarse for the pillar width; values next to the pillar walls are unreliable"},
+    "bem_w_coarse": {"es": "Elementos demasiado gruesos para un pilar angosto o una esquina entrante; los valores junto a esas "
+                           "paredes no son confiables: refina max_element_m",
+                     "en": "Elements too coarse for a narrow pillar or a re-entrant corner; values next to those walls are "
+                           "unreliable: refine max_element_m"},
 })

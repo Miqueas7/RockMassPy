@@ -799,8 +799,8 @@ print(r.min_sf, r.tension_count, r.warnings)
 
 Alcance: elástico, un material, deformación plana, medio infinito, sin gravedad y sin etapas. Un SF menor que 1 marca
 sobreesfuerzo, no la extensión de la falla (la salida lleva esa nota). El SF por omisión es el de RS2 (3D: usa el
-esfuerzo fuera del plano); `sf_mode="examine2d"` da el SF 2D al estilo de Examine2D. En el ejemplo publicado (sigma1 40,
-sigma3 10, sigma_z 10) Mohr-Coulomb da 1,146 (RS2) frente a 1,122 (2D) y Hoek-Brown 2,457 frente a 2,075. Si los
+esfuerzo fuera del plano); `sf_mode="examine2d"` da el SF 2D al estilo de Examine2D. Valores de referencia (salen de las fórmulas, no de una publicación) para sigma1 40, sigma3 10, sigma_z 10 con
+Mohr-Coulomb c = 5 MPa, phi = 30°: 1,146 (RS2) frente a 1,122 (2D); con Hoek-Brown m = 10, s = 1, sigci = 100 MPa: 2,457 frente a 2,075. Si los
 elementos son muy gruesos para el pilar más angosto, los puntos junto a sus paredes se marcan (`min_sf_coarse`) y un
 aviso lo dice. No reemplaza a RS2 ni a Examine2D. Ver `examples/17-elementos-de-contorno/`, `plot_bem`,
 `build_bem_report` y el comando `rockmass bem`.

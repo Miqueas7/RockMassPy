@@ -23,6 +23,8 @@ Phase 8C: 2D boundary elements (stresses around excavations).
 - Near-boundary remedy with c = 1.
 - The exact Examine2D SF formula is [NV] (not verified); the 2D mode is an approximation.
 - The generalized Hoek-Brown SF (a other than 0.5) is numeric and has no published oracle.
+- In RS2 mode, tension is checked with the minimum of the three principal stresses (including sigma_z), which is
+  conservative; RS2's text says "Sigma 3".
 
 ## [0.4.0] - 2026-11-14
 

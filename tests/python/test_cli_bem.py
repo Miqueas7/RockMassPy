@@ -80,3 +80,23 @@ def test_duplicate_orden_is_input_error(tmp_path, capsys):
     assert main(BASE + ["--excavations", str(f)]) == 1
     cap = capsys.readouterr()
     assert cap.out == "" and "'orden'" in cap.err and "ZZSENT" not in cap.err
+
+
+def test_output_has_coarse_and_corrected_columns(tmp_path, capsys):
+    out_csv = tmp_path / "campo.csv"
+    main(CIRCLE + ["--output", str(out_csv)])
+    capsys.readouterr()
+    head = out_csv.read_text(encoding="utf-8-sig").splitlines()[0]
+    assert "coarse" in head and "corrected" in head
+
+
+def test_core_runtime_error_is_single_error_line(monkeypatch, capsys):
+    import rockmasspy.bem as bem
+
+    def boom(*a, **k):
+        raise RuntimeError("singular matrix")
+
+    monkeypatch.setattr(bem, "analyze_bem", boom)
+    assert main(CIRCLE) == 1
+    cap = capsys.readouterr()
+    assert cap.err.startswith("error:") and "Traceback" not in cap.err

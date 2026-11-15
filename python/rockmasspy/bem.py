@@ -16,8 +16,8 @@ NOTE_ELASTIC = "elastic analysis: strength factor below 1 marks overstress, not 
 WARN_CURVATURE = "elements too coarse for the boundary curvature"
 WARN_CORRECTED = "points near the boundary corrected"
 WARN_TENSION = "tension zone present"
-WARN_COARSE = ("elements too coarse for the pillar width; values next to the pillar walls are unreliable — "
-               "use max_element_m below half the narrowest gap")
+WARN_COARSE = ("elements too coarse for a narrow pillar or a re-entrant corner; values next to those walls are "
+               "unreliable — refine max_element_m")
 
 # La regla de FORMULAS §5 es L <= 0.04·rho, pero con 128 elementos en un círculo L = 0.049·rho; el umbral 0.05 deja
 # pasar el valor por omisión y avisa de lo más grueso que eso.
@@ -158,7 +158,7 @@ def _core_error(exc: ValueError) -> ValueError:
     """Traduce los nombres de parámetro del núcleo a los de esta API (el mensaje no lleva valores)."""
     msg = str(exc)
     if "elements_per_side_hint" in msg:
-        return ValueError("parameter 'excavations' give more than 2048 elements; use a larger 'max_element_m'")
+        return ValueError("parameter 'excavations' gives more than 2048 elements; use a larger 'max_element_m'")
     return ValueError(re.sub(r"'(contours|vertices)'", "'excavations'", msg))
 
 
@@ -195,7 +195,7 @@ def analyze_bem(excavations, *, sigma1_mpa: float, sigma3_mpa: float, alpha_deg:
 
     `excavations`: lista de polígonos (listas de (x, y)); `grid` = (xmin, xmax, ymin, ymax, nx, ny) o `points`;
     sin ninguno, una caja de 3 veces la extensión de las excavaciones con 60 × 60 puntos.
-    `max_element_m` por omisión: el menor perímetro / 128. `sf_mode`: "rs2" o "examine2d".
+    `max_element_m` por omisión: max(menor perímetro / 128, perímetro total / 2000). `sf_mode`: "rs2" o "examine2d".
     """
     polys = [[(float(x), float(y)) for x, y in p] for p in excavations]
     if not polys:
@@ -205,7 +205,8 @@ def analyze_bem(excavations, *, sigma1_mpa: float, sigma3_mpa: float, alpha_deg:
     if grid is not None and points is not None:
         raise ValueError("parameters 'grid' and 'points' are mutually exclusive")
     if max_element_m is None:
-        max_element_m = min(_perimeter(p) for p in polys) / 128
+        # el tope de 2048 elementos limita el cociente entre el perímetro total y el elemento
+        max_element_m = max(min(_perimeter(p) for p in polys) / 128, sum(_perimeter(p) for p in polys) / 2000)
     try:
         sol = rm.bem_solve(rm.BemInput(
             contours=[rm.BemContour(vertices=p) for p in polys], sigma1_mpa=sigma1_mpa, sigma3_mpa=sigma3_mpa,
@@ -222,6 +223,9 @@ def analyze_bem(excavations, *, sigma1_mpa: float, sigma3_mpa: float, alpha_deg:
             cx, cy, w, h = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, max(xs) - min(xs), max(ys) - min(ys)
             grid = (cx - 1.5 * w, cx + 1.5 * w, cy - 1.5 * h, cy + 1.5 * h, 60, 60)
         xmin, xmax, ymin, ymax, nx, ny = grid
+        if not (float(nx).is_integer() and float(ny).is_integer()):
+            raise ValueError("parameter 'grid' needs integer nx and ny")
+        nx, ny = int(nx), int(ny)
         if nx < 2 or ny < 2 or not (xmax > xmin and ymax > ymin):
             raise ValueError("parameter 'grid' needs xmin < xmax, ymin < ymax and nx, ny of at least 2")
         points = [(xmin + (xmax - xmin) * i / (nx - 1), ymin + (ymax - ymin) * j / (ny - 1))
