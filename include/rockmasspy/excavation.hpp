@@ -1,7 +1,7 @@
 /**
  * @file excavation.hpp
- * @brief Excavaciones subterráneas en forma cerrada: Kirsch, borde de la elipse, revestimiento de Einstein y Schwartz
- *        y squeezing de Hoek y Marinos.
+ * @brief Excavaciones subterráneas en forma cerrada: Kirsch, borde de la elipse, revestimiento de Einstein y Schwartz,
+ *        squeezing de Hoek y Marinos, GRC, LDP, sostenimiento (SCC) y su FS en el cruce con la GRC.
  *
  * Fuentes (ecuaciones en docs/investigacion/FORMULAS_FASE8B.md §1, §2, §10 y §11.3): Kirsch (1898) según RS2-S p. 8 y
  * CC02 p. 26; elipse de Inglis (1913) según CC02 p. 26 (extremos deducidos de la misma fórmula); Einstein y Schwartz
@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -495,6 +496,196 @@ inline RadialStress reed_stress(const ReedInput& in, double r_m) {
     }
     const double a = std::pow(in.radius_m / r_m, 2) * (in.q_mpa - in.pi_mpa);  // todo elástico: σr(ro) = pi
     return {in.q_mpa - a, in.q_mpa + a, reed_info()};
+}
+
+// ---------------------------------------------------------------- LDP (§7)
+
+/// X* = x/R con x positivo detrás del frente (dentro del túnel ya excavado) y negativo delante.
+enum class Ldp { PANET1995, UNLU_GERCEK2003, CHERN1998, VD2009 };
+
+inline MethodInfo ldp_info(Ldp model) {
+    static const char* const ids[] = {"LDP-Panet-1995", "LDP-Unlu-Gercek-2003", "LDP-Chern-1998",
+                                      "LDP-Vlachopoulos-Diederichs-2009"};
+    static const char* const who[] = {"Panet (1995)", "Unlu and Gercek (2003)", "Fit to Chern et al. (1998)",
+                                      "Vlachopoulos and Diederichs (2009)"};
+    const int i = static_cast<int>(model);
+    return {ids[i], Verification::PrimaryLaterAuthors,
+            std::string(who[i]) + " as reproduced in KL08 Appendix 1 eq. A1.1-A1.7; original not read"};
+}
+
+namespace excavation_detail {
+inline void ldp_check(double rp_over_r, double nu) {
+    validation::require_finite(rp_over_r, "rp_over_r");
+    if (rp_over_r < 1.0) fail("rp_over_r", "must be at least 1");
+    poisson(nu, "nu");
+}
+}  // namespace excavation_detail
+
+/// u/umax en X* (KL08 ec. A1.1-A1.7). rp_over_r es el radio plástico sin sostenimiento (solo VD2009); nu, solo
+/// Unlu-Gercek.
+inline double ldp_ratio(Ldp model, double x_over_r, double rp_over_r, double nu) {
+    using namespace excavation_detail;
+    validation::require_finite(x_over_r, "x_over_r");
+    ldp_check(rp_over_r, nu);
+    const double x = x_over_r;
+    switch (model) {
+        case Ldp::PANET1995:
+            if (x < 0.0) fail("x_over_r", "must not be negative for PANET1995 (it starts at the face)");
+            return 0.25 + 0.75 * (1 - std::pow(3 / (3 + 4 * x), 2));
+        case Ldp::UNLU_GERCEK2003: {
+            const double u0 = 0.22 * nu + 0.19;
+            if (x <= 0.0) return u0 + (-0.22 * nu - 0.19) * (1 - std::exp((0.73 * nu + 0.81) * x));
+            const double bb = 0.39 * nu + 0.65;
+            return u0 + (-0.22 * nu + 0.81) * (1 - std::pow(bb / (bb + x), 2));
+        }
+        case Ldp::CHERN1998:
+            return std::pow(1 + std::exp(-x / 1.10), -1.7);
+        case Ldp::VD2009: {
+            const double u0 = std::exp(-0.15 * rp_over_r) / 3;
+            return x <= 0.0 ? u0 * std::exp(x) : 1 - (1 - u0) * std::exp(-3 * x / (2 * rp_over_r));
+        }
+    }
+    fail("ldp", "is not a known LDP model");
+}
+
+/// X* a la que el LDP de Vlachopoulos y Diederichs llega a u/umax = ratio (las demás no tienen inversa cerrada).
+inline double ldp_distance(Ldp model, double ratio, double rp_over_r, double nu) {
+    using namespace excavation_detail;
+    if (model != Ldp::VD2009) fail("ldp", "has no closed-form inverse; only VD2009 is supported");
+    validation::require_finite(ratio, "ratio");
+    if (!(ratio > 0.0 && ratio < 1.0)) fail("ratio", "must be within (0, 1)");
+    ldp_check(rp_over_r, nu);
+    const double u0 = std::exp(-0.15 * rp_over_r) / 3;
+    return ratio < u0 ? std::log(ratio / u0) : -2.0 / 3.0 * rp_over_r * std::log((1 - ratio) / (1 - u0));
+}
+
+// ---------------------------------------------------------------- SCC y cruce con la GRC (§8, §9)
+
+/// Sostenimiento elástico-perfectamente plástico: p = stiffness·(u − u_in)/R hasta psm (rigidez en MPa por u/R).
+struct SupportElement {
+    std::string code;
+    double psm_mpa = validation::unset, stiffness_mpa = validation::unset;
+};
+
+inline MethodInfo scc_info() {
+    return {"SCC-elastic-perfectly-plastic", Verification::PrimaryLaterAuthors,
+            "RocSupport support model (psm, eps_sm) as described in RST pp. 32-36 and the RocSupport help"};
+}
+
+/// Rigidez = psm/εsm (RST p. 36); eps_sm como fracción (0.002 = 0.2 %).
+inline SupportElement support_from_eps(const std::string& code, double psm_mpa, double eps_sm) {
+    excavation_detail::positive(psm_mpa, "psm_mpa");
+    excavation_detail::positive(eps_sm, "eps_sm");
+    return {code, psm_mpa, psm_mpa / eps_sm};
+}
+
+/// Rigidez del anillo grueso [V2, Secondary: UBC según Harrison y Hudson (2000)]; la psm la da el usuario.
+inline double thick_ring_stiffness(double e_mpa, double nu, double radius_m, double thickness_m) {
+    using namespace excavation_detail;
+    positive(e_mpa, "e_mpa");
+    poisson(nu, "nu");
+    positive(radius_m, "radius_m");
+    positive(thickness_m, "thickness_m");
+    if (thickness_m >= radius_m) fail("thickness_m", "must be less than 'radius_m'");
+    const double a2 = radius_m * radius_m, b2 = (radius_m - thickness_m) * (radius_m - thickness_m);
+    return e_mpa / (1 + nu) * (a2 - b2) / ((1 - 2 * nu) * a2 + b2);
+}
+
+/// STIFFNESS: rigideces sumadas y cada elemento contra su psm (Oreste 2009). ROCSUPPORT3: psm sumado y εsm
+/// promediado (RST pp. 37-38). ROCSUPPORT: psm sumado y εsm máximo (ayuda de RocSupport actual).
+enum class Combination { STIFFNESS, ROCSUPPORT3, ROCSUPPORT };
+
+/// En los modos RocSupport junta los elementos en uno solo; en STIFFNESS los devuelve tal cual.
+inline std::vector<SupportElement> combine_supports(const std::vector<SupportElement>& elements, Combination mode) {
+    using namespace excavation_detail;
+    if (elements.empty()) fail("elements", "must contain at least one support");
+    for (const auto& e : elements) {
+        positive(e.psm_mpa, "psm_mpa");
+        positive(e.stiffness_mpa, "stiffness_mpa");
+    }
+    if (mode == Combination::STIFFNESS) return elements;
+    SupportElement c{"", 0.0, 0.0};
+    double eps = 0.0;
+    for (const auto& e : elements) {
+        c.code += (c.code.empty() ? "" : "+") + e.code;
+        c.psm_mpa += e.psm_mpa;
+        const double ei = e.psm_mpa / e.stiffness_mpa;
+        eps = mode == Combination::ROCSUPPORT3 ? eps + ei / double(elements.size()) : std::max(eps, ei);
+    }
+    c.stiffness_mpa = c.psm_mpa / eps;
+    return {c};
+}
+
+struct Interaction {
+    bool found = false;
+    double p_eq_mpa = 0.0, u_eq_m = 0.0;
+    std::optional<double> fs;           // D6: con la recta elástica prolongada si algún elemento fluye
+    std::vector<double> fs_by_element;  // psm_i/p_i en el cruce de la recta elástica
+    bool elastic = false;
+    double rp_eq_m = 0.0, strain_eq_pct = 0.0;
+    MethodInfo info;
+    std::vector<std::string> warnings;
+};
+
+namespace excavation_detail {
+template <class Disp, class Rad>
+inline Interaction interaction(double radius, double p0, Disp disp, Rad rp_fn, const std::vector<SupportElement>& elements,
+                               double u_install_m, Combination mode, std::optional<Ldp> ldp) {
+    const auto els = combine_supports(elements, mode);
+    non_negative(u_install_m, "u_install_m");
+    const double umax = disp(0.0);  // valida la entrada de la GRC
+    const bool rs = mode != Combination::STIFFNESS;
+    Interaction r;
+    r.info = {"Support-interaction", rs ? Verification::Secondary : Verification::PrimaryLaterAuthors,
+              rs ? "GRC-SCC crossing (RST pp. 14-15, 36) with RocSupport combination of supports (RST pp. 37-38, help)"
+                 : "GRC-SCC crossing (RST pp. 14-15, 36) with summed stiffness of supports (Oreste 2009 eq. 24-25)"};
+    if (ldp && (*ldp == Ldp::PANET1995 || *ldp == Ldp::UNLU_GERCEK2003) && rp_fn(0.0) > 2 * radius)
+        r.warnings.push_back("LDP not valid for Rp > 2R; use VD2009");
+    if (u_install_m >= umax) {
+        r.u_eq_m = umax;
+        r.rp_eq_m = rp_fn(0.0);
+        r.strain_eq_pct = umax / radius * 100;
+        r.warnings.push_back("support does not intersect the ground reaction curve");
+        return r;
+    }
+    // Bisección en pi, equivalente a hacerla en u sin invertir la GRC: g(pi) = pi − p_SCC(u(pi)) crece con pi.
+    auto cross = [&](bool capped) {
+        double lo = 0.0, hi = p0;
+        for (int i = 0; i < 200 && hi - lo > 1e-13 * p0; ++i) {
+            const double mid = 0.5 * (lo + hi), du = std::max(disp(mid) - u_install_m, 0.0) / radius;
+            double s = 0.0;
+            for (const auto& e : els) s += capped ? std::min(e.stiffness_mpa * du, e.psm_mpa) : e.stiffness_mpa * du;
+            (mid > s ? hi : lo) = mid;
+        }
+        return 0.5 * (lo + hi);
+    };
+    const double p_lin = cross(false), du_lin = (disp(p_lin) - u_install_m) / radius;
+    for (const auto& e : els) r.fs_by_element.push_back(e.psm_mpa / (e.stiffness_mpa * du_lin));
+    r.fs = *std::min_element(r.fs_by_element.begin(), r.fs_by_element.end());
+    r.elastic = *r.fs >= 1.0;
+    r.found = true;
+    r.p_eq_mpa = r.elastic ? p_lin : cross(true);  // si algo fluye, el equilibrio real cae en la meseta
+    r.u_eq_m = disp(r.p_eq_mpa);
+    r.rp_eq_m = rp_fn(r.p_eq_mpa);
+    r.strain_eq_pct = r.u_eq_m / radius * 100;
+    return r;
+}
+}  // namespace excavation_detail
+
+/// Cruce de la GRC de Mohr-Coulomb con el sostenimiento instalado cuando la pared ya convergió u_install_m. Con
+/// `ldp` se añade el aviso de D4 si el modelo no vale para el radio plástico de esta GRC.
+inline Interaction interaction_mc(const GrcMcInput& in, const std::vector<SupportElement>& elements, double u_install_m,
+                                  Combination mode, std::optional<Ldp> ldp = std::nullopt) {
+    return excavation_detail::interaction(
+        in.radius_m, in.p0_mpa, [&](double pi) { return grc_mc_displacement(in, pi); },
+        [&](double pi) { return grc_mc_plastic_radius(in, pi); }, elements, u_install_m, mode, ldp);
+}
+
+inline Interaction interaction_hb(const GrcHbInput& in, const std::vector<SupportElement>& elements, double u_install_m,
+                                  Combination mode, std::optional<Ldp> ldp = std::nullopt) {
+    return excavation_detail::interaction(
+        in.radius_m, in.p0_mpa, [&](double pi) { return grc_hb_displacement(in, pi); },
+        [&](double pi) { return grc_hb_plastic_radius(in, pi); }, elements, u_install_m, mode, ldp);
 }
 
 }  // namespace rockmasspy

@@ -765,6 +765,39 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("grc_hb_plastic_radius", &grc_hb_plastic_radius, nb::arg("input"), nb::arg("pi_mpa"));
     m.def("grc_mc_from_hb", &grc_mc_from_hb, nb::arg("sigma_ci_mpa"), nb::arg("gsi"), nb::arg("mi"), nb::arg("d"),
           nb::arg("p0_mpa"), nb::arg("radius_m"), nb::arg("nu"), nb::arg("edition"));
+
+    // LDP, sostenimiento (SCC) y cruce con la GRC
+    nb::enum_<Ldp>(m, "Ldp", "Longitudinal displacement profile; X* = x/R, positive behind the face.")
+        .value("PANET1995", Ldp::PANET1995).value("UNLU_GERCEK2003", Ldp::UNLU_GERCEK2003)
+        .value("CHERN1998", Ldp::CHERN1998).value("VD2009", Ldp::VD2009);
+    nb::enum_<Combination>(m, "Combination", "How several supports combine: summed stiffness or RocSupport modes.")
+        .value("STIFFNESS", Combination::STIFFNESS).value("ROCSUPPORT3", Combination::ROCSUPPORT3)
+        .value("ROCSUPPORT", Combination::ROCSUPPORT);
+    m.def("ldp_info", &ldp_info, nb::arg("ldp"));
+    m.def("ldp_ratio", &ldp_ratio, nb::arg("ldp"), nb::arg("x_over_r"), nb::arg("rp_over_r"), nb::arg("nu"));
+    m.def("ldp_distance", &ldp_distance, nb::arg("ldp"), nb::arg("ratio"), nb::arg("rp_over_r"), nb::arg("nu"));
+    nb::class_<SupportElement>(m, "SupportElement",
+                               "Elastic-perfectly plastic support: p = stiffness*(u - u_in)/R up to psm (MPa).")
+        .def("__init__", [](SupportElement* self, std::string code, double psm_mpa, double stiffness_mpa) {
+                 new (self) SupportElement{std::move(code), psm_mpa, stiffness_mpa};
+             }, nb::arg("code") = "", nb::arg("psm_mpa") = nan, nb::arg("stiffness_mpa") = nan)
+        .def_rw("code", &SupportElement::code).def_rw("psm_mpa", &SupportElement::psm_mpa)
+        .def_rw("stiffness_mpa", &SupportElement::stiffness_mpa);
+    nb::class_<Interaction>(m, "Interaction", "GRC-SCC crossing: equilibrium, support FS and warnings.")
+        .def_ro("found", &Interaction::found).def_ro("p_eq_mpa", &Interaction::p_eq_mpa)
+        .def_ro("u_eq_m", &Interaction::u_eq_m).def_ro("fs", &Interaction::fs)
+        .def_ro("fs_by_element", &Interaction::fs_by_element).def_ro("elastic", &Interaction::elastic)
+        .def_ro("rp_eq_m", &Interaction::rp_eq_m).def_ro("strain_eq_pct", &Interaction::strain_eq_pct)
+        .def_ro("info", &Interaction::info).def_ro("warnings", &Interaction::warnings);
+    m.def("scc_info", &scc_info);
+    m.def("support_from_eps", &support_from_eps, nb::arg("code"), nb::arg("psm_mpa"), nb::arg("eps_sm"));
+    m.def("thick_ring_stiffness", &thick_ring_stiffness, nb::arg("e_mpa"), nb::arg("nu"), nb::arg("radius_m"),
+          nb::arg("thickness_m"));
+    m.def("combine_supports", &combine_supports, nb::arg("elements"), nb::arg("combination"));
+    m.def("interaction_mc", &interaction_mc, nb::arg("input"), nb::arg("elements"), nb::arg("u_install_m"),
+          nb::arg("combination"), nb::arg("ldp") = nb::none());
+    m.def("interaction_hb", &interaction_hb, nb::arg("input"), nb::arg("elements"), nb::arg("u_install_m"),
+          nb::arg("combination"), nb::arg("ldp") = nb::none());
     nb::class_<RadialStress>(m, "RadialStress", "Radial and hoop stress (MPa) at a radius.")
         .def_ro("sigma_r", &RadialStress::sigma_r).def_ro("sigma_theta", &RadialStress::sigma_theta)
         .def_ro("info", &RadialStress::info);

@@ -106,6 +106,93 @@ def test_grc_hb_carranza_torres():
     assert rm.grc_hb(inp).info.method_id == "GRC-HB-Carranza-Torres-Fairhurst-2000"
 
 
+D4 = "LDP not valid for Rp > 2R; use VD2009"
+D6 = "support does not intersect the ground reaction curve"
+
+
+def _rst1(scm=0.46927):
+    return rm.GrcMcInput(radius_m=6, p0_mpa=1.62, e_mpa=352.817, nu=0.3, c_mpa=0.2, phi_deg=25.6394,
+                         sigma_cm_override_mpa=scm)
+
+
+def _u_install(inp, ldp, x=0.5):
+    rs = rm.grc_mc_plastic_radius(inp, 0) / inp.radius_m
+    return rm.ldp_ratio(ldp, x, rs, inp.nu) * rm.grc_mc_displacement(inp, 0)
+
+
+def test_ldp_control_values():
+    for ldp, rs, vals in ((rm.Ldp.VD2009, 1, (0.1055, 0.2869, 0.8409)), (rm.Ldp.VD2009, 2.5, (0.0843, 0.2291, 0.5769)),
+                          (rm.Ldp.CHERN1998, 2.5, (0.1199, 0.3078, 0.5624))):
+        for x, v in zip((-1, 0, 1), vals):
+            assert rm.ldp_ratio(ldp, x, rs, 0.3) == pytest.approx(v, abs=0.0001)
+    for x, v in ((0, 0.25), (1, 0.8622), (2, 0.9442)):
+        assert rm.ldp_ratio(rm.Ldp.PANET1995, x, 1, 0.3) == pytest.approx(v, abs=0.0001)
+    assert rm.ldp_ratio(rm.Ldp.VD2009, 0, 2, 0.3) == pytest.approx(0.247, abs=0.0005)
+    assert rm.ldp_ratio(rm.Ldp.UNLU_GERCEK2003, 0, 1, 0.3) == pytest.approx(0.256)
+    assert rm.ldp_distance(rm.Ldp.VD2009, rm.ldp_ratio(rm.Ldp.VD2009, 0.7, 2.5, 0.3), 2.5, 0.3) == pytest.approx(0.7)
+    assert rm.ldp_info(rm.Ldp.VD2009).method_id == "LDP-Vlachopoulos-Diederichs-2009"
+    with pytest.raises(ValueError, match="ldp"):
+        rm.ldp_distance(rm.Ldp.PANET1995, 0.5, 2, 0.3)
+
+
+def test_interaction_rst_example1():
+    bolt = [rm.support_from_eps("B34", 0.354, 0.002)]
+    inp = _rst1()
+    r = rm.interaction_mc(inp, bolt, _u_install(inp, rm.Ldp.CHERN1998), rm.Combination.ROCSUPPORT3)
+    assert r.found and r.elastic
+    assert r.fs == pytest.approx(1.838, abs=0.001)
+    assert r.rp_eq_m == pytest.approx(10.02, abs=0.01) and r.strain_eq_pct == pytest.approx(0.989, abs=0.001)
+    assert r.info.method_id == "Support-interaction" and len(r.fs_by_element) == 1
+    for ldp, fs in ((rm.Ldp.VD2009, 1.92), (rm.Ldp.PANET1995, 5.24)):
+        assert rm.interaction_mc(inp, bolt, _u_install(inp, ldp), rm.Combination.ROCSUPPORT3).fs == pytest.approx(
+            fs, abs=0.01)
+
+
+def test_interaction_combination_and_thick_ring():
+    els = [rm.support_from_eps("B34", 0.354, 0.002), rm.support_from_eps("SC50", 0.325, 0.001)]
+    for mode, eps in ((rm.Combination.ROCSUPPORT3, 0.0015), (rm.Combination.ROCSUPPORT, 0.002)):
+        (c,) = rm.combine_supports(els, mode)
+        assert c.psm_mpa == pytest.approx(0.679) and c.psm_mpa / c.stiffness_mpa == pytest.approx(eps)
+    inp = _rst1()
+    u_in = _u_install(inp, rm.Ldp.CHERN1998)
+    r = rm.interaction_mc(inp, els, u_in, rm.Combination.STIFFNESS)
+    loads = [e.stiffness_mpa * (r.u_eq_m - u_in) / 6 for e in els]
+    assert r.fs_by_element == pytest.approx([e.psm_mpa / p for e, p in zip(els, loads)], rel=1e-6)
+    assert r.fs == pytest.approx(min(r.fs_by_element))
+    k = rm.thick_ring_stiffness(30000, 0.25, 1.85, 0.15)
+    assert k == pytest.approx(2777.5, abs=0.5)
+    ubc = rm.GrcMcInput(radius_m=1.85, p0_mpa=20, e_mpa=5000, nu=0.25, c_mpa=100, phi_deg=30)
+    r = rm.interaction_mc(ubc, [rm.SupportElement(code="lining", psm_mpa=50, stiffness_mpa=k)], 0.001,
+                          rm.Combination.STIFFNESS)
+    assert r.u_eq_m * 1000 == pytest.approx(5.869, abs=0.001) and r.p_eq_mpa == pytest.approx(7.310, abs=0.001)
+
+
+def test_interaction_beyond_elastic_limit():
+    inp = _rst1()
+    weak = [rm.SupportElement(code="weak", psm_mpa=0.1, stiffness_mpa=500)]
+    r = rm.interaction_mc(inp, weak, _u_install(inp, rm.Ldp.CHERN1998), rm.Combination.STIFFNESS)
+    assert r.found and not r.elastic and r.fs < 1
+    assert r.p_eq_mpa == pytest.approx(0.1)
+
+
+def test_interaction_installed_too_late():
+    inp = _rst1()
+    umax = rm.grc_mc_displacement(inp, 0)
+    r = rm.interaction_mc(inp, [rm.support_from_eps("B34", 0.354, 0.002)], umax, rm.Combination.ROCSUPPORT3)
+    assert not r.found and r.fs is None and list(r.fs_by_element) == [] and D6 in r.warnings
+
+
+def test_interaction_ldp_warning_panet():
+    inp = _rst1(0.29343)  # rp/R = 3
+    assert rm.grc_mc_plastic_radius(inp, 0) / 6 == pytest.approx(3.0, abs=0.01)
+    bolt = [rm.support_from_eps("B34", 0.354, 0.002)]
+    u_in = _u_install(inp, rm.Ldp.PANET1995)
+    assert D4 in rm.interaction_mc(inp, bolt, u_in, rm.Combination.ROCSUPPORT3, rm.Ldp.PANET1995).warnings
+    assert D4 not in rm.interaction_mc(inp, bolt, u_in, rm.Combination.ROCSUPPORT3, ldp=rm.Ldp.VD2009).warnings
+    hb = rm.GrcHbInput(radius_m=3.82, p0_mpa=30, g_mpa=1000, nu=0.25, sigma_ci_mpa=30, mb=1.7, s=3.9e-3)
+    assert rm.interaction_hb(hb, [rm.SupportElement("x", 100, 3000)], 0.01, rm.Combination.STIFFNESS).found
+
+
 def test_hb1982_and_reed_stresses():
     hb = rm.Hb1982Input(p0_mpa=30, radius_m=1, sigma_c_mpa=100, m=2.515, s=0.003865, mr=0.5, sr=1e-5)
     assert rm.hb1982_plastic_radius(hb) == pytest.approx(2.168, abs=0.001)

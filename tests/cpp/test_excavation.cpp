@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -240,6 +241,167 @@ TEST(GrcHb, ElasticoYErrores) {
     EXPECT_NEAR(r.u_max_m, 3.0 / 10000, 1e-12);
     in.mb = 0;
     EXPECT_NE(error_of([&] { grc_hb(in); }).find("'mb'"), std::string::npos);
+}
+
+// ---------------------------------------------------------------- LDP, SCC e interacción (Tarea 3)
+
+TEST(Ldp, ValoresDeControl) {  // recálculo de FORMULAS §7
+    const double xs[] = {-1, 0, 1};
+    const double vd1[] = {0.1055, 0.2869, 0.8409}, vd25[] = {0.0843, 0.2291, 0.5769}, ch[] = {0.1199, 0.3078, 0.5624};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(ldp_ratio(Ldp::VD2009, xs[i], 1, 0.3), vd1[i], 0.0001);
+        EXPECT_NEAR(ldp_ratio(Ldp::VD2009, xs[i], 2.5, 0.3), vd25[i], 0.0001);
+        EXPECT_NEAR(ldp_ratio(Ldp::CHERN1998, xs[i], 2.5, 0.3), ch[i], 0.0001);
+    }
+    EXPECT_NEAR(ldp_ratio(Ldp::PANET1995, 0, 1, 0.3), 0.2500, 0.0001);
+    EXPECT_NEAR(ldp_ratio(Ldp::PANET1995, 1, 1, 0.3), 0.8622, 0.0001);
+    EXPECT_NEAR(ldp_ratio(Ldp::PANET1995, 2, 1, 0.3), 0.9442, 0.0001);
+    EXPECT_NEAR(ldp_ratio(Ldp::VD2009, 0, 2, 0.3), 0.247, 0.0005);  // KL08 p. 9: «un cuarto»
+    // Unlu-Gercek: u0/umax = 0.22ν + 0.19 en el frente, 0 lejos delante y 1 lejos detrás
+    EXPECT_NEAR(ldp_ratio(Ldp::UNLU_GERCEK2003, 0, 1, 0.3), 0.256, 1e-12);
+    EXPECT_NEAR(ldp_ratio(Ldp::UNLU_GERCEK2003, -60, 1, 0.3), 0.0, 1e-9);
+    EXPECT_NEAR(ldp_ratio(Ldp::UNLU_GERCEK2003, 1e6, 1, 0.3), 1.0, 1e-9);
+    EXPECT_EQ(ldp_info(Ldp::PANET1995).method_id, "LDP-Panet-1995");
+    EXPECT_EQ(ldp_info(Ldp::UNLU_GERCEK2003).method_id, "LDP-Unlu-Gercek-2003");
+    EXPECT_EQ(ldp_info(Ldp::CHERN1998).method_id, "LDP-Chern-1998");
+    EXPECT_EQ(ldp_info(Ldp::VD2009).method_id, "LDP-Vlachopoulos-Diederichs-2009");
+}
+
+TEST(Ldp, InversaYErrores) {
+    for (double rs : {1.0, 2.5})
+        for (double x : {-1.0, -0.2, 0.0, 0.7, 3.0})
+            EXPECT_NEAR(ldp_distance(Ldp::VD2009, ldp_ratio(Ldp::VD2009, x, rs, 0.3), rs, 0.3), x, 1e-9);
+    EXPECT_NE(error_of([] { ldp_distance(Ldp::CHERN1998, 0.5, 2, 0.3); }).find("'ldp'"), std::string::npos);
+    const auto e = error_of([] { ldp_distance(Ldp::VD2009, 1.5, 2, 0.3); });
+    EXPECT_NE(e.find("'ratio'"), std::string::npos);
+    EXPECT_EQ(e.find("1.5"), std::string::npos);
+    EXPECT_NE(error_of([] { ldp_ratio(Ldp::PANET1995, -1, 1, 0.3); }).find("'x_over_r'"), std::string::npos);
+    EXPECT_NE(error_of([] { ldp_ratio(Ldp::VD2009, 0, 0.5, 0.3); }).find("'rp_over_r'"), std::string::npos);
+}
+
+namespace {
+const char* kD4 = "LDP not valid for Rp > 2R; use VD2009";
+const char* kD6 = "support does not intersect the ground reaction curve";
+bool has(const std::vector<std::string>& v, const char* s) { return std::find(v.begin(), v.end(), s) != v.end(); }
+// RST Ejemplo 1: perno de 34 mm a 1 × 1 m instalado a 3 m del frente (X* = 0.5)
+Interaction rst1_bolt(Ldp ldp, Combination mode = Combination::ROCSUPPORT3,
+                      std::vector<SupportElement> els = {support_from_eps("B34", 0.354, 0.002)}) {
+    const auto in = rst1();
+    const double umax = grc_mc_displacement(in, 0), rs = grc_mc_plastic_radius(in, 0) / in.radius_m;
+    return interaction_mc(in, els, ldp_ratio(ldp, 3.0 / 6.0, rs, in.nu) * umax, mode, ldp);
+}
+}  // namespace
+
+TEST(Interaccion, RstEjemplo1) {  // FORMULAS §9
+    const auto r = rst1_bolt(Ldp::CHERN1998);
+    ASSERT_TRUE(r.found);
+    ASSERT_TRUE(r.fs.has_value());
+    EXPECT_NEAR(*r.fs, 1.838, 0.001);
+    EXPECT_NEAR(r.p_eq_mpa, 0.1926, 0.0001);
+    EXPECT_NEAR(r.rp_eq_m, 10.02, 0.01);
+    EXPECT_NEAR(r.strain_eq_pct, 0.989, 0.001);
+    EXPECT_TRUE(r.elastic);
+    EXPECT_EQ(r.fs_by_element.size(), 1u);
+    EXPECT_EQ(r.info.method_id, "Support-interaction");
+    EXPECT_EQ(r.info.verification, Verification::Secondary);  // modo RocSupport
+    EXPECT_TRUE(r.warnings.empty());
+    EXPECT_NEAR(*rst1_bolt(Ldp::VD2009).fs, 1.92, 0.01);
+    EXPECT_NEAR(*rst1_bolt(Ldp::PANET1995).fs, 5.24, 0.01);
+}
+
+TEST(Interaccion, Combinacion) {  // FORMULAS §8.5: perno de 34 mm + shotcrete de 50 mm a 28 días, D = 12
+    const std::vector<SupportElement> els = {support_from_eps("B34", 0.354, 0.002), support_from_eps("SC50", 0.325, 0.001)};
+    const auto c3 = combine_supports(els, Combination::ROCSUPPORT3);
+    ASSERT_EQ(c3.size(), 1u);
+    EXPECT_NEAR(c3[0].psm_mpa, 0.679, 1e-9);
+    EXPECT_NEAR(c3[0].psm_mpa / c3[0].stiffness_mpa, 0.0015, 1e-12);
+    const auto c = combine_supports(els, Combination::ROCSUPPORT);
+    EXPECT_NEAR(c[0].psm_mpa, 0.679, 1e-9);
+    EXPECT_NEAR(c[0].psm_mpa / c[0].stiffness_mpa, 0.002, 1e-12);
+    EXPECT_EQ(combine_supports(els, Combination::STIFFNESS).size(), 2u);
+
+    const auto in = rst1();
+    const double u_in = ldp_ratio(Ldp::CHERN1998, 0.5, grc_mc_plastic_radius(in, 0) / 6, 0.3) * grc_mc_displacement(in, 0);
+    const auto r = interaction_mc(in, els, u_in, Combination::STIFFNESS);
+    ASSERT_TRUE(r.found);
+    ASSERT_EQ(r.fs_by_element.size(), 2u);
+    EXPECT_EQ(r.info.verification, Verification::PrimaryLaterAuthors);
+    double sum = 0, fs = 1e300;
+    for (size_t i = 0; i < 2; ++i) {
+        const double pi_ = els[i].stiffness_mpa * (r.u_eq_m - u_in) / 6;
+        sum += pi_;
+        EXPECT_NEAR(r.fs_by_element[i], els[i].psm_mpa / pi_, 1e-6 * r.fs_by_element[i]);
+        fs = std::min(fs, els[i].psm_mpa / pi_);
+    }
+    EXPECT_NEAR(*r.fs, fs, 1e-12);
+    EXPECT_NEAR(sum, r.p_eq_mpa, 1e-6 * r.p_eq_mpa);
+    EXPECT_NEAR(grc_mc_displacement(in, r.p_eq_mpa), r.u_eq_m, 1e-12);
+}
+
+TEST(Interaccion, AnilloGruesoUBC) {  // FORMULAS §8.2 [V2]
+    const double k = thick_ring_stiffness(30000, 0.25, 1.85, 0.15);
+    EXPECT_NEAR(k, 2777.5, 0.5);
+    GrcMcInput in;  // GRC elástica con G = 2 GPa (E = 5000, ν = 0.25), p0 = 20
+    in.radius_m = 1.85; in.p0_mpa = 20; in.e_mpa = 5000; in.nu = 0.25; in.c_mpa = 100; in.phi_deg = 30;
+    EXPECT_NEAR(grc_mc_displacement(in, 0) * 1000, 9.25, 1e-9);
+    const auto r = interaction_mc(in, {{"lining", 50.0, k}}, 0.001, Combination::STIFFNESS);
+    EXPECT_NEAR(r.u_eq_m * 1000, 5.869, 0.001);
+    EXPECT_NEAR(r.p_eq_mpa, 7.310, 0.001);
+    EXPECT_TRUE(r.elastic);
+    EXPECT_NE(error_of([] { thick_ring_stiffness(30000, 0.25, 1.85, 2); }).find("'thickness_m'"), std::string::npos);
+}
+
+TEST(Interaccion, CruceMasAllaDelLimiteElastico) {  // D6: se prolonga la recta elástica
+    const auto r = rst1_bolt(Ldp::CHERN1998, Combination::STIFFNESS, {{"weak", 0.1, 500.0}});
+    ASSERT_TRUE(r.found);
+    EXPECT_FALSE(r.elastic);
+    ASSERT_TRUE(r.fs.has_value());
+    EXPECT_LT(*r.fs, 1.0);
+    EXPECT_NEAR(r.p_eq_mpa, 0.1, 1e-9);  // el equilibrio real cae en la meseta plástica
+    EXPECT_NEAR(r.u_eq_m, grc_mc_displacement(rst1(), 0.1), 1e-9);
+}
+
+TEST(Interaccion, InstaladoDemasiadoTarde) {  // test_interaction_installed_too_late
+    const auto in = rst1();
+    const double umax = grc_mc_displacement(in, 0);
+    for (double u_in : {umax, 2 * umax}) {
+        const auto r = interaction_mc(in, {support_from_eps("B34", 0.354, 0.002)}, u_in, Combination::ROCSUPPORT3);
+        EXPECT_FALSE(r.found);
+        EXPECT_FALSE(r.fs.has_value());
+        EXPECT_TRUE(r.fs_by_element.empty());
+        EXPECT_TRUE(has(r.warnings, kD6));
+    }
+}
+
+TEST(Interaccion, AvisoLdpD4) {  // Panet con rp/R = 3
+    auto in = rst1();
+    in.sigma_cm_override_mpa = 0.29343;
+    const double rs = grc_mc_plastic_radius(in, 0) / 6;
+    EXPECT_NEAR(rs, 3.0, 0.01);
+    const double u_in = ldp_ratio(Ldp::PANET1995, 0.5, rs, 0.3) * grc_mc_displacement(in, 0);
+    const std::vector<SupportElement> b = {support_from_eps("B34", 0.354, 0.002)};
+    EXPECT_TRUE(has(interaction_mc(in, b, u_in, Combination::ROCSUPPORT3, Ldp::PANET1995).warnings, kD4));
+    EXPECT_TRUE(has(interaction_mc(in, b, u_in, Combination::ROCSUPPORT3, Ldp::UNLU_GERCEK2003).warnings, kD4));
+    EXPECT_FALSE(has(interaction_mc(in, b, u_in, Combination::ROCSUPPORT3, Ldp::VD2009).warnings, kD4));
+    EXPECT_TRUE(interaction_mc(in, b, u_in, Combination::ROCSUPPORT3).warnings.empty());
+}
+
+TEST(Interaccion, HoekBrownYErrores) {
+    GrcHbInput in;
+    in.radius_m = 3.82; in.p0_mpa = 30; in.g_mpa = 1000; in.nu = 0.25; in.sigma_ci_mpa = 30; in.mb = 1.7; in.s = 3.9e-3;
+    const auto r = interaction_hb(in, {{"lining", 100.0, 3000.0}}, 0.01, Combination::STIFFNESS);
+    ASSERT_TRUE(r.found);
+    EXPECT_TRUE(r.elastic);
+    EXPECT_NEAR(grc_hb_displacement(in, r.p_eq_mpa), r.u_eq_m, 1e-12);
+    EXPECT_NEAR(3000.0 * (r.u_eq_m - 0.01) / 3.82, r.p_eq_mpa, 1e-6 * r.p_eq_mpa);
+    EXPECT_NEAR(r.rp_eq_m, grc_hb_plastic_radius(in, r.p_eq_mpa), 1e-12);
+    EXPECT_NE(error_of([&] { interaction_hb(in, {}, 0, Combination::STIFFNESS); }).find("'elements'"), std::string::npos);
+    EXPECT_NE(error_of([&] { interaction_hb(in, {{"x", 0.0, 1.0}}, 0, Combination::STIFFNESS); }).find("'psm_mpa'"),
+              std::string::npos);
+    EXPECT_NE(error_of([&] { interaction_hb(in, {{"x", 1.0, 1.0}}, -1, Combination::STIFFNESS); }).find("'u_install_m'"),
+              std::string::npos);
+    EXPECT_NE(error_of([] { support_from_eps("x", 1, 0); }).find("'eps_sm'"), std::string::npos);
+    EXPECT_EQ(scc_info().method_id, "SCC-elastic-perfectly-plastic");
 }
 
 TEST(Hb1982, RS2Problema3) {
