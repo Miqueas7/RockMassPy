@@ -798,6 +798,70 @@ def _ext(a) -> int:
     return 2 if (attn or any(x.warning for x in cmps) or any(x.warning for x in mons) or hb_bad) else 0
 
 
+def _surrogate(a) -> int:
+    from . import report as rp
+    from .batch import write_table
+    from .predictive.surrogate import (fit_surrogate, load_points, load_runs, load_variables, surrogate_pof,
+                                       validate_surrogate)
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    if bool(a.predict) != bool(a.predict_output):
+        raise ValueError("--predict and --predict-output go together")
+    if a.predict_output and Path(a.predict_output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--predict-output must end in .csv or .xlsx")
+    inputs = [c.strip() for c in a.inputs.split(",")] if a.inputs else None
+    data = load_runs(a.runs, output=a.output, group=a.group, inputs=inputs)
+    s = fit_surrogate(data, kind=a.kind, smoothing=a.smoothing)
+    # todo se calcula antes del primer print: un error deja stdout vacío
+    val = validate_surrogate(data, kind=a.kind, smoothing=a.smoothing) if (a.validate or a.report) else None
+    pred = None
+    if a.predict:
+        pts = load_points(a.predict, s.names)
+        pred = (pts, s.predict(pts))
+    pof = None
+    if a.distributions:
+        pof = surrogate_pof(s, load_variables(a.distributions, s.names, sheet=a.sheet_distributions), n=a.n,
+                            seed=a.seed, threshold=a.threshold)
+    print(f"runs: {len(data.y)}")
+    print(f"inputs: {len(s.names)}")
+    print(f"surrogate: {s.kind}")
+    attn = bool(val) and not val.useful
+    if a.validate:
+        print(f"validation: {val.folds_kind}, {val.n_folds} folds")
+        print(f"rmse: {val.rmse:.4g}")
+        print(f"rmse mean model: {val.rmse_mean_model:.4g}")
+        print(f"mae: {val.mae:.4g}")
+        print(f"r2: {val.r2:.4g}")
+        print(f"fraction outside domain: {val.ood_fraction:.3f}")
+        print(f"useful: {'yes' if val.useful else 'no'}")
+    if pred:
+        pts, p = pred
+        n_out = int((~p.in_domain).sum())
+        rows = [[*map(float, x), None if not ok else float(y), int(ok)] for x, y, ok in zip(pts, p.y, p.in_domain)]
+        out = write_table(a.predict_output, (*s.names, a.output, "in_domain"), rows, sheet="Predicciones")
+        print(f"predictions: {len(rows)}, outside domain: {n_out}")
+        print(f"predictions file: {out}")
+        attn = attn or n_out > 0
+    if pof:
+        print(f"pof: {pof.pof:.4g}")
+        if pof.n_out_of_domain:
+            print(f"pof bounds: [{pof.pof_lower:.4g}, {pof.pof_upper:.4g}]")
+        print(f"n: {pof.n}, valid: {pof.n_valid}, n_out_of_domain: {pof.n_out_of_domain}")
+        print(f"fs mean: {pof.fs_mean:.4g}, p05: {pof.fs_p05:.4g}, p50: {pof.fs_p50:.4g}, p95: {pof.fs_p95:.4g}")
+        attn = attn or bool(pof.warnings)
+    _grouped("warning", [*(val.warnings if val else ()), *(pof.warnings if pof else ())])
+    _grouped("note", [*data.notes, *(val.notes if val else ()), *(pof.notes if pof else ())])
+    if a.report:
+        rep = rp.build_surrogate_report(val, surrogate=s, pof=pof, notes=data.notes,
+                                        title=a.title or t("sg_title", a.lang), lang=a.lang, author=a.author or "")
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if attn else 0
+
+
 def _snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name.rstrip("_")).lower()
 
@@ -1443,6 +1507,29 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--lang", choices=("es", "en"), default="es")
     _criteria_inputs(c)
     c.set_defaults(fn=_ext)
+    c = sub.add_parser("surrogate", help="surrogate of expensive runs: out-of-fold validation, predictions that "
+                       "refuse to extrapolate and PoF")
+    c.add_argument("--runs", required=True, metavar="CORRIDAS.csv|.xlsx", help="runs: one row per run (sheet Corridas)")
+    c.add_argument("--sheet", default="Corridas")
+    c.add_argument("--output", required=True, metavar="COL", help="output column of the runs (e.g. fs)")
+    c.add_argument("--group", metavar="COL", help="scenario column: folds leave whole scenarios out")
+    c.add_argument("--inputs", metavar="C1,C2,...", help="input columns (default: every numeric column)")
+    c.add_argument("--kind", choices=("rbf", "poly2"), default="rbf")
+    c.add_argument("--smoothing", type=float, default=0.0)
+    c.add_argument("--validate", action="store_true", help="grouped out-of-fold validation")
+    c.add_argument("--predict", metavar="PUNTOS.csv|.xlsx", help="points to predict (needs --predict-output)")
+    c.add_argument("--predict-output", metavar="OUT.csv|.xlsx", help="predictions; empty with in_domain 0 outside "
+                   "the domain")
+    c.add_argument("--distributions", metavar="DIST", help="random variables (sheet Distribuciones) for the PoF")
+    c.add_argument("--sheet-distributions", default="Distribuciones")
+    c.add_argument("--n", type=int, default=20000, help="PoF samples (default 20000)")
+    c.add_argument("--seed", type=int, default=1)
+    c.add_argument("--threshold", type=float, default=1.0, help="FS below this fails (default 1)")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_surrogate)
     c = sub.add_parser("history", help="audit the mine's geomechanical history and fit site correlations (level 1)")
     c.add_argument("history", metavar="HISTORICO.xlsx|CARPETA", help="the history template (.xlsx) or a folder of "
                    "Tramos.csv, Tipos_sostenimiento.csv and Desempeno.csv")

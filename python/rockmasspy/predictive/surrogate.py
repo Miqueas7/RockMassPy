@@ -320,3 +320,57 @@ def surrogate_pof(surrogate: Surrogate, variables, *, n: int = 20000, sampling: 
     p05, p50, p95 = np.percentile(fs, [5, 50, 95])
     return SurrogatePof(n_fail / n_valid, n, n_valid, n_ood, float(fs.mean()), float(p05), float(p50),
                         float(p95), warns, notes, n_fail / n, (n_fail + n_ood) / n)
+
+
+# ---------- lectores para la CLI (Fase 8D, tarea 4) ----------
+
+def load_points(path, names: Sequence[str], *, sheet: str = "Predicciones") -> np.ndarray:
+    """Puntos a predecir: una columna por entrada del sustituto (el orden del archivo no importa)."""
+    sheet, header, rows, dec = _rows(path, sheet)
+    col = {str(h).strip(): i for i, h in enumerate(header) if not _blank(h)}
+    if any(h not in col for h in names):
+        raise ValueError(f"sheet '{sheet}': missing input column")
+    rows = [r for r in rows if not all(_blank(v) for v in r)]
+    if not rows:
+        raise ValueError(f"sheet '{sheet}': no points")
+    out = []
+    for n, r in enumerate(rows, start=2):
+        row = []
+        for h in names:
+            v = r[col[h]] if col[h] < len(r) else None
+            if _blank(v):
+                raise ValueError(f"sheet '{sheet}', row {n}, column '{h}': empty input value")
+            row.append(_number(v, sheet, n, h, dec))
+        out.append(row)
+    return np.array(out, dtype=float)
+
+
+def load_variables(path, names: Sequence[str], *, sheet: str = "Distribuciones") -> dict:
+    """Hoja `Distribuciones` de la 3B (variable, distribucion, media, desviacion, minimo, maximo) -> {entrada: Distribution}.
+
+    Reusa el lector común (validación de la 3B); el enlace es la propia `variable`, que debe ser una entrada del sustituto.
+    """
+    from ..blocks import _KINDS, _check_distribution, load_distribution_rows
+    from ..probabilistic import Distribution
+
+    by_fold = {n.casefold(): n for n in names}  # el lector normaliza la variable a minúsculas
+
+    @dataclass(frozen=True)
+    class _Row:
+        variable: str
+        distribucion: str
+        media: float | None
+        desviacion: float | None
+        minimo: float
+        maximo: float
+        fila: int
+        hoja: str
+
+    def build(vals, n, sh):
+        _check_distribution(vals, n, sh, "variable", set(by_fold), {})
+        return _Row(**vals, fila=n, hoja=sh)
+
+    rows = load_distribution_rows(path, sheet, None, "variable",
+                                  ("variable", "distribucion", "media", "desviacion", "minimo", "maximo"), build)
+    return {by_fold[r.variable]: Distribution(_KINDS[r.distribucion], r.minimo, r.maximo, r.media, r.desviacion)
+            for r in rows}

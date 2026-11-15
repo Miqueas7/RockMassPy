@@ -1176,3 +1176,70 @@ REPORT_TEXTS.update({
                      "en": "Elements too coarse for a narrow pillar or a re-entrant corner; values next to those walls are "
                            "unreliable: refine max_element_m"},
 })
+
+
+REPORT_TEXTS.update({
+    # --- Modelo sustituto de corridas costosas (Fase 8D) ---
+    "sg_title": {"es": "Modelo sustituto de corridas costosas", "en": "Surrogate model of expensive runs"},
+    "sg_scope": {
+        "es": "Este documento valida un modelo sustituto entrenado con corridas de un modelo costoso y, si se pide, "
+              "estima la probabilidad de falla con él. El sustituto no extrapola: fuera del dominio de entrenamiento "
+              "no responde. El ingeniero decide.",
+        "en": "This document validates a surrogate trained on runs of an expensive model and, if requested, estimates "
+              "the probability of failure with it. The surrogate does not extrapolate: outside the training domain "
+              "it does not answer. The engineer decides."},
+    "sg_s2": {"es": "Validación fuera de pliegue", "en": "Out-of-fold validation"},
+    "sg_s3": {"es": "Dominio del sustituto", "en": "Surrogate domain"},
+    "sg_s4": {"es": "Probabilidad de falla con el sustituto", "en": "Probability of failure with the surrogate"},
+    "sg_s5": {"es": "Avisos y notas", "en": "Warnings and notes"},
+    "sg_s6": {"es": "Nota", "en": "Note"},
+    "sg_cap_validation": {"es": "Métricas fuera de pliegue", "en": "Out-of-fold metrics"},
+    "sg_cap_domain": {"es": "Entradas del sustituto", "en": "Surrogate inputs"},
+    "sg_cap_pof": {"es": "Probabilidad de falla", "en": "Probability of failure"},
+    "sg_h_metric": {"es": "Métrica", "en": "Metric"},
+    "sg_h_value": {"es": "Valor", "en": "Value"},
+    "sg_h_input": {"es": "Entrada", "en": "Input"},
+    "sg_h_min": {"es": "Mínimo del dominio", "en": "Domain minimum"},
+    "sg_h_max": {"es": "Máximo del dominio", "en": "Domain maximum"},
+    "sg_kind": {"es": "Tipo de sustituto", "en": "Surrogate kind"},
+    "sg_folds": {"es": "Pliegues", "en": "Folds"},
+    "sg_n_folds": {"es": "Número de pliegues", "en": "Number of folds"},
+    "sg_rmse": {"es": "RMSE", "en": "RMSE"},
+    "sg_rmse_mean": {"es": "RMSE del modelo media", "en": "RMSE of the mean model"},
+    "sg_mae": {"es": "MAE", "en": "MAE"},
+    "sg_max": {"es": "Error máximo absoluto", "en": "Maximum absolute error"},
+    "sg_r2": {"es": "R²", "en": "R²"},
+    "sg_ood": {"es": "Fracción fuera del dominio", "en": "Fraction outside the domain"},
+    "sg_useful_yes": {"es": "El sustituto es útil: su RMSE es menor que la mitad del RMSE del modelo media.",
+                      "en": "The surrogate is useful: its RMSE is below half the RMSE of the mean model."},
+    "sg_useful_no": {"es": "El sustituto no es útil: su RMSE no baja de la mitad del RMSE del modelo media.",
+                     "en": "The surrogate is not useful: its RMSE is not below half the RMSE of the mean model."},
+    "sg_no_domain": {"es": "No se dio un sustituto ajustado.", "en": "No fitted surrogate was given."},
+    "sg_no_pof": {"es": "No se pidió la probabilidad de falla.", "en": "The probability of failure was not requested."},
+    "sg_pof": {"es": "Probabilidad de falla (muestras válidas)", "en": "Probability of failure (valid samples)"},
+    "sg_pof_lower": {"es": "Cota inferior (las excluidas no fallan)", "en": "Lower bound (excluded do not fail)"},
+    "sg_pof_upper": {"es": "Cota superior (las excluidas fallan)", "en": "Upper bound (excluded fail)"},
+    "sg_n": {"es": "Muestras", "en": "Samples"},
+    "sg_n_valid": {"es": "Muestras dentro del dominio", "en": "Samples inside the domain"},
+    "sg_n_ood": {"es": "Muestras fuera del dominio", "en": "Samples outside the domain"},
+    "sg_fs_mean": {"es": "FS medio", "en": "Mean FS"},
+    "sg_fs_p05": {"es": "FS percentil 5", "en": "FS 5th percentile"},
+    "sg_fs_p50": {"es": "FS mediana", "en": "FS median"},
+    "sg_fs_p95": {"es": "FS percentil 95", "en": "FS 95th percentile"},
+    "sg_msg_no_groups": {"es": "Sin grupos: los pliegues al azar sobrestiman la exactitud",
+                         "en": "No groups given: random folds overestimate accuracy"},
+    "sg_msg_one_group": {"es": "Un solo grupo: se usaron pliegues al azar", "en": "A single group: random folds used"},
+    "sg_msg_fold_ood": {"es": "Muchas predicciones de pliegue fuera del dominio; las métricas cubren solo la parte "
+                              "dentro del dominio",
+                        "en": "Many fold predictions outside the surrogate domain; the metrics cover only the "
+                              "in-domain part"},
+    "sg_msg_unsampled": {"es": "Las entradas no muestreadas quedan en su media de entrenamiento",
+                         "en": "Unsampled inputs fixed at their training mean"},
+    "sg_msg_conditional": {"es": "La PoF es condicional al dominio del sustituto; ver la cota inferior y la superior",
+                           "en": "PoF conditional on the surrogate domain; see the lower and upper bounds"},
+    "sg_msg_poly2": {"es": "Una superficie cuadrática puede sesgar la PoF cerca del umbral; contrástala con rbf",
+                     "en": "A quadratic surface can bias the PoF near the threshold; check it with rbf"},
+    "sg_msg_pof_ood": {"es": "Muchas muestras fuera del dominio del sustituto; la PoF cubre solo ese dominio",
+                       "en": "Many samples outside the surrogate domain; the PoF covers only the surrogate domain"},
+    "sg_msg_dropped": {"es": "Se ignoraron corridas sin salida finita", "en": "Runs without a finite output ignored"},
+})

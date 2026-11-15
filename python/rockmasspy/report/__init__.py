@@ -690,6 +690,61 @@ def build_external_report(external, *, checks=(), comparisons=(), monitoring=(),
                   __version__, date or datetime.date.today().isoformat())
 
 
+# --- Modelo sustituto (Fase 8D) ---
+
+_SG_MSG = {"no groups given: random folds overestimate accuracy": "sg_msg_no_groups",
+           "a single group: random folds used": "sg_msg_one_group",
+           "many fold predictions outside the surrogate domain; the metrics cover only the in-domain part":
+               "sg_msg_fold_ood",
+           "unsampled inputs fixed at their training mean": "sg_msg_unsampled",
+           "PoF conditional on the surrogate domain; see pof_lower and pof_upper": "sg_msg_conditional",
+           "a quadratic surface can bias the PoF near the threshold; check it with kind='rbf'": "sg_msg_poly2",
+           "many samples outside the surrogate domain; the PoF covers only the surrogate domain": "sg_msg_pof_ood",
+           "runs without a finite output ignored": "sg_msg_dropped"}
+
+
+def build_surrogate_report(validation, *, surrogate=None, pof=None, notes=(), title: str, lang: str = "es",
+                           author: str = "", date: str = "") -> Report:
+    """Informe del sustituto: validación fuera de pliegue, dominio y PoF. Sin ids ni valores de las corridas."""
+    from ..predictive.surrogate import _INFO
+
+    _check_lang(lang)
+    v = validation
+    f = lambda x: _num(x, ".4g")  # noqa: E731
+    rows = ((t("sg_kind", lang), v.kind), (t("sg_folds", lang), v.folds_kind), (t("sg_n_folds", lang), str(v.n_folds)),
+            (t("sg_rmse", lang), f(v.rmse)), (t("sg_rmse_mean", lang), f(v.rmse_mean_model)),
+            (t("sg_mae", lang), f(v.mae)), (t("sg_max", lang), f(v.max_abs_error)), (t("sg_r2", lang), f(v.r2)),
+            (t("sg_ood", lang), f"{v.ood_fraction * 100:.1f} %"))
+    s2 = (Table(t("sg_cap_validation", lang), (t("sg_h_metric", lang), t("sg_h_value", lang)), rows),
+          Paragraph(t("sg_useful_yes" if v.useful else "sg_useful_no", lang)))
+    if surrogate is not None:
+        s3 = (Table(t("sg_cap_domain", lang), (t("sg_h_input", lang), t("sg_h_min", lang), t("sg_h_max", lang)),
+                    tuple((n, f(lo), f(hi)) for n, lo, hi in zip(surrogate.names, surrogate.lo, surrogate.hi))),)
+    else:
+        s3 = (Paragraph(t("sg_no_domain", lang)),)
+    if pof is not None:
+        r = [(t("sg_pof", lang), f(pof.pof))]
+        if pof.n_out_of_domain:  # con muestras excluidas la PoF sola engaña: va con sus cotas
+            r += [(t("sg_pof_lower", lang), f(pof.pof_lower)), (t("sg_pof_upper", lang), f(pof.pof_upper))]
+        r += [(t("sg_n", lang), str(pof.n)), (t("sg_n_valid", lang), str(pof.n_valid)),
+              (t("sg_n_ood", lang), str(pof.n_out_of_domain)), (t("sg_fs_mean", lang), f(pof.fs_mean)),
+              (t("sg_fs_p05", lang), f(pof.fs_p05)), (t("sg_fs_p50", lang), f(pof.fs_p50)),
+              (t("sg_fs_p95", lang), f(pof.fs_p95))]
+        s4 = (Table(t("sg_cap_pof", lang), (t("sg_h_metric", lang), t("sg_h_value", lang)), tuple(r)),)
+    else:
+        s4 = (Paragraph(t("sg_no_pof", lang)),)
+    msgs = [*notes, *v.warnings, *v.notes, *(pof.warnings if pof else ()), *(pof.notes if pof else ())]
+    msgs = [t(_SG_MSG[m], lang) if m in _SG_MSG else m for m in msgs]
+    s5 = (_ext_table(msgs, lang),) if msgs else (Paragraph(t("no_warnings", lang)),)
+    i = surrogate.info if surrogate is not None else _INFO[v.kind]
+    sections = (Section("1", t("st_s1", lang), (Paragraph(t("sg_scope", lang)),)), Section("2", t("sg_s2", lang), s2),
+                Section("3", t("sg_s3", lang), s3), Section("4", t("sg_s4", lang), s4),
+                Section("5", t("sg_s5", lang), s5), Section("6", t("sg_s6", lang), (Paragraph(DISCLAIMER[lang]),)))
+    return Report(title, _subtitle(t("sg_title", lang), author, lang), lang, sections,
+                  (MethodRef(i.method_id, i.verification.name, i.source),), DISCLAIMER[lang], __version__,
+                  date or datetime.date.today().isoformat())
+
+
 _SLOPE_MODES = ("planar", "wedge", "flexural_toppling", "direct_toppling")
 
 
