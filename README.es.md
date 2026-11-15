@@ -760,6 +760,28 @@ tramos.
 
 Ver `examples/13-mina-sintetica/`: una mina por la auditoría y los niveles 1 a 3, medida contra su verdad.
 
+## Túneles: convergencia-confinamiento
+
+`analyze_tunnel` arma la curva de reacción del terreno (GRC) de un túnel circular (Mohr-Coulomb con dilatancia, o
+Hoek-Brown), el perfil de deformación longitudinal (LDP), el cruce con la curva característica del sostenimiento y la
+clase de squeezing de Hoek y Marinos. Compresión positiva, unidades en MPa y m, deformación plana.
+
+```python
+from rockmasspy.excavation import TunnelInput, analyze_tunnel
+from rockmasspy.support_capacity import SupportCapacity, hoek_psm
+
+inp = TunnelInput(radius_m=6, p0_mpa=1.62, nu=0.3, criterion="HB", sigma_ci_mpa=7, gsi=15, mi=10)
+perno = SupportCapacity("B34", "bolt", psm_mpa=hoek_psm("34 mm rockbolt", spacing_m=1.0), eps_sm=0.002)
+r = analyze_tunnel(inp, supports=[perno], install_distance_m=3, ldp="CHERN1998", combination="rocsupport3")
+print(r.interaction.fs, r.rp_m, r.strain_pct, r.squeezing.squeezing_class)   # 1.84 13.78 2.03 B
+```
+
+Los avisos de alcance (K distinto de 1, forma no circular, deformación mayor que 10 %) son avisos, nunca errores, y no
+repiten valores de entrada. También hay `tunnel_uncertainty` (Monte Carlo sobre las entradas), `check_hoek_brown` (¿los
+mb, s, a y Erm declarados son los de GSI, mi y D?), la capacidad M-N de shotcrete y acero (`rm.capacity_mn`,
+`rm.check_capacity`), los esfuerzos del revestimiento de Einstein y Schwartz, `plot_tunnel`, un informe de túnel y el
+comando `rockmass tunnel`. Ver `examples/15-tuneles-convergencia-confinamiento/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en
@@ -791,6 +813,16 @@ posterior de los mismos autores) o **Secondary** (solo fuente secundaria). **Use
 | HB-2002 / HB-2018 | Parámetros del criterio de Hoek-Brown (`hb_params`) y Mohr-Coulomb equivalente (`hb_mohr_coulomb`); 2018 por defecto | Primary |
 | HB-2002 | Módulo del macizo Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Módulo del macizo (Hoek y Diederichs) | Primary |
+| Kirsch-1898 / Ellipse-Inglis-1913 / Reed-1986 | Esfuerzos en el borde y a distancia de una abertura circular o elíptica (Kirsch, Inglis) y esfuerzos elastoplásticos de Reed | PrimaryLaterAuthors |
+| GRC-MC-Salencon-1969 | Curva de reacción del terreno de Mohr-Coulomb con dilatancia (Salençon; Duncan Fama con psi = 0): pcr, radio plástico, desplazamiento en la pared | PrimaryLaterAuthors |
+| GRC-HB-Carranza-Torres-Fairhurst-2000 | Curva de reacción de Hoek-Brown con a = 0.5 | PrimaryLaterAuthors |
+| GRC-HB-equivalent-MC | Hoek-Brown con a distinto de 0.5 vía Mohr-Coulomb equivalente, al estilo RocSupport (σcm global con el φ del ajuste del túnel) | Secondary |
+| LDP-Panet-1995 / LDP-Unlu-Gercek-2003 / LDP-Chern-1998 / LDP-Vlachopoulos-Diederichs-2009 | Perfil de deformación longitudinal: Panet 1995, Unlu-Gercek 2003, Chern 1998, Vlachopoulos-Diederichs 2009 (por omisión) | PrimaryLaterAuthors |
+| Support-interaction | Curva del sostenimiento elástica-perfectamente plástica (psm, εsm) con la tabla de presiones de Hoek; combinación por rigidez (por omisión) o los modos de RocSupport; FS en el cruce GRC-SCC | PrimaryLaterAuthors (modos RocSupport: Secondary) |
+| Rigidez de anillo grueso | Rigidez de un anillo grueso de shotcrete u hormigón | Secondary |
+| Squeezing-Hoek-Marinos-2000 | Deformación y relación de radio plástico, clases A-E | PrimaryLaterAuthors |
+| Lining-capacity-Carranza-Torres-Diederichs-2009 | Capacidad M-N y Q-N de shotcrete y cerchas | PrimaryLaterAuthors |
+| Lining-Einstein-Schwartz-1979 | Esfuerzos de un revestimiento elástico en campo hidrostático o no hidrostático | PrimaryLaterAuthors |
 | Correlaciones (nombre del enum, p. ej. `RmrFromQ_Bieniawski1976`) | Correlaciones globales, sin encadenar | Primary o Secondary, ver `rm.correlate(...).info` |
 
 Fuera de la fase 1A: Fe de tuneladora, Q 1974, ecuación 3 del GSI, tablas de mi/MR.

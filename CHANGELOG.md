@@ -4,6 +4,37 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
+## [Unreleased]
+
+Phase 8B: analytical tunnel excavations (convergence-confinement). The version number does not change yet.
+
+### Added
+
+- `analyze_tunnel` and `TunnelInput`: ground reaction curve of a circular tunnel (Mohr-Coulomb with dilatancy, and
+  Hoek-Brown), longitudinal deformation profile (Panet 1995, Unlu-Gercek 2003, Chern 1998, Vlachopoulos-Diederichs
+  2009), crossing with the support curve and factor of safety, squeezing class (Hoek and Marinos), and scope warnings.
+- `tunnel_uncertainty` (Monte Carlo over the tunnel inputs), `check_hoek_brown` and `check_k_ratio` (consistency of
+  declared Hoek-Brown tables), `load_support_capacity` (capacity sheet, Spanish or Phase2 English headers, decimal
+  comma) and Hoek's support pressure table (`HOEK_SUPPORT_TABLE`, `hoek_psm`).
+- Core: Kirsch and elliptical-opening boundary stresses, Reed (stresses), M-N and Q-N capacity of linings
+  (`capacity_mn`, `check_capacity`), and the Einstein-Schwartz lining forces.
+- `plot_tunnel`, `build_tunnel_report` and the `rockmass tunnel` command.
+- Example 15 (`examples/15-tuneles-convergencia-confinamiento/`).
+
+### Values to confirm
+
+- Not implemented because no source was read: Reed displacement, rigorous generalized Hoek-Brown, steel-set support
+  curves by formula, Hoek and Brown (1980) bolt stiffness, maximum pressure of a thick ring (Lame), and the elastic
+  bolt reinforcement of RS2-S 21 (its transcription has errata). The maximum average strain of most Hoek support
+  items is not published in the sources read, so only the 34 mm bolt (0.2 %) and the 50 mm shotcrete at 28 days
+  (0.1 %) carry one; for the rest you give it.
+- The squeezing correlation is used outside its fitted range (sigma_cm/p0 or pi/p0 above 0.5) with a note, not an
+  error; that band is still to be confirmed.
+- Hoek-Brown with a other than 0.5 uses the equivalent Mohr-Coulomb in the RocSupport style, which mixes the global
+  sigma_cm with the friction angle of the tunnel fit; the output says so in a note. A rigorous solution is pending.
+- The RocSupport combination modes (`rocsupport3`, `rocsupport`) are checked against RocSupport help text only
+  (Secondary).
+
 ## [0.3.0] - 2026-11-11
 
 The rest of the continuous RMR curves of Kundu et al. (2020), the curves checked against the paper, and fixes found

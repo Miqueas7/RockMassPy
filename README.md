@@ -733,6 +733,28 @@ information. Where the model chooses it is much safer than the Q chart alone in 
 
 See `examples/13-mina-sintetica/`: one mine through the audit and levels 1–3, measured against its truth.
 
+## Tunnels: convergence-confinement
+
+`analyze_tunnel` builds the ground reaction curve (GRC) of a circular tunnel (Mohr-Coulomb with dilatancy, or
+Hoek-Brown), the longitudinal deformation profile (LDP), the crossing with the support characteristic curve and the
+squeezing class of Hoek and Marinos. Compression is positive, units are MPa and m, plane strain.
+
+```python
+from rockmasspy.excavation import TunnelInput, analyze_tunnel
+from rockmasspy.support_capacity import SupportCapacity, hoek_psm
+
+inp = TunnelInput(radius_m=6, p0_mpa=1.62, nu=0.3, criterion="HB", sigma_ci_mpa=7, gsi=15, mi=10)
+bolt = SupportCapacity("B34", "bolt", psm_mpa=hoek_psm("34 mm rockbolt", spacing_m=1.0), eps_sm=0.002)
+r = analyze_tunnel(inp, supports=[bolt], install_distance_m=3, ldp="CHERN1998", combination="rocsupport3")
+print(r.interaction.fs, r.rp_m, r.strain_pct, r.squeezing.squeezing_class)   # 1.84 13.78 2.03 B
+```
+
+Scope warnings (K different from 1, non-circular shape, strain above 10 %) are warnings, never errors, and never repeat
+input values. Also available: `tunnel_uncertainty` (Monte Carlo over the inputs), `check_hoek_brown` (are the declared
+mb, s, a and Erm those of GSI, mi and D?), the shotcrete and steel M-N capacity (`rm.capacity_mn`,
+`rm.check_capacity`), the Einstein-Schwartz lining forces, `plot_tunnel`, a tunnel report and the `rockmass tunnel`
+command. See `examples/15-tuneles-convergencia-confinamiento/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
@@ -764,6 +786,16 @@ the same authors) or **Secondary** (checked against a secondary source only). **
 | HB-2002 / HB-2018 | Hoek-Brown criterion parameters (`hb_params`) and equivalent Mohr-Coulomb (`hb_mohr_coulomb`); 2018 is the default | Primary |
 | HB-2002 | Rock mass modulus Em (`em_hoek2002`) | Secondary |
 | HD-2006 | Rock mass modulus (Hoek & Diederichs) | Primary |
+| Kirsch-1898 / Ellipse-Inglis-1913 / Reed-1986 | Boundary and far-field stresses of a circular or elliptical opening (Kirsch, Inglis) and Reed elastic-plastic stresses | PrimaryLaterAuthors |
+| GRC-MC-Salencon-1969 | Mohr-Coulomb ground reaction curve with dilatancy (Salencon; Duncan Fama when psi = 0): pcr, plastic radius, wall displacement | PrimaryLaterAuthors |
+| GRC-HB-Carranza-Torres-Fairhurst-2000 | Hoek-Brown ground reaction curve for a = 0.5 | PrimaryLaterAuthors |
+| GRC-HB-equivalent-MC | Hoek-Brown with a other than 0.5 through the equivalent Mohr-Coulomb, RocSupport style (global sigma_cm with the tunnel-fit phi) | Secondary |
+| LDP-Panet-1995 / LDP-Unlu-Gercek-2003 / LDP-Chern-1998 / LDP-Vlachopoulos-Diederichs-2009 | Longitudinal deformation profile: Panet 1995, Unlu-Gercek 2003, Chern 1998, Vlachopoulos-Diederichs 2009 (default) | PrimaryLaterAuthors |
+| Support-interaction | Elastic-perfectly plastic support curve (psm, epsilon_sm) with Hoek's pressure table; combination by stiffness (default) or the RocSupport modes; FS at the GRC-SCC crossing | PrimaryLaterAuthors (RocSupport modes: Secondary) |
+| Thick-ring stiffness | Stiffness of a thick shotcrete or concrete ring | Secondary |
+| Squeezing-Hoek-Marinos-2000 | Strain and plastic radius ratio, classes A-E | PrimaryLaterAuthors |
+| Lining-capacity-Carranza-Torres-Diederichs-2009 | M-N and Q-N capacity of shotcrete and steel sets | PrimaryLaterAuthors |
+| Lining-Einstein-Schwartz-1979 | Forces of an elastic lining in a hydrostatic or non-hydrostatic field | PrimaryLaterAuthors |
 | Correlations (enum name, e.g. `RmrFromQ_Bieniawski1976`) | Global correlations, never chained | Primary or Secondary, see `rm.correlate(...).info` |
 
 Out of phase 1A: TBM Fe, Q 1974, GSI equation 3, mi/MR tables.
