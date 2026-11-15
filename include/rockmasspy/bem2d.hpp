@@ -64,11 +64,14 @@ struct BemBoundary {
 };
 
 /// Esfuerzo en un punto, compresión positiva. sigma1 y sigma3 son los principales del plano; angle1_deg, el de σ1
-/// desde el eje x. inside: dentro de una excavación (todo NaN). corrected: se aplicó el remedio de §1.9.
+/// desde el eje x. inside: dentro de una excavación (todo NaN). corrected: se aplicó el remedio de §1.9. coarse: el
+/// punto está a menos de un elemento del borde pero el remedio no cabe (pilar más angosto que unos dos elementos):
+/// se da el valor directo, finito pero con el error de §1.9; hay que afinar los elementos.
 struct BemPointStress {
     double sxx, syy, sxy, szz, sigma1, sigma3, angle1_deg;
     bool inside;
     bool corrected;
+    bool coarse;
 };
 
 inline MethodInfo bem_info() {
@@ -86,17 +89,17 @@ constexpr std::size_t kMaxElements = 2048;  // 4100 incógnitas: unos 130 MB de 
     throw std::invalid_argument("Domain error [RockMassPy]: parameter '" + name + "' " + what);
 }
 /// Como validation::require_positive, pero sin repetir el valor.
+/// validation::require_finite repite el valor en el mensaje; aquí solo se nombra el parámetro.
+inline void finite(double v, const std::string& name) {
+    if (!std::isfinite(v)) fail(name, "must be a finite number (got NaN or infinity)");
+}
 inline void positive(double v, const std::string& name) {
-    validation::require_finite(v, name);
+    finite(v, name);
     if (!(v > 0.0)) fail(name, "must be strictly positive (> 0)");
 }
 inline void poisson(double v, const std::string& name) {
-    validation::require_finite(v, name);
+    finite(v, name);
     if (v < 0.0 || v >= 0.5) fail(name, "must be within [0, 0.5)");
-}
-/// require_finite repite el valor en el mensaje; aquí solo se nombra el parámetro.
-inline void finite(double v, const std::string& name) {
-    if (!std::isfinite(v)) fail(name, "must be a finite number (got NaN or infinity)");
 }
 
 using Pt = std::pair<double, double>;
@@ -280,7 +283,10 @@ inline std::vector<BemElement> bem_discretize(const std::vector<BemContour>& con
     for (std::size_t c = 0; c < polys.size(); ++c)
         for (std::size_t i = 0; i < polys[c].size(); ++i)
             total += pieces(polys[c][i], polys[c][(i + 1) % polys[c].size()], contours[c].elements_per_side_hint);
-    if (total > double(kMaxElements)) fail("max_element_m", "gives more than 2048 elements; use a larger value");
+    if (total > double(kMaxElements))
+        throw std::invalid_argument(
+            "Domain error [RockMassPy]: parameters 'max_element_m' and 'elements_per_side_hint' give more than 2048 "
+            "elements; use a larger 'max_element_m' or a smaller 'elements_per_side_hint'");
     std::vector<BemElement> els;
     for (std::size_t c = 0; c < polys.size(); ++c) {
         const auto& p = polys[c];
@@ -436,11 +442,9 @@ inline std::vector<BemPointStress> bem_field(const BemSolution& sol, const std::
     std::vector<BemPointStress> out;
     out.reserve(pts.size());
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    for (const auto& [x, y] : pts) {
-        finite(x, "points");
-        finite(y, "points");
-        std::size_t i = 0;
-        double d = std::numeric_limits<double>::infinity(), t = 0.0;
+    // elemento más cercano: distancia, coordenada local del pie y su índice
+    auto nearest = [&](double x, double y, double& d, double& t, std::size_t& i) {
+        d = std::numeric_limits<double>::infinity();
         for (std::size_t j = 0; j < n; ++j) {
             const auto [dj, tj] = distance(els[j], x, y);
             if (dj < d) {
@@ -449,18 +453,26 @@ inline std::vector<BemPointStress> bem_field(const BemSolution& sol, const std::
                 i = j;
             }
         }
+    };
+    auto inside_any = [&](double x, double y) {
+        for (const auto& p : polys)
+            if (inside_polygon(x, y, p)) return true;
+        return false;
+    };
+    for (const auto& [x, y] : pts) {
+        finite(x, "points");
+        finite(y, "points");
+        std::size_t i = 0;
+        double d = 0.0, t = 0.0;
+        nearest(x, y, d, t, i);
         const double len = els[i].length;
-        const bool on_boundary = d <= 1e-12 * len;
-        bool inside = false;
-        if (!on_boundary)
-            for (const auto& p : polys) inside = inside || inside_polygon(x, y, p);
-        if (inside) {
-            out.push_back({nan, nan, nan, nan, nan, nan, nan, true, false});
+        const bool on_boundary = d <= 1e-12 * len;  // la influencia es singular ahí: nunca se evalúa directo
+        if (!on_boundary && inside_any(x, y)) {
+            out.push_back({nan, nan, nan, nan, nan, nan, nan, true, false, false});
             continue;
         }
         BemPointStress r{};
-        r.corrected = d < len;
-        if (!r.corrected) {
+        if (d >= len) {
             direct(x, y, r.sxx, r.syy, r.sxy);
         } else {
             if (stt_b.empty()) stt_b = bem_boundary(sol).sigma_tt_mpa;
@@ -470,13 +482,24 @@ inline std::vector<BemPointStress> bem_field(const BemSolution& sol, const std::
             const double st = (1 - w) * stt_b[i] + w * stt_b[jn];
             const double bxx = st * e.cos_b * e.cos_b, byy = st * e.sin_b * e.sin_b, bxy = st * e.sin_b * e.cos_b;
             // Q = F + L·n_material; con recorrido antihorario el material queda a la derecha: (sin β, −cos β)
-            const double fx = e.xm + t * e.cos_b, fy = e.ym + t * e.sin_b;
-            double qxx, qyy, qxy;
-            direct(fx + len * e.sin_b, fy - len * e.cos_b, qxx, qyy, qxy);
-            const double s = d / len;
-            r.sxx = bxx + s * (qxx - bxx);
-            r.syy = byy + s * (qyy - byy);
-            r.sxy = bxy + s * (qxy - bxy);
+            const double qx = e.xm + t * e.cos_b + len * e.sin_b, qy = e.ym + t * e.sin_b - len * e.cos_b;
+            double dq = 0.0, tq = 0.0;
+            std::size_t iq = 0;
+            if (!on_boundary) nearest(qx, qy, dq, tq, iq);
+            // Q debe quedar en el material y a un elemento de todo borde; si no (pilar angosto, rincón entrante), el
+            // remedio usaría un σ(Q) sin sentido o singular: se da el valor directo y se marca coarse
+            if (!on_boundary && (dq < len * (1 - 1e-9) || inside_any(qx, qy))) {
+                r.coarse = true;
+                direct(x, y, r.sxx, r.syy, r.sxy);
+            } else {
+                r.corrected = true;
+                double qxx = 0.0, qyy = 0.0, qxy = 0.0;
+                if (!on_boundary) direct(qx, qy, qxx, qyy, qxy);  // sobre el borde pesa cero
+                const double s = d / len;
+                r.sxx = bxx + s * (qxx - bxx);
+                r.syy = byy + s * (qyy - byy);
+                r.sxy = bxy + s * (qxy - bxy);
+            }
         }
         r.szz = sol.szz0_mpa + nu * ((r.sxx - sol.sxx0_mpa) + (r.syy - sol.syy0_mpa));
         const double c = (r.sxx + r.syy) / 2, rad = std::hypot((r.sxx - r.syy) / 2, r.sxy);

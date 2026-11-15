@@ -1030,7 +1030,8 @@ NB_MODULE(_rockmasspy_core, m) {
         .def_ro("sxx", &BemPointStress::sxx).def_ro("syy", &BemPointStress::syy).def_ro("sxy", &BemPointStress::sxy)
         .def_ro("szz", &BemPointStress::szz).def_ro("sigma1", &BemPointStress::sigma1)
         .def_ro("sigma3", &BemPointStress::sigma3).def_ro("angle1_deg", &BemPointStress::angle1_deg)
-        .def_ro("inside", &BemPointStress::inside).def_ro("corrected", &BemPointStress::corrected);
+        .def_ro("inside", &BemPointStress::inside).def_ro("corrected", &BemPointStress::corrected)
+        .def_ro("coarse", &BemPointStress::coarse);
     m.def("bem_info", &bem_info);
     m.def("bem_discretize", &bem_discretize, nb::arg("contours"), nb::arg("max_element_m"));
     m.def("bem_solve", &bem_solve, nb::arg("input"));

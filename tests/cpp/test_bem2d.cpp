@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -208,6 +210,9 @@ TEST(Bem2d, Errores) {
     auto bad = input({a}, 30, 15);
     bad.e_mpa = 0;
     EXPECT_TRUE(has(error_of([&] { bem_solve(bad); }), "e_mpa"));
+    bad.e_mpa = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_TRUE(has(error_of([&] { bem_solve(bad); }), "e_mpa"));
+    EXPECT_TRUE(has(error_of([&] { bem_discretize({{a, 2000}}, 1.0); }), "elements_per_side_hint"));
     for (double nu : {-0.1, 0.5, 0.7}) {
         bad = input({a}, 30, 15);
         bad.nu = nu;
@@ -217,6 +222,47 @@ TEST(Bem2d, Errores) {
     BemInput blank;
     blank.contours = {{a, 0}};
     EXPECT_FALSE(error_of([&] { bem_solve(blank); }).empty());
+}
+
+namespace {
+Pts rect(double x0, double x1, double y0, double y1) { return {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}}; }
+
+/// Dos cámaras de ancho bw y alto h con un pilar de ancho w; perfil horizontal y vertical por el pilar.
+std::vector<BemPointStress> pillar(double w, double el, double bw, double h) {
+    auto in = input({rect(-w / 2 - bw, -w / 2, -h / 2, h / 2), rect(w / 2, w / 2 + bw, -h / 2, h / 2)}, 30, 15);
+    in.max_element_m = el;
+    Pts pts;
+    for (int i = 0; i <= 60; ++i) pts.push_back({-w / 2 - bw - 3 + (w + 2 * bw + 6) * i / 60.0, 0.0});
+    for (int i = 0; i <= 20; ++i) pts.push_back({0.0, -h / 2 + h * i / 20.0});
+    return bem_field(bem_solve(in), pts);
+}
+bool all_finite(const BemPointStress& p) {
+    for (double v : {p.sxx, p.syy, p.sxy, p.szz, p.sigma1, p.sigma3, p.angle1_deg})
+        if (!std::isfinite(v)) return false;
+    return true;
+}
+}  // namespace
+
+TEST(Bem2d, PilarAngostoSinNaN) {  // revisión: Q del remedio caía en la otra cámara (NaN o valor sin sentido)
+    for (auto [w, el, bw, h] : {std::tuple{1.0, 1.0, 4.0, 4.0}, std::tuple{0.5, 1.0, 4.0, 4.0},
+                                std::tuple{3.0, 3.0, 5.0, 6.0}}) {
+        const auto f = pillar(w, el, bw, h);
+        int coarse = 0;
+        for (const auto& p : f) {
+            if (p.inside) continue;
+            EXPECT_TRUE(all_finite(p)) << w << " " << el;
+            EXPECT_FALSE(p.coarse && p.corrected);
+            coarse += p.coarse;
+        }
+        EXPECT_GT(coarse, 0) << w << " " << el;
+        EXPECT_TRUE(f[61 + 10].coarse);  // centro del pilar
+    }
+}
+
+TEST(Bem2d, PilarConMallaFinaSinCambio) {  // L = 0.25: el remedio cabe; centro del pilar 81.683 como antes
+    const auto f = pillar(1.0, 0.25, 4.0, 4.0);
+    for (const auto& p : f) EXPECT_FALSE(p.coarse);
+    EXPECT_NEAR(f[61 + 10].syy, 81.683, 0.001);
 }
 
 TEST(Bem2d, Rendimiento) {  // 2 contornos × 256 elementos; meta < 2 s (se mide, la prueba solo exige que termine)

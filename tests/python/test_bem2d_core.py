@@ -96,3 +96,38 @@ def test_errors():
     with pytest.raises(ValueError, match="'alpha_deg'"):
         rm.bem_solve(rm.BemInput(contours=[rm.BemContour(vertices=sq)], sigma1_mpa=30, sigma3_mpa=15, e_mpa=1e4,
                                  nu=0.2, max_element_m=1))
+
+
+def _pillar(w, el, bw, h):
+    rect = lambda x0, x1: [(x0, -h / 2), (x1, -h / 2), (x1, h / 2), (x0, h / 2)]
+    sol = rm.bem_solve(rm.BemInput(contours=[rm.BemContour(vertices=rect(-w / 2 - bw, -w / 2)),
+                                             rm.BemContour(vertices=rect(w / 2, w / 2 + bw))],
+                                   sigma1_mpa=30, sigma3_mpa=15, alpha_deg=90, e_mpa=10000, nu=0.2, max_element_m=el))
+    pts = [(-w / 2 - bw - 3 + (w + 2 * bw + 6) * i / 60, 0.0) for i in range(61)]
+    pts += [(0.0, -h / 2 + h * i / 20) for i in range(21)]
+    return rm.bem_field(sol, pts)
+
+
+@pytest.mark.parametrize("w,el,bw,h", [(1.0, 1.0, 4.0, 4.0), (0.5, 1.0, 4.0, 4.0), (3.0, 3.0, 5.0, 6.0)])
+def test_narrow_pillar_no_nan(w, el, bw, h):
+    f = _pillar(w, el, bw, h)
+    out = [p for p in f if not p.inside]
+    assert all(math.isfinite(v) for p in out for v in (p.sxx, p.syy, p.sxy, p.szz, p.sigma1, p.sigma3))
+    assert f[61 + 10].coarse and not f[61 + 10].corrected
+    assert not any(p.coarse and p.corrected for p in out)
+
+
+def test_fine_pillar_unchanged():
+    f = _pillar(1.0, 0.25, 4.0, 4.0)
+    assert not any(p.coarse for p in f)
+    assert f[61 + 10].syy == pytest.approx(81.683, abs=1e-3)
+
+
+def test_messages_without_values():
+    sq = [(0, 0), (2, 0), (2, 2), (0, 2)]
+    with pytest.raises(ValueError, match="'e_mpa'") as e:
+        rm.bem_solve(rm.BemInput(contours=[rm.BemContour(vertices=sq)], sigma1_mpa=30, sigma3_mpa=15, alpha_deg=90,
+                                 e_mpa=float("nan"), nu=0.2, max_element_m=1))
+    assert "Received" not in str(e.value)
+    with pytest.raises(ValueError, match="'elements_per_side_hint'"):
+        rm.bem_discretize([rm.BemContour(vertices=sq, elements_per_side_hint=2000)], 1.0)
