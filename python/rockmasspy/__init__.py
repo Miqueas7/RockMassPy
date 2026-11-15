@@ -87,3 +87,5 @@ from .criteria import (CRITERIA_COLUMNS, CRITERIA_RESULT_COLUMNS, CRITERIA_STATU
 from .support_capacity import HOEK_SUPPORT_TABLE, HoekSupportItem, SupportCapacity, hoek_psm, load_support_capacity  # noqa: E402,F401
 from .hb_consistency import HbConsistency, check_hoek_brown, check_k_ratio  # noqa: E402,F401
 from .excavation import TunnelInput, TunnelResult, analyze_tunnel, tunnel_uncertainty  # noqa: E402,F401
+from .external import (QUANTITIES, ExternalRecord, ExternalSet, HbRow, check_rocdata,  # noqa: E402,F401
+                       load_external, load_rocdata_table)
