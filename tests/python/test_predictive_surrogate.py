@@ -82,3 +82,19 @@ def test_load_runs_csv_comma_decimal(tmp_path):
     assert set(d.groups) == {"E1", "E2"} and d.X[0, 0] == pytest.approx(1.0)
     assert d.notes == ("runs without a finite output ignored",)
     assert load_runs(f, sheet="corridas", output="fs", inputs=["phi"]).names == ("phi",)
+
+
+def test_poly2_needs_more_runs_than_terms(data):
+    with pytest.raises(ValueError, match="runs.*quadratic"):
+        fit_surrogate(SurrogateData(data.X[:8], data.y[:8], data.names))
+    assert fit_surrogate(SurrogateData(data.X[:11], data.y[:11], data.names)).kind == "poly2"
+    fit_surrogate(SurrogateData(data.X[:8], data.y[:8], data.names), kind="rbf")
+
+
+def test_rbf_duplicate_rows(data):
+    X = data.X[:12].copy()
+    X[1] = X[0]
+    d = SurrogateData(X, data.y[:12], data.names)
+    with pytest.raises(ValueError, match="runs.*smoothing"):
+        fit_surrogate(d, kind="rbf")
+    assert fit_surrogate(d, kind="rbf", smoothing=1e-3).kind == "rbf"

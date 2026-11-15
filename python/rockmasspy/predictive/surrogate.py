@@ -164,6 +164,8 @@ def fit_surrogate(data: SurrogateData, *, kind: str = "poly2", smoothing: float 
         raise ValueError(f"kind: must be one of {', '.join(KINDS)}")
     X, y = data.X, data.y
     n, p = X.shape
+    if kind == "poly2" and n < (p + 1) * (p + 2) // 2 + 1:  # al menos un grado de libertad tras los coeficientes
+        raise ValueError("runs: too few runs for a quadratic response surface")
     if n < 2 * p + 2:
         raise ValueError("runs: too few runs for the number of inputs (need at least 2p + 2)")
     if not (np.all(np.isfinite(X)) and np.all(np.isfinite(y))):
@@ -177,7 +179,12 @@ def fit_surrogate(data: SurrogateData, *, kind: str = "poly2", smoothing: float 
         beta = np.linalg.lstsq(_poly2(Z), y, rcond=None)[0]
         model = lambda Zq: _poly2(Zq) @ beta  # noqa: E731
     else:
-        model = RBFInterpolator(Z, y, kernel="thin_plate_spline", degree=1, smoothing=smoothing)
+        if smoothing == 0 and len(np.unique(X, axis=0)) < n:  # scipy no siempre detecta la matriz singular
+            raise ValueError("runs: duplicate or collinear inputs; use smoothing > 0")
+        try:
+            model = RBFInterpolator(Z, y, kernel="thin_plate_spline", degree=1, smoothing=smoothing)
+        except np.linalg.LinAlgError:
+            raise ValueError("runs: duplicate or collinear inputs; use smoothing > 0") from None
     lo, hi = X.min(axis=0), X.max(axis=0)
     cov = np.atleast_2d(np.cov(Z, rowvar=False))
     return Surrogate(data.names, kind, _INFO[kind], mean, std, lo - DOMAIN_BOX_MARGIN * (hi - lo),
