@@ -12,6 +12,7 @@ import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from . import _rockmasspy_core as rm
 from .csv_io import _CsvSource
 from .excel_io import _num, _open, _text, _where
 from .hb_consistency import HbConsistency, check_hoek_brown
@@ -334,4 +335,66 @@ def check_rocdata(rows) -> list[HbConsistency]:
         if r.gamma is not None and not GAMMA_RANGE_MN_M3[0] <= r.gamma <= GAMMA_RANGE_MN_M3[1]:
             c = replace(c, notes=c.notes + ("unit weight outside the usual range; check units",))
         out.append(c)
+    return out
+
+
+# --- monitoreo frente al modelo (E7) ---
+
+MONITORING_RATIO_WARN = 1.5  # provisional: medido/modelado por encima de esto pide atención
+
+
+@dataclass(frozen=True)
+class MonitoringComparison:
+    object_id: str = field(repr=False)
+    stage: str | None
+    measured: float
+    modeled: float | None
+    ratio: float | None  # medido / modelado; None si no hay modelo
+    warning: str | None = None
+    note: str | None = None
+
+
+def compare_monitoring(measured, modeled, *, quantity: str = "convergence_pct") -> list[MonitoringComparison]:
+    """Razón medido/modelado por (id, etapa). No juzga: avisa si ratio > MONITORING_RATIO_WARN.
+
+    `modeled` es un ExternalSet (se cruza por id y etapa, o por id si el modelo no trae etapa) o un
+    {id: TunnelResult}, cuyo valor es strain_eq_pct si hay cruce con el sostenimiento y strain_pct si no.
+    """
+    if isinstance(modeled, ExternalSet):
+        table = {(r.object_id, r.stage): r.value for r in modeled.records if r.quantity == quantity}
+        get = lambda oid, st: table.get((oid, st), table.get((oid, None)))  # noqa: E731
+    else:
+        def get(oid, st):
+            t = modeled.get(oid)
+            if t is None:
+                return None
+            return t.interaction.strain_eq_pct if t.interaction is not None and t.interaction.found else t.strain_pct
+    out = []
+    for r in (r for r in measured.records if r.quantity == quantity):
+        m = get(r.object_id, r.stage)
+        if m is None or m == 0:
+            out.append(MonitoringComparison(r.object_id, r.stage, r.value, None, None, None,
+                                            "no model for some measurements"))
+            continue
+        ratio = r.value / m
+        warn = f"measured exceeds model by more than {(MONITORING_RATIO_WARN - 1) * 100:g} %"
+        out.append(MonitoringComparison(r.object_id, r.stage, r.value, m, ratio,
+                                        warn if ratio > MONITORING_RATIO_WARN else None))
+    return out
+
+
+def lining_forces(external, *, object_id: str | None = None) -> list:
+    """rm.LiningForce por (id, etapa) desde axial_force_mn, moment_mnm y shear_mn; sin M ni Q valen 0."""
+    recs = external.records if isinstance(external, ExternalSet) else tuple(external)
+    groups: dict = {}
+    for r in recs:
+        if r.quantity in ("axial_force_mn", "moment_mnm", "shear_mn") and object_id in (None, r.object_id):
+            groups.setdefault((r.object_id, r.stage), {})[r.quantity] = r.value
+    out = []
+    for g in groups.values():
+        if "axial_force_mn" not in g:
+            raise ValueError("lining force without its 'axial_force_mn'")
+        f = rm.LiningForce()
+        f.n_mn, f.m_mnm, f.q_mn = g["axial_force_mn"], g.get("moment_mnm", 0.0), g.get("shear_mn", 0.0)
+        out.append(f)
     return out
