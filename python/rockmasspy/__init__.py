@@ -81,11 +81,11 @@ from .limit_equilibrium import (ANALYSIS_COLUMNS, GEOMETRY_COLUMNS, LAYER_COLUMN
                                 LeAnalysisResult, LeInputs, MaterialRow, RecordRow, assess_le, le_attention, le_counts,
                                 le_warning_counts, load_le_inputs, read_accelerogram, save_le_results)
 from .normative import CONSEQUENCES, RANGE_POLICIES, SCALES  # noqa: E402,F401
-from .criteria import (CRITERIA_COLUMNS, CRITERIA_RESULT_COLUMNS, CRITERIA_STATUSES, CriterionCheck,  # noqa: E402,F401
-                       assess_criteria, criteria_attention, criteria_counts, load_criteria_table,
-                       save_criteria_results)
+from .criteria import (CRITERIA_COLUMNS, CRITERIA_RESULT_COLUMNS, CRITERIA_STATUSES, SSR_BAND,  # noqa: E402,F401
+                       SSR_POLICIES, CriterionCheck, assess_criteria, criteria_attention, criteria_counts,
+                       load_criteria_table, save_criteria_results)
 from .support_capacity import HOEK_SUPPORT_TABLE, HoekSupportItem, SupportCapacity, hoek_psm, load_support_capacity  # noqa: E402,F401
 from .hb_consistency import HbConsistency, check_hoek_brown, check_k_ratio  # noqa: E402,F401
 from .excavation import TunnelInput, TunnelResult, analyze_tunnel, tunnel_uncertainty  # noqa: E402,F401
-from .external import (QUANTITIES, ExternalRecord, ExternalSet, HbRow, check_rocdata,  # noqa: E402,F401
-                       load_external, load_rocdata_table)
+from .external import (QUANTITIES, ExternalRecord, ExternalSet, HbRow, MethodComparison,  # noqa: E402,F401
+                       check_rocdata, compare_methods, load_external, load_rocdata_table)

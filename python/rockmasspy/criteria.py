@@ -1,8 +1,10 @@
-"""Criterios de aceptación de taludes: compara bloques (3B) y análisis LE (3C) con un perfil de criterios (3D).
+"""Criterios de aceptación de taludes: compara bloques (3B), análisis LE (3C) y resultados externos (8A) con un
+perfil de criterios (3D).
 
 Cada objeto lleva una escala y una consecuencia (`assignments`). Por cada regla del perfil que aplica al tipo de
 objeto sale un chequeo: `meets`, `fails` o `not_verifiable`, con el criterio, su fuente, su fuerza y su marca.
-Nunca dice «aprobado». Una sola regla de atención: un `fails` (R10); `not_verifiable` es nota.
+Nunca dice «aprobado». Pide atención un `fails` (R10) o un SRF que cumple dentro de la banda provisional cerca del
+umbral (8A, `attention_note`); `not_verifiable` es nota.
 El estado sigue el comparador (R2): un FS igual al mínimo cumple con «>=» y una PoF igual al máximo con «<=»;
 la comparación es exacta en decimales, así que 1.2 - 1e-12 no cumple «>= 1.2».
 Los ids van solo al archivo de resultados; las razones van en inglés y sin valores ni ids.
@@ -20,6 +22,7 @@ from pathlib import Path
 from .batch import write_table
 from .blocks import BlockResult
 from .excel_io import _where
+from .external import ExternalRecord, ExternalSet
 from .limit_equilibrium import LeAnalysisResult, le_fs, le_static_fs
 from .normative import (CONSEQUENCES, RANGE_POLICIES, SCALES, NormativeProfile, NormItem, _check_date)
 from .slopes import _cargar, _rango
@@ -31,9 +34,17 @@ CRITERIA_COLUMNS = ("escala", "consecuencia", "fs_estatico_min", "fs_seudoestati
                     "confiabilidad_berma_min_pct", "fuente")
 # reglas que se miran en cada tipo de objeto
 _KIND_RULES = {"block": ("slope_fs_static", "slope_pof", "slope_fs_pseudostatic"), "berm": ("berm_reliability",),
-               "le": ("slope_fs_static", "slope_fs_pseudostatic", "deformation_required")}
+               "le": ("slope_fs_static", "slope_fs_pseudostatic", "deformation_required"),
+               "ext": ("slope_fs_static", "slope_fs_pseudostatic", "slope_pof")}
 NOT_IN_FORCE = "profile not in force on the evaluation date"
 NOT_APPLICABLE = "the guideline sets no minimum for this consequence (not applicable)"
+# política del SRF de un resultado externo (investigación §11.2): la banda del 5 % es provisional
+SSR_POLICIES = ("warn", "accept", "not_verifiable")
+SSR_BAND = 0.05
+SSR_NOTE = "SRF (shear strength reduction), not a limit-equilibrium FS"
+SSR_REJECTED = "SRF not accepted by the policy"
+SSR_ATTENTION = "SRF within the provisional band near the threshold"
+_EXT_QUANTITIES = ("fs", "srf", "pof_pct")
 
 
 @dataclass(frozen=True)
@@ -52,10 +63,11 @@ class CriterionCheck:
     force: str
     verification: str
     range_used: str | None
+    attention_note: str | None = None  # solo en `ext`: cumple, pero cerca del umbral (banda del SRF)
 
     @property
     def needs_attention(self) -> bool:
-        return self.status == "fails"
+        return self.status == "fails" or self.attention_note is not None
 
 
 def _ok(x, comparison, value) -> bool:
@@ -158,7 +170,44 @@ def _le_value(rule, r: LeAnalysisResult):
     return _lowest(le_fs(r), "pseudo-static FS")
 
 
-def _check(kind, oid, order, item, policy, obtained, reason, note, newmark=None):
+def _ext_rows(rows):
+    """Objetos externos con FS, SRF o PoF: [((modelo, escenario, id), filas)] ordenados por esa clave."""
+    recs = rows.records if isinstance(rows, ExternalSet) else tuple(rows)
+    return sorted(ExternalSet(tuple(r for r in recs if r.quantity in _EXT_QUANTITIES)).objects().items())
+
+
+def _ext_value(rule, rows, ssr_policy):
+    """(obtenido, razón, nota, ¿banda del SRF?) de un objeto externo; kh vacío o 0 es estático."""
+    if rule == "slope_pof":
+        pof = [r.value for r in rows if r.quantity == "pof_pct" and _finite(r.value) and not (r.kh or 0) > 0]
+        return (max(pof), "", "", False) if pof else (None, "no static PoF", "", False)
+    pseudo = rule == "slope_fs_pseudostatic"
+    # shortcut: varios kh > 0 en un objeto se juzgan con el menor FS de todos; separar por kh si llega ese caso
+    fs = [r for r in rows if r.quantity in ("fs", "srf") and _finite(r.value) and ((r.kh or 0) > 0) == pseudo]
+    if ssr_policy == "not_verifiable":
+        kept = [r for r in fs if r.method != "ssr"]
+        if fs and not kept:
+            return None, SSR_REJECTED, "", False
+        fs = kept
+    if not fs:
+        return None, f"no {'pseudo-static' if pseudo else 'static'} FS", "", False
+    low = min(fs, key=lambda r: (r.value, r.method == "ssr"))  # en un empate manda el de equilibrio límite
+    notes = [f"lowest of {len(fs)} methods" + (f": {low.method}" if low.method else "")] if len(fs) > 1 else []
+    warn = low.method == "ssr" and ssr_policy == "warn"
+    if warn:
+        notes.append(SSR_NOTE)
+    return low.value, "", "; ".join(notes), warn
+
+
+def _near(obtained, required) -> bool:
+    """|FS − req| < SSR_BAND·req, exacta en decimales."""
+    if math.isinf(obtained):
+        return False
+    req = Fraction(str(required))
+    return abs(Fraction(str(obtained)) - req) < Fraction(str(SSR_BAND)) * req
+
+
+def _check(kind, oid, order, item, policy, obtained, reason, note, newmark=None, band=False):
     required, rng = _threshold(item, policy)
     if obtained is None:
         status = "not_verifiable"
@@ -170,9 +219,10 @@ def _check(kind, oid, order, item, policy, obtained, reason, note, newmark=None)
             status, note = "meets", "deformation analysis not required"
     else:
         status = "meets" if _ok(obtained, item.comparison, required) else "fails"
+    attention = SSR_ATTENTION if band and status == "meets" and _near(obtained, required) else None
     return CriterionCheck(kind, oid, order, item.item_id, item.check, required, item.comparison,
                           None if obtained is None else float(obtained), status, reason or note,
-                          _source(item), item.force, item.verification, rng)
+                          _source(item), item.force, item.verification, rng, attention)
 
 
 def _source(item: NormItem) -> str:
@@ -198,11 +248,21 @@ def _assigner(assignments: Mapping):
     return assign
 
 
-def criteria_assignments(blocks: Iterable[BlockResult] = (),
-                         le: Iterable[LeAnalysisResult] = ()) -> dict:
-    """El `assignments` de `assess_criteria`, de las columnas `escala` y `consecuencia` de `Bloques` y `Analisis_LE`."""
+def _same(rows, col):
+    """El valor de `col` en las filas de un objeto externo; vacío no cuenta, dos distintos son un error."""
+    vals = {v.strip().casefold() for r in rows if (v := getattr(r, col)) and v.strip()}
+    if len(vals) > 1:
+        raise ValueError(f"external: rows of the same object differ in {col}")
+    return next(iter(vals), None)
+
+
+def criteria_assignments(blocks: Iterable[BlockResult] = (), le: Iterable[LeAnalysisResult] = (),
+                         external: ExternalSet | Iterable[ExternalRecord] = ()) -> dict:
+    """El `assignments` de `assess_criteria`, de las columnas `escala` y `consecuencia` de `Bloques` y `Analisis_LE`
+    y de `scale`/`consequence` de los resultados externos (clave `("ext", (modelo, escenario, id))`)."""
     out = {("berm" if r.model == "berm" else "block", r.id_bloque): (r.escala, r.consecuencia) for r in blocks}
     out.update({("le", r.id_analisis): (r.escala, r.consecuencia) for r in le})
+    out.update({("ext", k): (_same(rows, "scale"), _same(rows, "consequence")) for k, rows in _ext_rows(external)})
     return out
 
 
@@ -231,17 +291,25 @@ def _pseudostatic_present(item, le, assign, return_periods):
 
 def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] = (),
                     le: Iterable[LeAnalysisResult] = (), assignments: Mapping, range_policy: str | None = None,
-                    return_periods: Mapping | None = None, as_of: str | None = None) -> list[CriterionCheck]:
+                    return_periods: Mapping | None = None, as_of: str | None = None,
+                    external: ExternalSet | Iterable[ExternalRecord] = (),
+                    ssr_policy: str = "warn") -> list[CriterionCheck]:
     """Un chequeo por objeto y regla del perfil que aplica a su tipo (y por ítem si varios calzan).
 
-    `assignments`: {(tipo, id): (escala, consecuencia)} con tipo `block`, `berm` (bloque modelo berma) o `le`;
+    `assignments`: {(tipo, id): (escala, consecuencia)} con tipo `block`, `berm` (bloque modelo berma) o `le`, y
+    `("ext", (modelo, escenario, id))` para los resultados externos (`criteria_assignments` los arma);
     una escala o consecuencia vacía, ausente o fuera de la lista deja el chequeo «not_verifiable» (con la razón
     «unknown scale» o «unknown consequence»). `range_policy` sobrescribe la del
     perfil. `return_periods`: {id_analisis: Tr en años}, solo para `pseudostatic_analysis_present`.
+    `external`: cada (modelo, escenario, id) con `fs`, `srf` o `pof_pct` es un objeto `ext`, ordenado por esa clave;
+    su FS es el menor de sus filas (kh > 0 va a la regla seudoestática) y `ssr_policy` dice qué hacer con el SRF:
+    `warn` lo evalúa con nota y banda de atención, `accept` sin nota, `not_verifiable` no lo evalúa.
     """
     policy = profile.range_policy if range_policy is None else range_policy
     if policy not in RANGE_POLICIES:
         raise ValueError(f"range_policy: must be one of {RANGE_POLICIES}")
+    if ssr_policy not in SSR_POLICIES:
+        raise ValueError(f"ssr_policy: must be one of {SSR_POLICIES}")
     as_of = datetime.date.today().isoformat() if as_of is None else _check_date(as_of, "as_of")
     items = [i for i in (profile.version(iid, as_of) for iid in profile.item_ids()) if i is not None]
     by_rule: dict[str, list[NormItem]] = {}
@@ -253,22 +321,28 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
 
     assign = _assigner(assignments)
     out: list[CriterionCheck] = []
-    objects = [("berm" if r.model == "berm" else "block", r.id_bloque, r) for r in blocks]
+    # (tipo, clave de assignments, orden, objeto); en `ext` el objeto son sus filas y el id va al final de la clave
+    objects = [("berm" if r.model == "berm" else "block", r.id_bloque, r.order, r) for r in blocks]
     le = list(le)
-    objects += [("le", r.id_analisis, r) for r in le]
-    for kind, oid, r in objects:
-        scale, cons = assign((kind, oid))
+    objects += [("le", r.id_analisis, r.order, r) for r in le]
+    objects += [("ext", k, n, rows) for n, (k, rows) in enumerate(_ext_rows(external), start=1)]
+    for kind, key, order, r in objects:
+        scale, cons = assign((kind, key))
+        oid = key[2] if kind == "ext" else key
         unknown = _unknown(scale, cons)
         for rule in _KIND_RULES[kind]:
             if kind == "block" and rule == "slope_fs_pseudostatic" and not r.kh > 0:
                 continue  # un bloque sin kh se juzga solo con las reglas estáticas
+            if kind == "ext" and rule == "slope_fs_pseudostatic" and not any((x.kh or 0) > 0 for x in r
+                                                                                if x.quantity in ("fs", "srf")):
+                continue  # igual en un objeto externo sin filas de FS con kh
             if rule not in by_rule:
                 old = [i for i in all_by_rule.get(rule, ()) if not unknown and _matches(i, scale, cons)]
                 if old:
-                    out.append(_empty(kind, oid, r.order, rule, old, NOT_IN_FORCE))
+                    out.append(_empty(kind, oid, order, rule, old, NOT_IN_FORCE))
                 continue
             if unknown:
-                out.append(_empty(kind, oid, r.order, rule, by_rule[rule], unknown))
+                out.append(_empty(kind, oid, order, rule, by_rule[rule], unknown))
                 continue
             hits = [i for i in by_rule[rule] if _matches(i, scale, cons)]
             if not hits:
@@ -276,13 +350,17 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
                 reason = NOT_IN_FORCE if old else _no_match_reason(by_rule[rule], scale, cons)
                 if reason == "the profile has no criterion for this consequence" and cons in profile.not_applicable:
                     reason = NOT_APPLICABLE
-                out.append(_empty(kind, oid, r.order, rule, old or by_rule[rule], reason))
+                out.append(_empty(kind, oid, order, rule, old or by_rule[rule], reason))
                 continue
             rule_value = "slope_fs_pseudostatic" if rule == "deformation_required" else rule
-            obtained, reason, note = (_le_value(rule_value, r) if kind == "le" else _block_value(rule, r))
+            band = False
+            if kind == "ext":
+                obtained, reason, note, band = _ext_value(rule, r, ssr_policy)
+            else:
+                obtained, reason, note = (_le_value(rule_value, r) if kind == "le" else _block_value(rule, r))
             for item in hits:
-                out.append(_check(kind, oid, r.order, item, policy, obtained, reason, note,
-                                  newmark=kind == "le" and r.newmark is not None))
+                out.append(_check(kind, oid, order, item, policy, obtained, reason, note,
+                                  newmark=kind == "le" and r.newmark is not None, band=band))
     for item in by_rule.get("pseudostatic_analysis_present", ()):
         status, reason = _pseudostatic_present(item, le, assign, return_periods or {})
         out.append(CriterionCheck("le_set", "", 0, item.item_id, item.check, item.value, item.comparison, None,
@@ -300,13 +378,14 @@ def criteria_counts(checks: Iterable[CriterionCheck]) -> dict[str, int]:
 
 
 def criteria_attention(checks: Iterable[CriterionCheck]) -> Counter:
-    """Única regla de atención (R10): los «fails», agrupados por regla y sin ids. Vacío = nada pide atención."""
+    """Regla de atención (R10): los «fails» y los SRF en la banda (8A), agrupados por regla y sin ids. Vacío = nada
+    pide atención."""
     return Counter(x.rule for x in checks if x.needs_attention)
 
 
 CRITERIA_RESULT_COLUMNS = ("tipo_objeto", "id_objeto", "orden", "criterio", "regla", "requerido", "comparacion",
                            "obtenido", "estado", "razon", "fuente", "fuerza", "marca", "rango_usado")
-_KIND_WORD = {"block": "bloque", "berm": "berma", "le": "le", "le_set": "conjunto_le"}
+_KIND_WORD = {"block": "bloque", "berm": "berma", "le": "le", "le_set": "conjunto_le", "ext": "externo"}
 _STATUS_WORD = {"meets": "cumple", "fails": "no_cumple", "not_verifiable": "no_verificable"}
 _FORCE_WORD = {"law": "ley", "guide": "guia"}
 

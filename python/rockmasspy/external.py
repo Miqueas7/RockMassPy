@@ -6,14 +6,16 @@ de una magnitud («Factor of Safety (-)») pasa de tabla ancha a filas largas; s
 Los errores ubican hoja, fila y columna; nunca repiten valores ni ids.
 """
 
+import math
 import re
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .csv_io import _CsvSource
 from .excel_io import _num, _open, _text, _where
 from .hb_consistency import HbConsistency, check_hoek_brown
+from .limit_equilibrium import _METHOD_WORD, le_static_fs
 
 # magnitud -> unidad canónica
 QUANTITIES = {
@@ -225,6 +227,45 @@ def load_external(path, *, sheet: str = "Resultados_externos", column_map: dict 
             out.append(replace(r, method="ssr") if q == "srf" else r)
     notes = ("unrecognized columns ignored",) if ignored else ()
     return ExternalSet(tuple(out), (), notes)
+
+
+# --- comparación de métodos (investigación §11.2 regla 5) ---
+
+METHOD_SPREAD = 0.10  # provisional
+
+
+@dataclass(frozen=True)
+class MethodComparison:
+    object_id: str = field(repr=False)
+    values: dict  # método -> FS estático; los de RockMassPy con el prefijo «rockmasspy:»
+    spread: float  # (máx − mín)/mín
+    warning: str | None
+    model: str = field(default="", repr=False)
+    scenario: str = field(default="", repr=False)
+
+
+def compare_methods(external, le_results=(), *, threshold: float = METHOD_SPREAD) -> list[MethodComparison]:
+    """FS estático por método de cada (modelo, escenario, id) externo, más los de un análisis LE de RockMassPy con
+    `id_analisis` igual al id. Un objeto con un solo método no se compara. Avisa si spread > threshold."""
+    recs = external.records if isinstance(external, ExternalSet) else tuple(external)
+    ours: dict = {}
+    for r in le_results:
+        names = ["sarma"] if r.sarma is not None else [_METHOD_WORD[x.method] for x in r.results]
+        ours.setdefault(r.id_analisis, []).extend((f"rockmasspy:{m}", v) for m, v in zip(names, le_static_fs(r)))
+    out = []
+    for (model, scenario, oid), rows in sorted(ExternalSet(recs).objects().items()):
+        pairs = [(r.method or "unspecified", r.value) for r in rows if r.quantity in ("fs", "srf") and not r.kh]
+        vals: dict = {}
+        for m, v in pairs + ours.get(oid, []):
+            if v is not None and math.isfinite(v):
+                vals[m] = min(v, vals.get(m, v))  # el mismo método dos veces: el menor
+        if len(vals) < 2:
+            continue
+        lo, hi = min(vals.values()), max(vals.values())
+        spread = (hi - lo) / lo if lo > 0 else math.inf
+        warning = f"methods differ by more than {threshold * 100:g} %" if spread > threshold else None
+        out.append(MethodComparison(oid, vals, spread, warning, model, scenario))
+    return out
 
 
 # --- tabla ancha de RocData / tesis ---
