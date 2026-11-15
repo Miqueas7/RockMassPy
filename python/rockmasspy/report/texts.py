@@ -1092,5 +1092,51 @@ REPORT_TEXTS.update({
 })
 
 
+REPORT_TEXTS.update({
+    # --- Resultados externos (Slide2, RS2, FLAC3D, RocData) ---
+    "ex_title": {"es": "Resultados de programas externos", "en": "External program results"},
+    "ex_scope": {
+        "es": "Este documento reúne resultados calculados por programas externos y los contrasta con los criterios "
+              "de aceptación, entre métodos, con el monitoreo y con la coherencia de Hoek-Brown. No recalcula los "
+              "modelos; el ingeniero decide.",
+        "en": "This document gathers results computed by external programs and checks them against the acceptance "
+              "criteria, between methods, against monitoring and for Hoek-Brown consistency. It does not rerun the "
+              "models; the engineer decides."},
+    "ex_s2": {"es": "Entradas por programa y versión", "en": "Inputs by program and version"},
+    "ex_s3": {"es": "Criterios de aceptación", "en": "Acceptance criteria"},
+    "ex_s4": {"es": "Comparación de métodos", "en": "Method comparison"},
+    "ex_s5": {"es": "Monitoreo frente al modelo", "en": "Monitoring against the model"},
+    "ex_s6": {"es": "Coherencia de Hoek-Brown", "en": "Hoek-Brown consistency"},
+    "ex_s7": {"es": "Avisos y notas", "en": "Warnings and notes"},
+    "ex_s8": {"es": "Nota", "en": "Note"},
+    "ex_cap_inputs": {"es": "Registros por programa y versión", "en": "Records by program and version"},
+    "ex_h_program": {"es": "Programa", "en": "Program"},
+    "ex_h_version": {"es": "Versión", "en": "Version"},
+    "ex_h_records": {"es": "Registros", "en": "Records"},
+    "ex_h_objects": {"es": "Objetos", "en": "Objects"},
+    "ex_none_criteria": {"es": "No se evaluaron criterios.", "en": "No criteria were assessed."},
+    "ex_attention_note": {"es": "Notas de atención de los chequeos: {why}.",
+                          "en": "Attention notes of the checks: {why}."},
+    "ex_cap_checks": {"es": "Chequeos de criterios", "en": "Criteria checks"},
+    "ex_cap_methods": {"es": "FS por método", "en": "FS by method"},
+    "ex_h_values": {"es": "FS por método", "en": "FS by method"},
+    "ex_h_spread": {"es": "Dispersión (%)", "en": "Spread (%)"},
+    "ex_none_methods": {"es": "Ningún objeto tiene dos o más métodos.", "en": "No object has two or more methods."},
+    "ex_cap_monitoring": {"es": "Convergencia medida y modelada", "en": "Measured and modeled convergence"},
+    "ex_h_stage": {"es": "Etapa", "en": "Stage"},
+    "ex_h_measured": {"es": "Medido", "en": "Measured"},
+    "ex_h_modeled": {"es": "Modelado", "en": "Modeled"},
+    "ex_h_ratio": {"es": "Medido / modelado", "en": "Measured / modeled"},
+    "ex_none_monitoring": {"es": "Sin monitoreo.", "en": "No monitoring."},
+    "ex_cap_hb": {"es": "Parámetros de Hoek-Brown declarados", "en": "Declared Hoek-Brown parameters"},
+    "ex_h_material": {"es": "Material", "en": "Material"},
+    "ex_h_mismatch": {"es": "Discrepancias", "en": "Mismatches"},
+    "ex_h_hb_notes": {"es": "Notas", "en": "Notes"},
+    "ex_none_rocdata": {"es": "Sin tabla de RocData.", "en": "No RocData table."},
+    "ex_cap_warnings": {"es": "Avisos y notas agrupados", "en": "Grouped warnings and notes"},
+    "kind_ext": {"es": "Externo", "en": "External"},
+})
+
+
 def t(key: str, lang: str) -> str:
     return REPORT_TEXTS[key][lang]

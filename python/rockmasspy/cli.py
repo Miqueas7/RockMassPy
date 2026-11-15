@@ -614,6 +614,103 @@ def _le(a) -> int:
     return 2 if any(le.le_attention(r) for r in rs) or crit_fails else 0  # una sola regla (R14) y R10
 
 
+def _map_args(specs) -> dict:
+    out = {}
+    for s in specs or ():
+        head, sep, field = s.partition("=")
+        if not sep or not head.strip() or not field.strip():
+            raise ValueError("--map must be HEADER=FIELD")  # sin repetir el valor: puede traer datos
+        out[head.strip()] = field.strip()
+    return out
+
+
+_EXT_COLUMNS = ("programa", "version", "modelo", "escenario", "etapa", "tipo_objeto", "id", "magnitud", "metodo",
+                "valor", "unidad", "kh", "escala", "consecuencia")
+
+
+def _ext_rows(ext):
+    return [[r.program, r.version, r.model, r.scenario, r.stage, r.object_kind, r.object_id, r.quantity, r.method,
+             r.value, r.unit, r.kh, r.scale, r.consequence] for r in ext.records]
+
+
+def _grouped(label, items) -> None:
+    """Textos agrupados con su cuenta: nunca un id."""
+    from collections import Counter
+
+    for w, n in sorted(Counter(items).items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"{label}: {w} ({n})")
+
+
+def _ext(a) -> int:
+    from . import report as rp
+    from .batch import write_table
+    from .external import (check_rocdata, compare_methods, compare_monitoring, load_external, load_rocdata_table)
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    if a.output and Path(a.output).suffix.lower() not in (".csv", ".xlsx"):
+        raise ValueError("--output must end in .csv or .xlsx")
+    if a.ssr_policy and not a.criteria:
+        raise ValueError("--ssr-policy needs --criteria")
+    cmap = _map_args(a.map)
+    prof, _ = _criteria_args(a)
+    defaults = {k: v for k, v in (("program", a.program), ("version", a.version)) if v}
+    kw = {"column_map": cmap or None, "defaults": defaults or None}
+    es = load_external(a.results, sheet=a.sheet, **kw)
+    # todo se lee y se calcula antes del primer print: un error deja stdout vacío
+    from .criteria import assess_criteria, criteria_assignments
+
+    checks = None if prof is None else assess_criteria(
+        prof, external=es, assignments=criteria_assignments(external=es), ssr_policy=a.ssr_policy or "warn",
+        range_policy=a.range_policy)
+    les = ()
+    if a.le:
+        from . import limit_equilibrium as le
+
+        les = le.assess_le(a.le)
+    cmps = compare_methods(es, les)
+    mons = compare_monitoring(load_external(a.monitoring, sheet=a.sheet, **kw), es) if a.monitoring else []
+    rocs = []
+    if a.rocdata:
+        rows = load_rocdata_table(a.rocdata)
+        rocs = list(zip(rows, check_rocdata(rows)))
+    hb_bad = [c for _, c in rocs if c.mismatches or c.notes]
+    print(f"records: {len(es.records)}")
+    print(f"objects: {len(es.objects())}")
+    attn = 0
+    if checks is not None:
+        from .criteria import criteria_counts
+
+        c = criteria_counts(checks)
+        print(f"criteria: {prof.profile_id}")
+        print(f"meets: {c['meets']}, fails: {c['fails']}, not verifiable: {c['not_verifiable']}")
+        _grouped("attention", (x.attention_note for x in checks if x.attention_note))
+        _grouped("fails by rule", (x.rule for x in checks if x.status == "fails"))
+        attn = len({(x.object_kind, x.object_id) for x in checks if x.needs_attention})
+        print(f"objects needing attention: {attn}")
+    print(f"method comparisons: {len(cmps)}")
+    print(f"monitoring comparisons: {len(mons)}")
+    if rocs:
+        print(f"rocdata rows: {len(rocs)}, with mismatches or notes: {len(hb_bad)}")
+    _grouped("warning", [*es.warnings, *(x.warning for x in cmps if x.warning),
+                         *(x.warning for x in mons if x.warning), *(n for c in hb_bad for n in c.notes)])
+    _grouped("note", [*es.notes, *(x.note for x in mons if x.note)])
+    if a.output:
+        print(f"results: {write_table(a.output, _EXT_COLUMNS, _ext_rows(es), sheet='Resultados_externos')}")
+    if a.criteria_output:
+        from .criteria import save_criteria_results
+
+        print(f"criteria results: {save_criteria_results(checks, a.criteria_output)}")
+    if a.report:
+        rep = rp.build_external_report(es, checks=checks or (), comparisons=cmps, monitoring=mons, rocdata=rocs,
+                                       title=a.title or t("ex_title", a.lang), lang=a.lang, author=a.author or "")
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if (attn or any(x.warning for x in cmps) or any(x.warning for x in mons) or hb_bad) else 0
+
+
 def _snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name.rstrip("_")).lower()
 
@@ -1204,6 +1301,27 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--profile", metavar="PE-DS024-2016", help="regulatory profile for art. 264 (pseudo-static "
                    "analysis of the overall slope)")
     c.set_defaults(fn=_le)
+    c = sub.add_parser("ext", help="results from external programs (Slide2, RS2, FLAC3D, RocData): criteria, "
+                       "methods, monitoring and Hoek-Brown consistency")
+    c.add_argument("--results", required=True, metavar="RESULTADOS.csv|.xlsx")
+    c.add_argument("--sheet", default="Resultados_externos")
+    c.add_argument("--map", action="append", metavar="HEADER=FIELD", help="file header to field or quantity "
+                   "(repeatable; wins over the aliases)")
+    c.add_argument("--program", help="program name for files without that column")
+    c.add_argument("--version", help="program version for files without that column")
+    c.add_argument("--ssr-policy", choices=("warn", "accept", "not_verifiable"), help="how to treat an SRF "
+                   "(default warn; needs --criteria)")
+    c.add_argument("--le", metavar="LIBRO.xlsx", help="limit equilibrium workbook (as `le --workbook`) to compare "
+                   "with the external FS")
+    c.add_argument("--monitoring", metavar="MEDIDO.csv|.xlsx", help="measured convergence, in the same long format")
+    c.add_argument("--rocdata", metavar="ROCDATA.csv|.xlsx", help="RocData table: Hoek-Brown consistency")
+    c.add_argument("-o", "--output", metavar="RES.csv|.xlsx", help="the records read, with their ids")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    _criteria_inputs(c)
+    c.set_defaults(fn=_ext)
     c = sub.add_parser("history", help="audit the mine's geomechanical history and fit site correlations (level 1)")
     c.add_argument("history", metavar="HISTORICO.xlsx|CARPETA", help="the history template (.xlsx) or a folder of "
                    "Tramos.csv, Tipos_sostenimiento.csv and Desempeno.csv")

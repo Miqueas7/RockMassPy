@@ -569,6 +569,70 @@ def build_tunnel_report(results, *, title: str, lang: str = "es", author: str = 
                   __version__, date or datetime.date.today().isoformat())
 
 
+# --- Resultados externos ---
+
+def _ext_table(items, lang) -> Table:
+    """Conteo de avisos agrupados por texto, sin ids."""
+    return Table(t("ex_cap_warnings", lang), (t("h_warning", lang), t("h_count", lang)),
+                 tuple((w, str(n)) for w, n in sorted(Counter(items).items(), key=lambda kv: (-kv[1], kv[0]))))
+
+
+def build_external_report(external, *, checks=(), comparisons=(), monitoring=(), rocdata=(), title: str,
+                          lang: str = "es", author: str = "", date: str = "") -> Report:
+    """Informe de resultados externos. `rocdata` son pares (HbRow, HbConsistency). Los ids solo van en celdas."""
+    from ..criteria import criteria_attention, criteria_counts
+
+    _check_lang(lang)
+    checks, comparisons, monitoring, rocdata = list(checks), list(comparisons), list(monitoring), list(rocdata)
+    recs = external.records
+    groups = Counter((r.program or "-", r.version or "-") for r in recs)
+    objs = Counter((r.program or "-", r.version or "-") for r in
+                   {(r.program, r.version, r.model, r.scenario, r.object_id): r for r in recs}.values())
+    s2 = (Table(t("ex_cap_inputs", lang),
+                (t("ex_h_program", lang), t("ex_h_version", lang), t("ex_h_records", lang), t("ex_h_objects", lang)),
+                tuple((p, v, str(n), str(objs[(p, v)])) for (p, v), n in sorted(groups.items()))),)
+    if checks:
+        att = criteria_attention(checks)
+        notes = Counter(c.attention_note for c in checks if c.attention_note)
+        s3 = [Paragraph(t("crit_counts", lang).format(n=len(checks), **criteria_counts(checks)))]
+        if att:
+            s3.append(Paragraph(t("crit_attention", lang).format(why=_why(att, lang))))
+        if notes:
+            s3.append(Paragraph(t("ex_attention_note", lang).format(why="; ".join(sorted(notes)))))
+        head = (t("h_object", lang), t("h_id_object", lang), t("h_criterion", lang), t("h_rule", lang),
+                t("h_status", lang), t("h_crit_required", lang), t("h_obtained", lang), t("h_range_used", lang),
+                t("h_reason", lang), t("h_source", lang), t("h_force", lang), t("h_mark", lang))
+        s3.append(Table(t("ex_cap_checks", lang), head, _crit_rows(checks, lang)))
+    else:
+        s3 = [Paragraph(t("ex_none_criteria", lang))]
+    s4 = ((Table(t("ex_cap_methods", lang),
+                 (t("h_id_object", lang), t("ex_h_values", lang), t("ex_h_spread", lang), t("h_warning", lang)),
+                 tuple((c.object_id, "; ".join(f"{m}: {v:.3f}" for m, v in sorted(c.values.items())),
+                        f"{c.spread * 100:.1f}", c.warning or "-") for c in comparisons)),)
+          if comparisons else (Paragraph(t("ex_none_methods", lang)),))
+    s5 = ((Table(t("ex_cap_monitoring", lang),
+                 (t("h_id_object", lang), t("ex_h_stage", lang), t("ex_h_measured", lang), t("ex_h_modeled", lang),
+                  t("ex_h_ratio", lang), t("h_warning", lang)),
+                 tuple((m.object_id, m.stage or "-", _num(m.measured), _num(m.modeled), _num(m.ratio, ".2f"),
+                        m.warning or m.note or "-") for m in monitoring)),)
+          if monitoring else (Paragraph(t("ex_none_monitoring", lang)),))
+    s6 = ((Table(t("ex_cap_hb", lang), (t("ex_h_material", lang), t("ex_h_mismatch", lang), t("ex_h_hb_notes", lang)),
+                 tuple((r.material or "-", ", ".join(c.mismatches) or "-", "; ".join(c.notes) or "-")
+                       for r, c in rocdata)),)
+          if rocdata else (Paragraph(t("ex_none_rocdata", lang)),))
+    allw = [*external.warnings, *external.notes, *(c.warning for c in comparisons if c.warning),
+            *(m.warning or m.note for m in monitoring if m.warning or m.note),
+            *(n for _, c in rocdata for n in c.notes)]
+    s7 = (_ext_table(allw, lang),) if allw else (Paragraph(t("no_warnings", lang)),)
+    sections = (Section("1", t("st_s1", lang), (Paragraph(t("ex_scope", lang)),)),
+                Section("2", t("ex_s2", lang), s2), Section("3", t("ex_s3", lang), tuple(s3)),
+                Section("4", t("ex_s4", lang), s4), Section("5", t("ex_s5", lang), s5),
+                Section("6", t("ex_s6", lang), s6), Section("7", t("ex_s7", lang), s7),
+                Section("8", t("ex_s8", lang), (Paragraph(DISCLAIMER[lang]),)))
+    return Report(title, _subtitle(t("ex_title", lang), author, lang), lang, sections, (), DISCLAIMER[lang],
+                  __version__, date or datetime.date.today().isoformat())
+
+
 _SLOPE_MODES = ("planar", "wedge", "flexural_toppling", "direct_toppling")
 
 
