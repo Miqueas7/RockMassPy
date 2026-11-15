@@ -178,7 +178,8 @@ def test_fisher_dispersos_no_lanza():
     assert s.n == 5
     s = rm.fisher_stats([rm.LineOrientation(0, 0), rm.LineOrientation(90, 0)])  # R = sqrt(2)
     assert s.alpha95_deg is None
-    assert s.warnings == ["alpha95 undefined: poles too dispersed for their number"]
+    assert s.warnings == ["mean direction is not unique: a pole is perpendicular to the principal axis",  # 45 o 135
+                          "alpha95 undefined: poles too dispersed for their number"]
 
 
 def test_fisher_errores():
@@ -215,6 +216,15 @@ def test_fisher_invertir_polo_horizontal_no_cambia(poles, trends):
     assert rm.angle_between(a.mean, b.mean) < 1e-4
     if a.kappa is not None and math.isfinite(a.kappa):
         assert a.kappa == pytest.approx(b.kappa, rel=1e-6)
+
+
+def test_fisher_polo_horizontal_perpendicular_al_eje():
+    # contraejemplo de hypothesis: antes daba 0/63.4 frente a 180/63.4 según cómo se escribía el polo horizontal
+    a = rm.fisher_stats([rm.LineOrientation(0, 90)] * 2 + [rm.LineOrientation(0, 0)])
+    b = rm.fisher_stats([rm.LineOrientation(0, 90)] * 2 + [rm.LineOrientation(180, 0)])
+    assert rm.angle_between(a.mean, b.mean) < 1e-9
+    w = "mean direction is not unique: a pole is perpendicular to the principal axis"
+    assert w in a.warnings and w in b.warnings
 
 
 def test_fisher_invertir_eje_horizontal():

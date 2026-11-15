@@ -210,7 +210,9 @@ inline FisherStats fisher_stats(const std::vector<LineOrientation>& poles) {
     v.reserve(poles.size());
     for (const auto& p : poles) {
         check(p);
-        v.push_back(vec(p));
+        // un polo horizontal en t y en t + 180 es el mismo eje: se lleva a una sola mitad para que el empate de signo
+        // (polo perpendicular al eje principal) no dependa de cómo se escribió
+        v.push_back(vec(p.plunge_deg == 0.0 && p.trend_deg >= 180.0 ? LineOrientation{p.trend_deg - 180.0, 0.0} : p));
     }
     const auto dot = [](const Vec& a, const Vec& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
     const auto norm = [](const Vec& a) { return std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); };
@@ -222,11 +224,14 @@ inline FisherStats fisher_stats(const std::vector<LineOrientation>& poles) {
             for (int j = 0; j < 3; ++j) T[i][j] += u[i] * u[j];
     Vec ref = principal_axis(T), s{};
     std::vector<char> flip(v.size(), 2);  // 2: sin asignar
+    bool tie = false;                     // algún polo perpendicular al eje principal: la media no es única
     for (int it = 0; it < 100; ++it) {
         bool changed = false;
         s = {0, 0, 0};
         for (std::size_t k = 0; k < v.size(); ++k) {
-            const char f = dot(v[k], ref) < 0.0;
+            const double d = dot(v[k], ref);
+            if (it == 0 && std::fabs(d) <= 1e-12) tie = true;
+            const char f = d < -1e-12;  // empate: se conserva el sentido canónico del polo
             changed = changed || f != flip[k];
             flip[k] = f;
             for (int i = 0; i < 3; ++i) s[i] += (f ? -1.0 : 1.0) * v[k][i];
@@ -246,6 +251,7 @@ inline FisherStats fisher_stats(const std::vector<LineOrientation>& poles) {
                      "11.14-11.17: mean of unit vectors, k = (N-1)/(N-R), alpha95 with p = 0.05; Fisher (1953) not "
                      "read; poles treated as axes"},
                     {}};
+    if (tie) out.warnings.push_back("mean direction is not unique: a pole is perpendicular to the principal axis");
     if (n == 1) return out;
     if (n - r <= 1e-12) {
         out.kappa = std::numeric_limits<double>::infinity();

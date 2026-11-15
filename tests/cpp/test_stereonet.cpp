@@ -144,8 +144,10 @@ TEST(StereonetFisher, DispersedWarnsAndErrors) {
     EXPECT_NO_THROW(fisher_stats({{0, 0}, {90, 0}, {180, 45}, {270, 30}, {0, 89}}));
     const auto s = fisher_stats({{0, 0}, {90, 0}});  // R = sqrt(2): alpha95 no existe
     EXPECT_FALSE(s.alpha95_deg.has_value());
-    ASSERT_EQ(s.warnings.size(), 1u);
-    EXPECT_EQ(s.warnings[0], "alpha95 undefined: poles too dispersed for their number");
+    // dos ejes perpendiculares: la media (45 o 135) tampoco es única
+    ASSERT_EQ(s.warnings.size(), 2u);
+    EXPECT_EQ(s.warnings[0], "mean direction is not unique: a pole is perpendicular to the principal axis");
+    EXPECT_EQ(s.warnings[1], "alpha95 undefined: poles too dispersed for their number");
     EXPECT_THROW(fisher_stats({}), std::invalid_argument);
     EXPECT_THROW(fisher_stats({{std::nan(""), 10}}), std::invalid_argument);
 }
@@ -239,4 +241,14 @@ TEST(StereonetFisher, HorizontalMeanIndependentOfOrder) {
     const auto b = fisher_stats({{190, 0}, {10, 0}, {20, 0}});
     EXPECT_NEAR(a.mean.trend_deg, b.mean.trend_deg, 1e-9);
     EXPECT_LT(a.mean.trend_deg, 180.0);
+}
+
+TEST(StereonetFisher, PoloHorizontalPerpendicularAlEjePrincipal) {  // contraejemplo de hypothesis (revisión final 8B)
+    const auto a = fisher_stats({{0, 90}, {0, 90}, {0, 0}});
+    const auto b = fisher_stats({{0, 90}, {0, 90}, {180, 0}});  // el mismo eje escrito al revés
+    EXPECT_LT(angle_between(a.mean, b.mean), 1e-9);
+    EXPECT_NEAR(a.resultant_length, b.resultant_length, 1e-12);
+    const char* w = "mean direction is not unique: a pole is perpendicular to the principal axis";
+    EXPECT_NE(std::find(a.warnings.begin(), a.warnings.end(), w), a.warnings.end());
+    EXPECT_NE(std::find(b.warnings.begin(), b.warnings.end(), w), b.warnings.end());
 }
