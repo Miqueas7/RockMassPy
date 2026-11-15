@@ -2,7 +2,7 @@
 
 from ._rockmasspy_core import *  # noqa: F401,F403
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def _install_reprs():

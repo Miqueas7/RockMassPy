@@ -7,7 +7,7 @@ regulatory profiles, rock slope analysis (kinematics, stereonets, block and limi
 **Documentation: <https://miqueas.dev/rockmasspy>** (guide, methods, worked examples and API reference, in English
 and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md).
 
-**Status:** version 0.4.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications; 0.3.0: every continuous RMR89 and RMR14 curve of Kundu et al. (2020), checked against Table 3 of the paper; phase 8: analytical tunnels (convergence-confinement) and external results from Slide2, RS2 and FLAC3D). The library recommends, the engineer decides.
+**Status:** version 0.5.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications; 0.3.0: every continuous RMR89 and RMR14 curve of Kundu et al. (2020), checked against Table 3 of the paper; phase 8: analytical tunnels (convergence-confinement) and external results from Slide2, RS2 and FLAC3D, 2D boundary elements and a surrogate model; phase 8 complete). The library recommends, the engineer decides.
 
 ## Installation
 
@@ -778,6 +778,30 @@ for the narrowest pillar, the points next to its walls are flagged (`min_sf_coar
 replace RS2 or Examine2D. See `examples/17-elementos-de-contorno/`, `plot_bem`, `build_bem_report` and the
 `rockmass bem` command.
 
+## Surrogate model
+
+When each run in Slide2, RS2 or FLAC3D is slow, `fit_surrogate` fits a fast stand-in (default `rbf`; `poly2` is an
+option) to a table of runs, `validate_surrogate` measures its error, and `surrogate_pof` computes the probability of
+failure on thousands of samples. It does not extrapolate: a point outside the box of the runs (5 % margin) or too
+far from them (chi-squared level 0.99) is refused (`FS = nan`), and samples excluded this way are counted, with
+`pof_lower` and `pof_upper` bounding the PoF of the full distribution. Validate it grouped by scenario (the default
+when you give a group column): random folds look better and mislead. It is "useful" when its RMSE is below 0.5 times
+that of the mean model. A good validation does not guarantee a good PoF: on the planar bench `poly2` validates well
+and still gives 1.5 to 1.8 times the true PoF, which is why `rbf` is the default. It does not replace the final run
+in the source program.
+
+```python
+from rockmasspy import probabilistic as pb
+from rockmasspy.predictive.surrogate import fit_surrogate, load_runs, surrogate_pof, validate_surrogate
+
+data = load_runs("runs.csv", output="fs", group="scenario")
+print(validate_surrogate(data).useful)
+s = fit_surrogate(data)
+print(surrogate_pof(s, {"cohesion": pb.normal(10, 3, 2, 25)}).pof)
+```
+
+See `examples/18-modelo-sustituto/` and the `rockmass surrogate` command.
+
 ## Results from Slide2, RS2 and FLAC3D
 
 `load_external` reads the numbers a program exported (CSV or Excel, long or wide table) into one record per value:
@@ -881,7 +905,7 @@ If RockMassPy helps your work, please cite it. GitHub shows a "Cite this reposit
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (version 0.4.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (version 0.5.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
 
 Each result also records the method and edition it follows (`result.info`); cite that original source as well.
 

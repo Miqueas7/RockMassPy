@@ -7,7 +7,7 @@ normativos por país, análisis de taludes en roca (cinemática, estereografía,
 **Documentación: <https://miqueas.dev/rockmasspy>** (guía, métodos, casos resueltos y referencia de la API, en
 español e inglés). Los cambios de cada versión están en [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md) (en inglés).
 
-**Estado:** versión 0.4.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones; 0.3.0: todas las curvas continuas del RMR89 y del RMR14 de Kundu et al. (2020), comprobadas contra la Tabla 3 del artículo; fase 8: túneles analíticos (convergencia-confinamiento) y resultados externos de Slide2, RS2 y FLAC3D).
+**Estado:** versión 0.5.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones; 0.3.0: todas las curvas continuas del RMR89 y del RMR14 de Kundu et al. (2020), comprobadas contra la Tabla 3 del artículo; fase 8: túneles analíticos (convergencia-confinamiento) y resultados externos de Slide2, RS2 y FLAC3D, elementos de contorno 2D y modelo sustituto; fase 8 completa).
 La librería recomienda, el ingeniero decide.
 
 ## Instalación
@@ -805,6 +805,30 @@ elementos son muy gruesos para el pilar más angosto, los puntos junto a sus par
 aviso lo dice. No reemplaza a RS2 ni a Examine2D. Ver `examples/17-elementos-de-contorno/`, `plot_bem`,
 `build_bem_report` y el comando `rockmass bem`.
 
+## Modelo sustituto
+
+Cuando cada corrida en Slide2, RS2 o FLAC3D es lenta, `fit_surrogate` ajusta un reemplazo rápido (por omisión `rbf`;
+`poly2` es opcional) a una tabla de corridas, `validate_surrogate` mide su error y `surrogate_pof` calcula la
+probabilidad de falla con miles de muestras. No extrapola: un punto fuera de la caja de las corridas (margen de 5 %) o
+muy lejos de ellas (nivel χ² de 0,99) se rechaza (`FS = nan`), y las muestras excluidas así se cuentan, con
+`pof_lower` y `pof_upper` como cotas de la PoF de la distribución completa. Valídalo agrupado por escenario (es lo
+que hace cuando das una columna de grupo): los pliegues aleatorios se ven mejor y engañan. Es «útil» si su RMSE es
+menor que 0,5 veces el del modelo de la media. Una buena validación no asegura una buena PoF: en el banco planar
+`poly2` valida bien y aun así da de 1,5 a 1,8 veces la PoF verdadera, por eso `rbf` es el valor por omisión. No
+reemplaza la corrida final en el programa de origen.
+
+```python
+from rockmasspy import probabilistic as pb
+from rockmasspy.predictive.surrogate import fit_surrogate, load_runs, surrogate_pof, validate_surrogate
+
+data = load_runs("corridas.csv", output="fs", group="escenario")
+print(validate_surrogate(data).useful)
+s = fit_surrogate(data)
+print(surrogate_pof(s, {"cohesion": pb.normal(10, 3, 2, 25)}).pof)
+```
+
+Ver `examples/18-modelo-sustituto/` y el comando `rockmass surrogate`.
+
 ## Resultados de Slide2, RS2 y FLAC3D
 
 `load_external` lee lo que un programa exportó (CSV o Excel, tabla larga o ancha) como un registro por valor:
@@ -907,7 +931,7 @@ Si RockMassPy te sirve en tu trabajo, cítalo. GitHub muestra el botón «Cite t
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (versión 0.4.0) [Software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (versión 0.5.0) [Software]. https://github.com/Miqueas7/RockMassPy
 
 Cada resultado registra además el método y la edición que sigue (`result.info`); cita también esa fuente original.
 

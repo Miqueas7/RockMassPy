@@ -4,9 +4,9 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-15
 
-Phase 8C: 2D boundary elements (stresses around excavations).
+Phase 8C: 2D boundary elements (stresses around excavations). Phase 8D: surrogate model.
 
 ### Added
 
@@ -15,6 +15,12 @@ Phase 8C: 2D boundary elements (stresses around excavations).
   `rectangle` and `horseshoe`, `load_excavations`, scope warnings and notes.
 - `rockmass bem` command, `plot_bem` and `plot_bem_boundary`, `build_bem_report`.
 - Example 17 (`examples/17-elementos-de-contorno/`).
+- Surrogate model (8D): `load_runs`, `fit_surrogate` (`rbf` by default, `poly2` optional), `validate_surrogate`
+  (grouped by scenario when groups are given), `surrogate_pof` with `pof_lower` and `pof_upper`, `load_points`,
+  `load_variables`; predictions outside the domain are refused (`nan`) and counted.
+- Test bench with known truth (`planar_runs`, `grc_runs`; 10 scenarios with their own geometry), the
+  `rockmass surrogate` command and `build_surrogate_report`.
+- Example 18 (`examples/18-modelo-sustituto/`).
 
 ### Values to confirm
 
@@ -23,6 +29,9 @@ Phase 8C: 2D boundary elements (stresses around excavations).
 - Near-boundary remedy with c = 1.
 - The exact Examine2D SF formula is [NV] (not verified); the 2D mode is an approximation.
 - The generalized Hoek-Brown SF (a other than 0.5) is numeric and has no published oracle.
+- Surrogate: box margin 5 %, chi-squared level 0.99 for the domain, useful when RMSE < 0.5 times the mean model's,
+  out-of-domain warning above 5 % of samples, `rbf` as default (on the planar bench `poly2` gave 1.8 times the true
+  PoF while its validation looked fine).
 - In RS2 mode, tension is checked with the minimum of the three principal stresses (including sigma_z), which is
   conservative; RS2's text says "Sigma 3".
 
@@ -209,6 +218,7 @@ decides. Full documentation: <https://miqueas.dev/rockmasspy>.
   optional extras `io`, `viz`, `report` and `ml`; type stubs (`py.typed`).
 - Thirteen worked examples in `examples/` with synthetic data only.
 
+[0.5.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.0
