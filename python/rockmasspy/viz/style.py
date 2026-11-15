@@ -315,3 +315,15 @@ TEXTS.update({
     "tn_m_axis": {"es": "M (MN·m/m)", "en": "M (MN·m/m)"},
     "tn_demand": {"es": "pares (N, M) de diseño", "en": "design (N, M) pairs"},
 })
+
+TEXTS.update({
+    "bem_title": {"es": "Esfuerzos alrededor de excavaciones (elementos de contorno)",
+                  "en": "Stresses around excavations (boundary elements)"},
+    "bem_sf": {"es": "Strength factor", "en": "Strength factor"},
+    "bem_sigma1": {"es": "σ1 (MPa)", "en": "σ1 (MPa)"},
+    "bem_sigma3": {"es": "σ3 (MPa)", "en": "σ3 (MPa)"},
+    "bem_tension": {"es": "zona en tracción", "en": "tension zone"},
+    "bem_boundary": {"es": "σ tangencial en el borde", "en": "Tangential stress along the boundary"},
+    "bem_element": {"es": "Elemento de contorno (n.º)", "en": "Boundary element (no.)"},
+    "bem_stt_axis": {"es": "σtt (MPa)", "en": "σtt (MPa)"},
+})

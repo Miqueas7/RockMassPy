@@ -569,6 +569,63 @@ def build_tunnel_report(results, *, title: str, lang: str = "es", author: str = 
                   __version__, date or datetime.date.today().isoformat())
 
 
+def _bem_warning(w: str, lang: str) -> str:
+    from ..bem import NOTE_ELASTIC, WARN_COARSE, WARN_CORRECTED, WARN_CURVATURE, WARN_TENSION
+
+    keys = {WARN_CURVATURE: "bem_w_curvature", WARN_CORRECTED: "bem_w_corrected", WARN_TENSION: "bem_w_tension",
+            WARN_COARSE: "bem_w_coarse", NOTE_ELASTIC: "bem_note_elastic"}
+    return t(keys[w], lang) if w in keys else w
+
+
+def _bem_blocks(results, inputs, lang: str, figures: bool) -> tuple:
+    from ..viz.bem import bem_boundary_figure, bem_figure
+
+    blocks: list = []
+    if inputs:
+        names = list(inputs[0])
+        blocks.append(Table(t("bem_cap_inputs", lang), tuple(names),
+                            tuple(tuple(_str(i.get(k)) for k in names) for i in inputs)))
+    head = (t("h_method", lang), t("bem_h_minsf", lang), t("bem_h_tension", lang), t("bem_h_elements", lang),
+            t("bem_h_points", lang))
+    blocks.append(Table(t("bem_cap_results", lang), head, tuple(
+        (r.info.method_id, "" if r.min_sf is None else f"{r.min_sf:.2f}", str(r.tension_count),
+         str(len(r.boundary.x)), str(len(r.field.x))) for r in results)))
+    for r in results:
+        blocks.append(_fig(t("bem_fig_sf", lang), lambda r=r: bem_figure(r, quantity="sf", lang=lang), lang, figures))
+        blocks.append(_fig(t("bem_fig_boundary", lang), lambda r=r: bem_boundary_figure(r, lang=lang), lang, figures))
+    return tuple(blocks)
+
+
+def build_bem_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
+                     figures: bool = True, inputs=None) -> Report:
+    """Informe de elementos de contorno. `inputs`: un dict nombre -> valor por resultado (tabla de entradas)."""
+    _check_lang(lang)
+    results = list(results)
+    if not results:
+        raise ValueError("results is empty: nothing to report")
+    inputs = list(inputs) if inputs else []
+    if inputs and len(inputs) != len(results):
+        raise ValueError("inputs must have one entry per result")
+    methods = tuple({(r.info.method_id, r.info.source): MethodRef(r.info.method_id, r.info.verification.name,
+                                                                    r.info.source) for r in results}.values())
+    counts = Counter(w for r in results for w in set(r.warnings))
+    s4 = (Table(t("bem_cap_warnings", lang), (t("h_warning", lang), t("bem_h_cases", lang)),
+                tuple((_bem_warning(w, lang), str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),
+          ) if counts else (Paragraph(t("no_warnings", lang)),)
+    notes = tuple(Paragraph(_bem_warning(n, lang)) for n in dict.fromkeys(n for r in results for n in r.notes))
+    sections = (
+        Section("1", t("st_s1", lang), (Paragraph(t("bem_scope", lang)),)),
+        Section("2", t("st_s2", lang), (Table(
+            t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
+            tuple((m.method_id, m.verification, m.source) for m in methods)),)),
+        Section("3", t("bem_s3", lang), _bem_blocks(results, inputs, lang, figures) + notes),
+        Section("4", t("st_s4", lang), s4),
+        Section("5", t("st_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
+    )
+    return Report(title, _subtitle(t("bem_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang],
+                  __version__, date or datetime.date.today().isoformat())
+
+
 # --- Resultados externos ---
 
 def _ext_table(items, lang) -> Table:

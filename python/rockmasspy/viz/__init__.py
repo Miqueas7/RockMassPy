@@ -15,3 +15,4 @@ from .q_chart import plot_q_chart  # noqa: F401
 from .stability_graph import plot_stability_graph  # noqa: F401
 from .stereonet import plot_stereonet  # noqa: F401
 from .tunnel import plot_lining_capacity, plot_tunnel  # noqa: F401
+from .bem import plot_bem, plot_bem_boundary  # noqa: F401

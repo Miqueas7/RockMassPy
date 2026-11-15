@@ -1140,3 +1140,38 @@ REPORT_TEXTS.update({
 
 def t(key: str, lang: str) -> str:
     return REPORT_TEXTS[key][lang]
+
+
+REPORT_TEXTS.update({
+    # --- Elementos de contorno (DDM 2D) ---
+    "bem_title": {"es": "Esfuerzos alrededor de excavaciones: elementos de contorno",
+                  "en": "Stresses around excavations: boundary elements"},
+    "bem_scope": {
+        "es": "Este documento calcula los esfuerzos alrededor de excavaciones 2D con el método de discontinuidad de "
+              "desplazamientos (elemento constante): medio elástico infinito, deformación plana, un solo material, "
+              "sin gravedad ni etapas. El strength factor sigue la definición elegida; el ingeniero decide.",
+        "en": "This document computes the stresses around 2D excavations with the displacement discontinuity method "
+              "(constant element): infinite elastic medium, plane strain, one material, no gravity and no stages. "
+              "The strength factor follows the chosen definition; the engineer decides."},
+    "bem_s3": {"es": "Resultados", "en": "Results"},
+    "bem_cap_inputs": {"es": "Entradas del análisis", "en": "Analysis inputs"},
+    "bem_cap_results": {"es": "Resultados del análisis", "en": "Analysis results"},
+    "bem_cap_warnings": {"es": "Avisos del análisis", "en": "Analysis warnings"},
+    "bem_h_minsf": {"es": "SF mínimo", "en": "Minimum SF"},
+    "bem_h_tension": {"es": "Puntos en tracción", "en": "Tension points"},
+    "bem_h_elements": {"es": "Elementos de contorno", "en": "Boundary elements"},
+    "bem_h_points": {"es": "Puntos del campo", "en": "Field points"},
+    "bem_h_cases": {"es": "Casos", "en": "Cases"},
+    "bem_fig_sf": {"es": "Contornos del strength factor", "en": "Strength factor contours"},
+    "bem_fig_boundary": {"es": "Esfuerzo tangencial en el borde", "en": "Tangential stress along the boundary"},
+    "bem_note_elastic": {
+        "es": "Análisis elástico: un strength factor menor que 1 indica sobreesfuerzo, no la extensión de la falla.",
+        "en": "Elastic analysis: strength factor below 1 marks overstress, not failure extent."},
+    "bem_w_curvature": {"es": "Elementos demasiado gruesos para la curvatura del borde",
+                        "en": "Elements too coarse for the boundary curvature"},
+    "bem_w_corrected": {"es": "Puntos cercanos al borde corregidos", "en": "Points near the boundary corrected"},
+    "bem_w_tension": {"es": "Hay zona en tracción", "en": "Tension zone present"},
+    "bem_w_coarse": {"es": "Elementos demasiado gruesos para el ancho del pilar; los valores junto a sus paredes no "
+                           "son confiables",
+                     "en": "Elements too coarse for the pillar width; values next to the pillar walls are unreliable"},
+})

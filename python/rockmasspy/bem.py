@@ -273,3 +273,32 @@ def analyze_bem(excavations, *, sigma1_mpa: float, sigma3_mpa: float, alpha_deg:
         min_sf_coarse=min(cs) if cs else None, tension_count=tension_count, info=sol.info, warnings=warnings,
         notes=[NOTE_ELASTIC],
         needs_attention=bool((min_sf is not None and min_sf < 1) or tension_count or any(fld.coarse)))
+
+
+# ---------------------------------------------------------------- lectura de excavaciones
+def load_excavations(path, sheet: str = "Excavaciones") -> list[list[tuple[float, float]]]:
+    """Polígonos de la hoja `Excavaciones` (columnas id, orden, x, y) de un .xlsx o .csv (coma decimal con ';').
+
+    Un polígono por id, con los vértices en el orden de `orden`. Los ids solo agrupan: no salen en ningún mensaje.
+    """
+    from pathlib import Path
+
+    from .csv_io import _CsvSource
+    from .excel_io import _open, _sheet_rows
+
+    p = Path(path)
+    src = _CsvSource({sheet: p}) if p.suffix.lower() == ".csv" else _open(p)
+    try:
+        try:
+            rows = _sheet_rows(src, sheet, ("id", "orden", "x", "y"), {"id", "orden", "x", "y"}, {"orden", "x", "y"})
+        except ValueError as exc:  # el mensaje de celda trae el valor leído: no se repite
+            raise ValueError(re.sub(r", got '.*'$", "", str(exc))) from None
+    finally:
+        if hasattr(src, "wb"):
+            src.wb.close()
+    groups: dict[str, list] = {}
+    for _, r in rows:
+        groups.setdefault(r["id"], []).append((r["orden"], r["x"], r["y"]))
+    if not groups:
+        raise ValueError(f"sheet '{sheet}': no excavations found")
+    return [[(x, y) for _, x, y in sorted(g)] for g in groups.values()]

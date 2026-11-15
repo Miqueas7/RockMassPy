@@ -301,6 +301,87 @@ def _tunnel(a) -> int:
     return 2 if r.needs_attention else 0
 
 
+def _bem_material(a):
+    from .bem import BemMaterial
+
+    if a.criterion is None:
+        return None
+    if a.criterion == "MC":
+        if a.c is None or a.phi is None:
+            raise ValueError("--criterion MC needs --c and --phi")
+        return BemMaterial("MC", c_mpa=a.c, phi_deg=a.phi, tensile_mpa=a.tensile)
+    if a.sigci is None:
+        raise ValueError("--criterion HB needs --sigci")
+    return BemMaterial("HB", sigma_ci_mpa=a.sigci, gsi=a.gsi, mi=a.mi, d=a.d, mb=a.mb, s=a.s, a=a.a)
+
+
+def _pair(spec: str, flag: str, n: int) -> list[float]:
+    try:
+        v = [float(x) for x in spec.split(":")]
+    except ValueError:
+        v = []
+    if len(v) != n:
+        raise ValueError(f"{flag} must be {n} numbers separated by ':'")
+    return v
+
+
+def _bem(a) -> int:
+    import math
+
+    from . import report as rp
+    from .bem import analyze_bem, circle, horseshoe, load_excavations
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    if sum(x is not None for x in (a.excavations, a.circle, a.horseshoe)) != 1:
+        raise ValueError("give exactly one of --excavations, --circle or --horseshoe")
+    if a.excavations:
+        polys = load_excavations(a.excavations)
+    elif a.circle is not None:
+        polys = [circle(0.0, 0.0, a.circle)]
+    else:
+        w, h = _pair(a.horseshoe, "--horseshoe", 2)
+        polys = [horseshoe(0.0, 0.0, w, h)]
+    grid = None
+    if a.grid:
+        g = _pair(a.grid, "--grid", 6)
+        grid = (g[0], g[1], g[2], g[3], int(g[4]), int(g[5]))
+    r = analyze_bem(polys, sigma1_mpa=a.sigma1, sigma3_mpa=a.sigma3, alpha_deg=a.alpha, sigma_z_mpa=a.sigma_z,
+                    e_mpa=a.e, nu=a.nu, material=_bem_material(a), grid=grid, max_element_m=a.max_element,
+                    sf_mode=a.sf_mode)
+    print("min SF: " + ("none" if r.min_sf is None else f"{r.min_sf:.2f}"))
+    print(f"tension points: {r.tension_count}")
+    for w in r.warnings:
+        print(f"warning: {w}")
+    for n in r.notes:
+        print(f"note: {n}")
+    if a.output:
+        from .batch import write_table
+
+        f = r.field
+
+        def v(x):
+            return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else x
+
+        rows = [[v(f.x[k]), v(f.y[k]), v(f.sigma1[k]), v(f.sigma3[k]), v(f.sigma_z[k]), v(f.angle1[k]), v(f.sf[k]),
+                 int(f.tension[k]), int(f.inside[k])] for k in range(len(f.x))]
+        print(f"output: {write_table(a.output, ('x', 'y', 'sigma1', 'sigma3', 'sigma_z', 'angle1_deg', 'sf', 'tension', 'inside'), rows, sheet='Campo')}")
+    if a.chart:
+        from .viz import plot_bem
+
+        print(f"chart: {plot_bem(r, a.chart, quantity=a.quantity, lang=a.lang)}")
+    if a.report:
+        inp = {"sigma1 (MPa)": a.sigma1, "sigma3 (MPa)": a.sigma3, "alpha (deg)": a.alpha, "E (MPa)": a.e,
+               "nu": a.nu, "criterion": a.criterion or "", "SF": a.sf_mode}
+        rep = rp.build_bem_report([r], inputs=[inp], title=a.title or t("bem_title", a.lang), lang=a.lang,
+                                  author=a.author or "")
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if r.needs_attention else 0
+
+
 def _verify(a) -> int:
     import datetime
 
@@ -1228,6 +1309,39 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--author")
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.set_defaults(fn=_tunnel)
+
+    c = sub.add_parser("bem", help="2D stresses around excavations (boundary elements, displacement discontinuity)")
+    c.add_argument("--excavations", metavar="FILE", help="sheet Excavaciones (id, orden, x, y), .xlsx or .csv")
+    c.add_argument("--circle", type=float, metavar="R", help="circular excavation of radius R at the origin")
+    c.add_argument("--horseshoe", metavar="W:H", help="horseshoe of width W and wall height H at the origin")
+    c.add_argument("--sigma1", type=float, required=True, metavar="MPA")
+    c.add_argument("--sigma3", type=float, required=True, metavar="MPA")
+    c.add_argument("--alpha", type=float, default=90.0, metavar="DEG", help="angle of sigma1 from the x axis")
+    c.add_argument("--sigma-z", type=float, metavar="MPA")
+    c.add_argument("--e", type=float, required=True, metavar="MPA")
+    c.add_argument("--nu", type=float, required=True)
+    c.add_argument("--criterion", choices=("MC", "HB"), help="strength criterion for the strength factor")
+    c.add_argument("--c", type=float, metavar="MPA")
+    c.add_argument("--phi", type=float, metavar="DEG")
+    c.add_argument("--tensile", type=float, default=0.0, metavar="MPA")
+    c.add_argument("--sigci", type=float, metavar="MPA")
+    c.add_argument("--gsi", type=float)
+    c.add_argument("--mi", type=float)
+    c.add_argument("--d", type=float, default=0.0)
+    c.add_argument("--mb", type=float)
+    c.add_argument("--s", type=float)
+    c.add_argument("--a", type=float)
+    c.add_argument("--sf-mode", choices=("rs2", "examine2d"), default="rs2")
+    c.add_argument("--grid", metavar="XMIN:XMAX:YMIN:YMAX:NX:NY")
+    c.add_argument("--max-element", type=float, metavar="M")
+    c.add_argument("--quantity", choices=("sf", "sigma1", "sigma3"), default="sf")
+    c.add_argument("--chart", metavar="OUT.png")
+    c.add_argument("-o", "--output", metavar="CAMPO.csv|.xlsx", help="the field, with coordinates")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_bem)
 
     c = sub.add_parser("mrmr", help="MRMR (Laubscher 1990) and caving diagram zone")
     c.add_argument("--irs", type=float, required=True, metavar="MPA")
