@@ -728,6 +728,68 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("hoek_marinos", &hoek_marinos, nb::arg("sigma_cm_mpa"), nb::arg("p0_mpa"), nb::arg("pi_mpa"),
           nb::arg("radius_m"));
 
+    // GRC de Mohr-Coulomb y de Hoek-Brown, esfuerzos de HB 1982 y de Reed
+    const double nan = validation::unset;
+    nb::class_<GrcMcInput>(m, "GrcMcInput", "Mohr-Coulomb ground reaction input (MPa, m, degrees); psi_deg=0 by default.")
+        .def("__init__", [](GrcMcInput* self, double radius_m, double p0_mpa, double e_mpa, double nu, double c_mpa,
+                            double phi_deg, double psi_deg, double sigma_cm_override_mpa) {
+                 new (self) GrcMcInput{radius_m, p0_mpa, e_mpa, nu, c_mpa, phi_deg, psi_deg, sigma_cm_override_mpa};
+             }, nb::arg("radius_m") = nan, nb::arg("p0_mpa") = nan, nb::arg("e_mpa") = nan, nb::arg("nu") = nan,
+             nb::arg("c_mpa") = nan, nb::arg("phi_deg") = nan, nb::arg("psi_deg") = 0.0,
+             nb::arg("sigma_cm_override_mpa") = nan)
+        .def_rw("radius_m", &GrcMcInput::radius_m).def_rw("p0_mpa", &GrcMcInput::p0_mpa)
+        .def_rw("e_mpa", &GrcMcInput::e_mpa).def_rw("nu", &GrcMcInput::nu).def_rw("c_mpa", &GrcMcInput::c_mpa)
+        .def_rw("phi_deg", &GrcMcInput::phi_deg).def_rw("psi_deg", &GrcMcInput::psi_deg)
+        .def_rw("sigma_cm_override_mpa", &GrcMcInput::sigma_cm_override_mpa);
+    nb::class_<GrcHbInput>(m, "GrcHbInput", "Hoek-Brown (a = 0.5) ground reaction input: G in MPa, mb and s.")
+        .def("__init__", [](GrcHbInput* self, double radius_m, double p0_mpa, double g_mpa, double nu,
+                            double sigma_ci_mpa, double mb, double s, double psi_deg) {
+                 new (self) GrcHbInput{radius_m, p0_mpa, g_mpa, nu, sigma_ci_mpa, mb, s, psi_deg};
+             }, nb::arg("radius_m") = nan, nb::arg("p0_mpa") = nan, nb::arg("g_mpa") = nan, nb::arg("nu") = nan,
+             nb::arg("sigma_ci_mpa") = nan, nb::arg("mb") = nan, nb::arg("s") = nan, nb::arg("psi_deg") = 0.0)
+        .def_rw("radius_m", &GrcHbInput::radius_m).def_rw("p0_mpa", &GrcHbInput::p0_mpa)
+        .def_rw("g_mpa", &GrcHbInput::g_mpa).def_rw("nu", &GrcHbInput::nu)
+        .def_rw("sigma_ci_mpa", &GrcHbInput::sigma_ci_mpa).def_rw("mb", &GrcHbInput::mb).def_rw("s", &GrcHbInput::s)
+        .def_rw("psi_deg", &GrcHbInput::psi_deg);
+    nb::class_<GrcPoint>(m, "GrcPoint", "One point of a ground reaction curve: internal pressure and wall convergence.")
+        .def_ro("pi_mpa", &GrcPoint::pi_mpa).def_ro("u_m", &GrcPoint::u_m);
+    nb::class_<GrcResult>(m, "GrcResult", "Ground reaction curve from p0 down to 0, critical pressure, rp and u at pi = 0.")
+        .def_ro("p_crit_mpa", &GrcResult::p_crit_mpa).def_ro("curve", &GrcResult::curve)
+        .def_ro("rp_unsupported_m", &GrcResult::rp_unsupported_m).def_ro("u_max_m", &GrcResult::u_max_m)
+        .def_ro("info", &GrcResult::info).def_ro("notes", &GrcResult::notes);
+    m.def("grc_mc", &grc_mc, nb::arg("input"), nb::arg("n_points") = 50);
+    m.def("grc_mc_displacement", &grc_mc_displacement, nb::arg("input"), nb::arg("pi_mpa"));
+    m.def("grc_mc_plastic_radius", &grc_mc_plastic_radius, nb::arg("input"), nb::arg("pi_mpa"));
+    m.def("grc_hb", &grc_hb, nb::arg("input"), nb::arg("n_points") = 50);
+    m.def("grc_hb_displacement", &grc_hb_displacement, nb::arg("input"), nb::arg("pi_mpa"));
+    m.def("grc_hb_plastic_radius", &grc_hb_plastic_radius, nb::arg("input"), nb::arg("pi_mpa"));
+    m.def("grc_mc_from_hb", &grc_mc_from_hb, nb::arg("sigma_ci_mpa"), nb::arg("gsi"), nb::arg("mi"), nb::arg("d"),
+          nb::arg("p0_mpa"), nb::arg("radius_m"), nb::arg("nu"), nb::arg("edition"));
+    nb::class_<RadialStress>(m, "RadialStress", "Radial and hoop stress (MPa) at a radius.")
+        .def_ro("sigma_r", &RadialStress::sigma_r).def_ro("sigma_theta", &RadialStress::sigma_theta);
+    nb::class_<Hb1982Input>(m, "Hb1982Input", "Hoek-Brown 1982 peak (m, s) and residual (mr, sr) input.")
+        .def("__init__", [](Hb1982Input* self, double p0_mpa, double radius_m, double sigma_c_mpa, double m_, double s,
+                            double mr, double sr, double pi_mpa) {
+                 new (self) Hb1982Input{p0_mpa, radius_m, sigma_c_mpa, m_, s, mr, sr, pi_mpa};
+             }, nb::arg("p0_mpa") = nan, nb::arg("radius_m") = nan, nb::arg("sigma_c_mpa") = nan, nb::arg("m") = nan,
+             nb::arg("s") = nan, nb::arg("mr") = nan, nb::arg("sr") = nan, nb::arg("pi_mpa") = 0.0)
+        .def_rw("p0_mpa", &Hb1982Input::p0_mpa).def_rw("radius_m", &Hb1982Input::radius_m)
+        .def_rw("sigma_c_mpa", &Hb1982Input::sigma_c_mpa).def_rw("m", &Hb1982Input::m).def_rw("s", &Hb1982Input::s)
+        .def_rw("mr", &Hb1982Input::mr).def_rw("sr", &Hb1982Input::sr).def_rw("pi_mpa", &Hb1982Input::pi_mpa);
+    nb::class_<ReedInput>(m, "ReedInput", "Reed (1986) brittle-plastic input: field q, peak and residual cohesion, phi.")
+        .def("__init__", [](ReedInput* self, double q_mpa, double radius_m, double c_peak_mpa, double c_res_mpa,
+                            double phi_deg, double pi_mpa) {
+                 new (self) ReedInput{q_mpa, radius_m, c_peak_mpa, c_res_mpa, phi_deg, pi_mpa};
+             }, nb::arg("q_mpa") = nan, nb::arg("radius_m") = nan, nb::arg("c_peak_mpa") = nan,
+             nb::arg("c_res_mpa") = nan, nb::arg("phi_deg") = nan, nb::arg("pi_mpa") = 0.0)
+        .def_rw("q_mpa", &ReedInput::q_mpa).def_rw("radius_m", &ReedInput::radius_m)
+        .def_rw("c_peak_mpa", &ReedInput::c_peak_mpa).def_rw("c_res_mpa", &ReedInput::c_res_mpa)
+        .def_rw("phi_deg", &ReedInput::phi_deg).def_rw("pi_mpa", &ReedInput::pi_mpa);
+    m.def("hb1982_plastic_radius", &hb1982_plastic_radius, nb::arg("input"));
+    m.def("hb1982_stress", &hb1982_stress, nb::arg("input"), nb::arg("r_m"));
+    m.def("reed_plastic_radius", &reed_plastic_radius, nb::arg("input"));
+    m.def("reed_stress", &reed_stress, nb::arg("input"), nb::arg("r_m"));
+
     // Búsqueda de la superficie crítica (malla circular y bloque, con afinado)
     nb::class_<CircularGrid>(m, "CircularGrid", "Grid of circle centres (nx, ny intervals) and radii per centre.")
         .def(nb::init<>())

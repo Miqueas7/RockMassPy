@@ -60,3 +60,58 @@ def test_hoek_marinos():
         rm.hoek_marinos(1, 0, 0, 2)
     with pytest.raises(ValueError, match="pi_mpa"):
         rm.hoek_marinos(1, 4, -1, 2)
+
+
+def _rsv5(c, p0, psi=0.0):
+    return rm.GrcMcInput(radius_m=1, p0_mpa=p0, e_mpa=10000, nu=0.2, c_mpa=c, phi_deg=30, psi_deg=psi)
+
+
+def test_grc_mc_rsv_and_soria():
+    for c, p0, rp in ((3.45, 30, 1.735), (3.45, 20, 1.474), (5, 30, 1.494), (5, 20, 1.286)):
+        assert rm.grc_mc_plastic_radius(_rsv5(c, p0), 0) == pytest.approx(rp, abs=0.0005)
+    assert rm.grc_mc_displacement(_rsv5(3.45, 30, 30), 0) * 1000 == pytest.approx(19.09, abs=0.01)
+    soria = rm.GrcMcInput(radius_m=5, p0_mpa=4.05, e_mpa=446, nu=0.3, c_mpa=1, phi_deg=37, psi_deg=6)
+    assert rm.grc_mc_plastic_radius(soria, 0) == pytest.approx(5.8573, abs=0.0001)
+    assert rm.grc_mc_displacement(soria, 0) * 1000 == pytest.approx(68.049, abs=0.001)
+    r = rm.grc_mc(soria, 30)
+    assert len(r.curve) == 30 and r.info.method_id == "GRC-MC-Salencon-1969"
+    assert r.rp_unsupported_m == pytest.approx(5.8573, abs=0.0001)
+
+
+def test_grc_mc_from_hb_rocsupport_example():
+    inp = rm.grc_mc_from_hb(7, 15, 10, 0, 1.62, 6, 0.3, rm.HbEdition.HB2002)
+    assert inp.e_mpa == pytest.approx(352.817, abs=0.001)
+    assert inp.sigma_cm_override_mpa == pytest.approx(0.46927, abs=0.00001)
+    assert inp.phi_deg == pytest.approx(25.6394, abs=0.0001)
+    r = rm.grc_mc(inp)
+    assert r.info.method_id == "GRC-HB-equivalent-MC" and r.notes
+    assert r.rp_unsupported_m == pytest.approx(13.78, abs=0.01)
+    assert r.u_max_m / 6 * 100 == pytest.approx(2.030, abs=0.001)
+
+
+def test_grc_mc_all_elastic_and_degenerate():
+    r = rm.grc_mc(_rsv5(3.45, 1))
+    assert r.rp_unsupported_m == 1.0 and all(math.isfinite(p.u_m) for p in r.curve)
+    with pytest.raises(ValueError, match="phi_deg"):
+        rm.grc_mc_displacement(rm.GrcMcInput(radius_m=1, p0_mpa=30, e_mpa=1e4, nu=0.2, c_mpa=3, phi_deg=0.5), 0)
+    with pytest.raises(ValueError, match="c_mpa"):
+        rm.grc_mc(_rsv5(0, 30))
+
+
+def test_grc_hb_carranza_torres():
+    inp = rm.GrcHbInput(radius_m=3.82, p0_mpa=30, g_mpa=1000, nu=0.25, sigma_ci_mpa=30, mb=1.7, s=3.9e-3)
+    assert rm.grc_hb(inp).p_crit_mpa == pytest.approx(15.78, abs=0.01)
+    assert rm.grc_hb_plastic_radius(inp, 5) / 3.82 == pytest.approx(1.623, abs=0.0005)
+    assert rm.grc_hb_displacement(inp, 5) == pytest.approx(0.0835, abs=0.0001)
+    assert rm.grc_hb(inp).info.method_id == "GRC-HB-Carranza-Torres-Fairhurst-2000"
+
+
+def test_hb1982_and_reed_stresses():
+    hb = rm.Hb1982Input(p0_mpa=30, radius_m=1, sigma_c_mpa=100, m=2.515, s=0.003865, mr=0.5, sr=1e-5)
+    assert rm.hb1982_plastic_radius(hb) == pytest.approx(2.168, abs=0.001)
+    s = rm.hb1982_stress(hb, 5)
+    assert s.sigma_r == pytest.approx(25.8, abs=0.1) and s.sigma_theta == pytest.approx(34.2, abs=0.1)
+    # ro = 4 y q = 100: la Tabla 30.1 del manual trae errata (FORMULAS §14)
+    rd = rm.ReedInput(q_mpa=100, radius_m=4, c_peak_mpa=30, c_res_mpa=5, phi_deg=30)
+    assert rm.reed_plastic_radius(rd) == pytest.approx(7.77, abs=0.01)
+    assert rm.reed_stress(rd, 4).sigma_theta == pytest.approx(17.3, abs=0.1)

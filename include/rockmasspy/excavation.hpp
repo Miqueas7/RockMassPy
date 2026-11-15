@@ -16,10 +16,13 @@
 #pragma once
 
 #include <cmath>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "rockmasspy/hoek_brown.hpp"
 #include "rockmasspy/method_info.hpp"
 #include "rockmasspy/validation.hpp"
 
@@ -40,6 +43,10 @@ inline void positive(double v, const std::string& name) {
 inline void non_negative(double v, const std::string& name) {
     validation::require_finite(v, name);
     if (v < 0.0) fail(name, "must not be negative (>= 0)");
+}
+inline void poisson(double v, const std::string& name) {
+    validation::require_finite(v, name);
+    if (v < 0.0 || v >= 0.5) fail(name, "must be within [0, 0.5)");
 }
 }  // namespace excavation_detail
 
@@ -188,6 +195,293 @@ inline Squeezing hoek_marinos(double sigma_cm_mpa, double p0_mpa, double pi_mpa,
     return {pct, rp * radius_m, pct / 100.0 * radius_m, cls, x <= 0.5 && y <= 0.5,
             {"Squeezing-Hoek-Marinos-2000", Verification::PrimaryLaterAuthors,
              "Hoek and Marinos (2000) as reproduced in PRE eq. 8-9 and RST Table A-1; original not read"}};
+}
+
+// ---------------------------------------------------------------- GRC (§3, §4.1)
+
+struct GrcPoint {
+    double pi_mpa, u_m;
+};
+
+struct GrcResult {
+    double p_crit_mpa;            // si es <= 0 el terreno no plastifica con pi >= 0
+    std::vector<GrcPoint> curve;  // de pi = p0 a pi = 0
+    double rp_unsupported_m, u_max_m;
+    MethodInfo info;
+    std::vector<std::string> notes;
+};
+
+struct GrcMcInput {
+    double radius_m = validation::unset, p0_mpa = validation::unset, e_mpa = validation::unset;
+    double nu = validation::unset, c_mpa = validation::unset, phi_deg = validation::unset;
+    double psi_deg = 0.0;
+    /// Solo para el modo «equivalente RocSupport» (D2): reemplaza a 2c·cosφ/(1−sinφ) por el σcm global de Hoek-Brown.
+    double sigma_cm_override_mpa = validation::unset;
+};
+
+struct GrcHbInput {  // a = 0.5
+    double radius_m = validation::unset, p0_mpa = validation::unset, g_mpa = validation::unset;
+    double nu = validation::unset, sigma_ci_mpa = validation::unset, mb = validation::unset, s = validation::unset;
+    double psi_deg = 0.0;
+};
+
+namespace excavation_detail {
+struct McState {
+    double k, kpsi, q, pcr, g;
+};
+inline void check_pi(double pi, double p0) {
+    non_negative(pi, "pi_mpa");
+    if (pi > p0) fail("pi_mpa", "must not exceed 'p0_mpa'");
+}
+inline void check_psi(double psi) {
+    validation::require_finite(psi, "psi_deg");
+    if (psi < 0.0 || psi >= 90.0) fail("psi_deg", "must be within [0, 90) degrees");
+}
+inline McState mc_state(const GrcMcInput& in, double pi) {
+    positive(in.radius_m, "radius_m");
+    positive(in.p0_mpa, "p0_mpa");
+    positive(in.e_mpa, "e_mpa");
+    poisson(in.nu, "nu");
+    validation::require_finite(in.phi_deg, "phi_deg");
+    if (in.phi_deg < 1.0 || in.phi_deg >= 90.0) fail("phi_deg", "must be within [1, 90) degrees");
+    check_psi(in.psi_deg);
+    const bool ovr = !std::isnan(in.sigma_cm_override_mpa);
+    non_negative(in.c_mpa, "c_mpa");
+    if (ovr) non_negative(in.sigma_cm_override_mpa, "sigma_cm_override_mpa");
+    check_pi(pi, in.p0_mpa);
+    const double sp = std::sin(rad(in.phi_deg)), sps = std::sin(rad(in.psi_deg));
+    McState st{};
+    st.k = (1 + sp) / (1 - sp);
+    st.kpsi = (1 + sps) / (1 - sps);
+    st.q = ovr ? in.sigma_cm_override_mpa : 2 * in.c_mpa * std::cos(rad(in.phi_deg)) / (1 - sp);
+    st.pcr = (2 * in.p0_mpa - st.q) / (1 + st.k);
+    st.g = in.e_mpa / (2 * (1 + in.nu));
+    // sin cohesión la fórmula de rp se divide por cero con pi = 0
+    if (st.q <= 0.0 && pi <= 0.0) fail(ovr ? "sigma_cm_override_mpa" : "c_mpa", "must be positive when pi_mpa is 0");
+    return st;
+}
+
+template <class Disp, class Rad>
+inline GrcResult grc_curve(double p0, double p_crit, int n_points, MethodInfo info, Disp disp, Rad rad_fn) {
+    if (n_points < 2) fail("n_points", "must be at least 2");
+    GrcResult r{p_crit, {}, rad_fn(0.0), disp(0.0), std::move(info), {}};
+    for (int i = 0; i < n_points; ++i) {
+        const double pi = i == n_points - 1 ? 0.0 : p0 * (1.0 - double(i) / (n_points - 1));
+        r.curve.push_back({pi, disp(pi)});
+    }
+    return r;
+}
+}  // namespace excavation_detail
+
+/// Radio plástico de Salençon / Duncan Fama (la dilatancia no lo cambia); R si pi >= pcr.
+inline double grc_mc_plastic_radius(const GrcMcInput& in, double pi_mpa) {
+    const auto st = excavation_detail::mc_state(in, pi_mpa);
+    if (pi_mpa >= st.pcr) return in.radius_m;
+    return in.radius_m * std::pow(2 * (in.p0_mpa * (st.k - 1) + st.q) / ((1 + st.k) * ((st.k - 1) * pi_mpa + st.q)),
+                                  1 / (st.k - 1));
+}
+
+/// Convergencia de la pared (positiva hacia adentro): elástica de PRE ec. 5, plástica de Salençon con Kψ (RS2-S p. 15).
+inline double grc_mc_displacement(const GrcMcInput& in, double pi_mpa) {
+    const auto st = excavation_detail::mc_state(in, pi_mpa);
+    if (pi_mpa >= st.pcr) return in.radius_m * (in.p0_mpa - pi_mpa) / (2 * st.g);
+    const double k = st.k, kp = st.kpsi, nu = in.nu;
+    const double x = pi_mpa + st.q / (k - 1);
+    const double ratio = grc_mc_plastic_radius(in, pi_mpa) / in.radius_m;
+    return in.radius_m / (2 * st.g) *
+           ((2 * nu - 1) * (in.p0_mpa + st.q / (k - 1)) + (1 - nu) * (k * k - 1) / (k + kp) * x * std::pow(ratio, k + kp) +
+            ((1 - nu) * (k * kp + 1) / (k + kp) - nu) * x);
+}
+
+inline GrcResult grc_mc(const GrcMcInput& in, int n_points = 50) {
+    const bool ovr = !std::isnan(in.sigma_cm_override_mpa);
+    GrcResult r = excavation_detail::grc_curve(
+        in.p0_mpa, excavation_detail::mc_state(in, in.p0_mpa).pcr, n_points,
+        ovr ? MethodInfo{"GRC-HB-equivalent-MC", Verification::Secondary,
+                         "RocSupport-style Mohr-Coulomb equivalent of Hoek-Brown (RST example 1; FORMULAS 3.4)"}
+            : MethodInfo{"GRC-MC-Salencon-1969", Verification::PrimaryLaterAuthors,
+                         "Salencon (1969) as reproduced in RS2-S p. 14-15 and Hoek PRE eq. 1-7; original not read"},
+        [&](double pi) { return grc_mc_displacement(in, pi); }, [&](double pi) { return grc_mc_plastic_radius(in, pi); });
+    if (ovr)
+        r.notes.push_back(
+            "equivalent Mohr-Coulomb mixes the global rock mass strength with the friction angle of the tunnel fit, as "
+            "RocSupport does");
+    return r;
+}
+
+/// Equivalente Mohr-Coulomb al estilo RocSupport (D2): σcm global, φ y c del ajuste con σ3max de túneles
+/// (0.47·σcm·(σcm/p0)^−0.94, Hoek-Carranza-Torres-Corkum 2002) y Erm de 2002.
+inline GrcMcInput grc_mc_from_hb(double sigma_ci_mpa, double gsi, double mi, double d, double p0_mpa, double radius_m,
+                                 double nu, HbEdition edition) {
+    excavation_detail::positive(p0_mpa, "p0_mpa");
+    const HbParams p = hb_params(gsi, mi, d, edition);
+    const double scm = hb_global_strength(sigma_ci_mpa, p);
+    const double s3max = 0.47 * scm * std::pow(scm / p0_mpa, -0.94);
+    const MohrCoulombFit fit = hb_mohr_coulomb(sigma_ci_mpa, p, s3max);
+    GrcMcInput in;
+    in.radius_m = radius_m;
+    in.p0_mpa = p0_mpa;
+    in.e_mpa = em_hoek2002(gsi, d, sigma_ci_mpa).value * 1000.0;
+    in.nu = nu;
+    in.c_mpa = fit.cohesion_mpa;
+    in.phi_deg = fit.phi_deg;
+    in.sigma_cm_override_mpa = scm;
+    return in;
+}
+
+namespace excavation_detail {
+struct HbState {
+    double so, pi_cr_norm, pi_cr, mbs;
+};
+inline HbState hb_state(const GrcHbInput& in, double pi) {
+    positive(in.radius_m, "radius_m");
+    positive(in.p0_mpa, "p0_mpa");
+    positive(in.g_mpa, "g_mpa");
+    poisson(in.nu, "nu");
+    positive(in.sigma_ci_mpa, "sigma_ci_mpa");
+    positive(in.mb, "mb");
+    non_negative(in.s, "s");
+    check_psi(in.psi_deg);
+    check_pi(pi, in.p0_mpa);
+    HbState h{};
+    h.mbs = in.mb * in.sigma_ci_mpa;
+    const double s0 = in.s / (in.mb * in.mb);
+    h.so = in.p0_mpa / h.mbs + s0;
+    h.pi_cr_norm = std::pow(1 - std::sqrt(1 + 16 * h.so), 2) / 16;
+    h.pi_cr = (h.pi_cr_norm - s0) * h.mbs;
+    return h;
+}
+}  // namespace excavation_detail
+
+/// Radio plástico de Carranza-Torres y Fairhurst; R si pi >= pi_cr.
+inline double grc_hb_plastic_radius(const GrcHbInput& in, double pi_mpa) {
+    const auto h = excavation_detail::hb_state(in, pi_mpa);
+    if (pi_mpa >= h.pi_cr) return in.radius_m;
+    const double pn = pi_mpa / h.mbs + in.s / (in.mb * in.mb);
+    return in.radius_m * std::exp(2 * (std::sqrt(h.pi_cr_norm) - std::sqrt(pn)));
+}
+
+/// Convergencia de la pared de Carranza-Torres y Fairhurst (CC02 ec. 5-11), pequeñas deformaciones.
+inline double grc_hb_displacement(const GrcHbInput& in, double pi_mpa) {
+    using excavation_detail::rad;
+    const auto h = excavation_detail::hb_state(in, pi_mpa);
+    if (pi_mpa >= h.pi_cr) return (in.p0_mpa - pi_mpa) * in.radius_m / (2 * in.g_mpa);
+    const double sps = std::sin(rad(in.psi_deg)), kp = (1 + sps) / (1 - sps), nu = in.nu;
+    const double ratio = grc_hb_plastic_radius(in, pi_mpa) / in.radius_m, ln = std::log(ratio);
+    const double dso = h.so - h.pi_cr_norm, pw = std::pow(ratio, kp + 1);
+    const double f = (kp - 1) / (kp + 1) + 2 / (kp + 1) * pw + (1 - 2 * nu) / (4 * dso) * ln * ln -
+                     ((1 - 2 * nu) / (kp + 1) * std::sqrt(h.pi_cr_norm) / dso +
+                      (1 - nu) / 2 * (kp - 1) / ((kp + 1) * (kp + 1)) / dso) *
+                         ((kp + 1) * ln - pw + 1);
+    return f * in.radius_m * (in.p0_mpa - h.pi_cr) / (2 * in.g_mpa);
+}
+
+inline GrcResult grc_hb(const GrcHbInput& in, int n_points = 50) {
+    return excavation_detail::grc_curve(
+        in.p0_mpa, excavation_detail::hb_state(in, in.p0_mpa).pi_cr, n_points,
+        {"GRC-HB-Carranza-Torres-Fairhurst-2000", Verification::PrimaryLaterAuthors,
+         "Carranza-Torres and Fairhurst (2000) as reproduced in CC02 p. 53-55 eq. 5-11; original not read"},
+        [&](double pi) { return grc_hb_displacement(in, pi); }, [&](double pi) { return grc_hb_plastic_radius(in, pi); });
+}
+
+// ---------------------------------------------------------------- Esfuerzos de HB 1982 y de Reed (§4.2, §6.1)
+
+struct RadialStress {
+    double sigma_r, sigma_theta;
+};
+
+struct Hb1982Input {
+    double p0_mpa = validation::unset, radius_m = validation::unset, sigma_c_mpa = validation::unset;
+    double m = validation::unset, s = validation::unset, mr = validation::unset, sr = validation::unset;
+    double pi_mpa = 0.0;
+};
+
+namespace excavation_detail {
+inline void hb1982_check(const Hb1982Input& in) {
+    positive(in.p0_mpa, "p0_mpa");
+    positive(in.radius_m, "radius_m");
+    positive(in.sigma_c_mpa, "sigma_c_mpa");
+    positive(in.m, "m");
+    non_negative(in.s, "s");
+    positive(in.mr, "mr");
+    non_negative(in.sr, "sr");
+    non_negative(in.pi_mpa, "pi_mpa");
+}
+inline double hb1982_m_factor(const Hb1982Input& in) {
+    return 0.5 * std::sqrt(std::pow(in.m / 4, 2) + in.m * in.p0_mpa / in.sigma_c_mpa + in.s) - in.m / 8;
+}
+}  // namespace excavation_detail
+
+/// Radio re del contorno elastoplástico (HB 1982 con resistencia residual); R si no hay zona plástica.
+inline double hb1982_plastic_radius(const Hb1982Input& in) {
+    excavation_detail::hb1982_check(in);
+    const double sc = in.sigma_c_mpa, mr = in.mr, sr = in.sr, M = excavation_detail::hb1982_m_factor(in);
+    const double n = 2 / (mr * sc) * std::sqrt(mr * sc * in.p0_mpa + sr * sc * sc - mr * sc * sc * M);
+    const double re = in.radius_m * std::exp(n - 2 / (mr * sc) * std::sqrt(mr * sc * in.pi_mpa + sr * sc * sc));
+    return std::max(re, in.radius_m);
+}
+
+inline RadialStress hb1982_stress(const Hb1982Input& in, double r_m) {
+    const double re = hb1982_plastic_radius(in);
+    validation::require_finite(r_m, "r_m");
+    if (r_m < in.radius_m) excavation_detail::fail("r_m", "must be at least 'radius_m'");
+    const double sc = in.sigma_c_mpa;
+    if (r_m < re) {
+        const double l = std::log(r_m / in.radius_m), b = std::sqrt(in.mr * sc * in.pi_mpa + in.sr * sc * sc);
+        const double sr_ = in.mr * sc / 4 * l * l + l * b + in.pi_mpa;
+        return {sr_, sr_ + std::sqrt(in.mr * sc * sr_ + in.sr * sc * sc)};
+    }
+    // sin zona plástica el contorno elástico pasa por la presión interna
+    const double sre = re > in.radius_m ? in.p0_mpa - excavation_detail::hb1982_m_factor(in) * sc : in.pi_mpa;
+    const double d = (in.p0_mpa - sre) * (re / r_m) * (re / r_m);
+    return {in.p0_mpa - d, in.p0_mpa + d};
+}
+
+struct ReedInput {
+    double q_mpa = validation::unset, radius_m = validation::unset, c_peak_mpa = validation::unset;
+    double c_res_mpa = validation::unset, phi_deg = validation::unset, pi_mpa = 0.0;
+};
+
+namespace excavation_detail {
+struct ReedState {
+    double k, sc, pp, rbar;
+};
+inline ReedState reed_state(const ReedInput& in) {
+    positive(in.q_mpa, "q_mpa");
+    positive(in.radius_m, "radius_m");
+    positive(in.c_peak_mpa, "c_peak_mpa");
+    non_negative(in.c_res_mpa, "c_res_mpa");
+    non_negative(in.pi_mpa, "pi_mpa");
+    validation::require_finite(in.phi_deg, "phi_deg");
+    if (in.phi_deg < 1.0 || in.phi_deg >= 90.0) fail("phi_deg", "must be within [1, 90) degrees");
+    const double sp = std::sin(rad(in.phi_deg)), cp = std::cos(rad(in.phi_deg));
+    ReedState s{};
+    s.k = (1 + sp) / (1 - sp);
+    s.sc = 2 * in.c_peak_mpa * cp / (1 - sp);
+    s.pp = 2 * in.c_res_mpa * cp / (1 - sp) / (s.k - 1);
+    const double ratio = (s.pp + (2 * in.q_mpa - s.sc) / (s.k + 1)) / (in.pi_mpa + s.pp);
+    s.rbar = ratio > 1.0 ? in.radius_m * std::pow(ratio, 1 / (s.k - 1)) : in.radius_m;
+    return s;
+}
+}  // namespace excavation_detail
+
+/// Radio r̄ del contorno elastoplástico de Reed; ro si no hay zona plástica.
+inline double reed_plastic_radius(const ReedInput& in) { return excavation_detail::reed_state(in).rbar; }
+
+inline RadialStress reed_stress(const ReedInput& in, double r_m) {
+    const auto s = excavation_detail::reed_state(in);
+    validation::require_finite(r_m, "r_m");
+    if (r_m < in.radius_m) excavation_detail::fail("r_m", "must be at least 'radius_m'");
+    if (r_m < s.rbar) {
+        const double t = (in.pi_mpa + s.pp) * std::pow(r_m / in.radius_m, s.k - 1);
+        return {t - s.pp, s.k * t - s.pp};
+    }
+    if (s.rbar > in.radius_m) {
+        const double a = std::pow(s.rbar / r_m, 2) * ((s.k - 1) * in.q_mpa + s.sc) / (s.k + 1);
+        return {in.q_mpa - a, in.q_mpa + a};
+    }
+    const double a = std::pow(in.radius_m / r_m, 2) * (in.q_mpa - in.pi_mpa);  // todo elástico: σr(ro) = pi
+    return {in.q_mpa - a, in.q_mpa + a};
 }
 
 }  // namespace rockmasspy
