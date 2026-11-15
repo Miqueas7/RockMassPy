@@ -1037,4 +1037,29 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("bem_solve", &bem_solve, nb::arg("input"));
     m.def("bem_boundary", &bem_boundary, nb::arg("solution"));
     m.def("bem_field", &bem_field, nb::arg("solution"), nb::arg("points"));
+
+    nb::enum_<SfCriterion>(m, "SfCriterion", "Failure criterion for the strength factor.")
+        .value("MohrCoulomb", SfCriterion::MohrCoulomb).value("HoekBrown", SfCriterion::HoekBrown);
+    nb::enum_<SfMode>(m, "SfMode", "RS2 (3D invariants, default) or Examine2D-style 2D strength factor.")
+        .value("RS2", SfMode::RS2).value("Examine2D", SfMode::Examine2D);
+    nb::class_<SfMaterial>(m, "SfMaterial",
+                           "Mohr-Coulomb (c, phi, tensile) or Hoek-Brown (sigma_ci, mb, s, a) for the strength factor.")
+        .def("__init__", [](SfMaterial* self, SfCriterion criterion, double c_mpa, double phi_deg, double tensile_mpa,
+                            double sigma_ci_mpa, double mb, double s, double a) {
+                 new (self) SfMaterial{criterion, c_mpa, phi_deg, tensile_mpa, sigma_ci_mpa, mb, s, a};
+             }, nb::arg("criterion") = SfCriterion::MohrCoulomb, nb::arg("c_mpa") = nan, nb::arg("phi_deg") = nan,
+             nb::arg("tensile_mpa") = 0.0, nb::arg("sigma_ci_mpa") = nan, nb::arg("mb") = nan, nb::arg("s") = nan,
+             nb::arg("a") = 0.5)
+        .def_rw("criterion", &SfMaterial::criterion).def_rw("c_mpa", &SfMaterial::c_mpa)
+        .def_rw("phi_deg", &SfMaterial::phi_deg).def_rw("tensile_mpa", &SfMaterial::tensile_mpa)
+        .def_rw("sigma_ci_mpa", &SfMaterial::sigma_ci_mpa).def_rw("mb", &SfMaterial::mb).def_rw("s", &SfMaterial::s)
+        .def_rw("a", &SfMaterial::a);
+    nb::class_<SfResult>(m, "SfResult", "Strength factor (None in tension or inside an excavation) and tension flag.")
+        .def_ro("sf", &SfResult::sf).def_ro("tension", &SfResult::tension);
+    m.def("strength_factor_info", &strength_factor_info, nb::arg("mode") = SfMode::RS2);
+    m.def("strength_factor", &strength_factor, nb::arg("material"), nb::arg("sigma1"), nb::arg("sigma3"),
+          nb::arg("sigma2"), nb::arg("mode") = SfMode::RS2,
+          "Strength factor at a point, compression positive; sigma2 is sigma_z in plane strain.");
+    m.def("bem_strength_factor", &bem_strength_factor, nb::arg("points"), nb::arg("material"),
+          nb::arg("mode") = SfMode::RS2);
 }

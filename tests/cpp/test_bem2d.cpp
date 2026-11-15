@@ -273,3 +273,134 @@ TEST(Bem2d, Rendimiento) {  // 2 contornos × 256 elementos; meta < 2 s (se mide
     std::cout << "[bem2d] 2 x 256 elementos: " << s << " s\n";
     EXPECT_EQ(b.sigma_tt_mpa.size(), 512u);
 }
+
+// ---- Strength factor (FORMULAS §3) ----
+namespace {
+SfMaterial mc(double c, double phi, double t = 0.0) {
+    SfMaterial m;
+    m.criterion = SfCriterion::MohrCoulomb;
+    m.c_mpa = c;
+    m.phi_deg = phi;
+    m.tensile_mpa = t;
+    return m;
+}
+SfMaterial hb(double mb, double s, double sci, double a = 0.5) {
+    SfMaterial m;
+    m.criterion = SfCriterion::HoekBrown;
+    m.mb = mb;
+    m.s = s;
+    m.sigma_ci_mpa = sci;
+    m.a = a;
+    return m;
+}
+}  // namespace
+
+TEST(StrengthFactor, SobreLaEnvolventeDaUno) {  // §3.2: SF = 1 con σ2 = σ3, σ1 y el promedio
+    const double nphi = 3.0;  // φ = 30°
+    for (double s3 : {0.0, 5.0, 20.0}) {
+        const double s1m = s3 * nphi + 2 * 5 * std::sqrt(nphi), s1h = s3 + 100 * std::sqrt(10 * s3 / 100 + 1);
+        for (auto [m, s1] : {std::pair{mc(5, 30), s1m}, std::pair{hb(10, 1, 100), s1h}})
+            for (double s2 : {s3, s1, (s1 + s3) / 2})
+                for (auto mode : {SfMode::RS2, SfMode::Examine2D}) {
+                    const auto r = strength_factor(m, s1, s3, s2, mode);
+                    ASSERT_TRUE(r.sf.has_value());
+                    EXPECT_FALSE(r.tension);
+                    EXPECT_NEAR(*r.sf, 1.0, 1e-9) << s3 << " " << s2;
+                }
+    }
+}
+
+TEST(StrengthFactor, EjemploRs2Y2D) {  // §3.3: σ1 = 40, σ3 = 10, σz = 10
+    EXPECT_NEAR(strength_factor(mc(5, 30), 40, 10, 10, SfMode::RS2).sf.value(), 1.146, 0.001);
+    EXPECT_NEAR(strength_factor(mc(5, 30), 40, 10, 10, SfMode::Examine2D).sf.value(), 1.122, 0.001);
+    EXPECT_NEAR(strength_factor(hb(10, 1, 100), 40, 10, 10, SfMode::RS2).sf.value(), 2.457, 0.001);
+    EXPECT_NEAR(strength_factor(hb(10, 1, 100), 40, 10, 10, SfMode::Examine2D).sf.value(), 2.075, 0.001);
+}
+
+TEST(StrengthFactor, ThetaPorAtanIgualQueAsin) {  // valores del prototipo sf.py (asin de J3) con Θ intermedio
+    for (auto [s2, emc, ehb] : {std::tuple{17.0, 1.1339117330918675, 2.251652952653475},
+                                std::tuple{33.0, 1.1120485929952364, 1.9402879793320835}}) {
+        EXPECT_NEAR(strength_factor(mc(5, 30), 40, 10, s2, SfMode::RS2).sf.value(), emc, 1e-9);
+        EXPECT_NEAR(strength_factor(hb(10, 1, 100), 40, 10, s2, SfMode::RS2).sf.value(), ehb, 1e-9);
+    }
+    EXPECT_NEAR(strength_factor(mc(5, 30, 5), 25, -3, 8, SfMode::RS2).sf.value(), 0.6911205199201623, 1e-9);
+    EXPECT_NEAR(strength_factor(hb(10, 1, 100), 25, -3, 8, SfMode::RS2).sf.value(), 1.4173163179020543, 1e-9);
+}
+
+TEST(StrengthFactor, Traccion) {  // §3.4: σ3 < −T marca tracción y no da SF; HB: T = s·σci/mb = 10
+    for (auto mode : {SfMode::RS2, SfMode::Examine2D}) {
+        auto r = strength_factor(mc(5, 30, 1.0), 20, -1.5, 2, mode);
+        EXPECT_TRUE(r.tension);
+        EXPECT_FALSE(r.sf.has_value());
+        r = strength_factor(mc(5, 30, 1.0), 20, -0.5, 2, mode);
+        EXPECT_FALSE(r.tension);
+        EXPECT_TRUE(r.sf.has_value());
+        for (double a : {0.5, 0.55}) {
+            r = strength_factor(hb(10, 1, 100, a), 20, -10.5, 2, mode);
+            EXPECT_TRUE(r.tension);
+            EXPECT_FALSE(r.sf.has_value());
+            r = strength_factor(hb(10, 1, 100, a), 20, -9.5, 2, mode);
+            EXPECT_FALSE(r.tension);
+            ASSERT_TRUE(r.sf.has_value());
+            EXPECT_GT(*r.sf, 0.0);
+        }
+    }
+}
+
+TEST(StrengthFactor, HidrostaticoEsInfinito) {  // sin desviador no hay corte: SF = +inf
+    for (auto mode : {SfMode::RS2, SfMode::Examine2D}) {
+        EXPECT_TRUE(std::isinf(strength_factor(mc(5, 30), 10, 10, 10, mode).sf.value()));
+        EXPECT_TRUE(std::isinf(strength_factor(hb(10, 1, 100, 0.55), 10, 10, 10, mode).sf.value()));
+    }
+}
+
+TEST(StrengthFactor, test_hb_general_matches_closed_form) {
+    using bem2d_detail::hb_scaled_sf;
+    const auto m5 = hb(10, 1, 100);
+    for (auto [s1, s3, s2] : {std::tuple{40.0, 10.0, 10.0}, std::tuple{80.0, 2.0, 30.0}, std::tuple{15.0, -5.0, 0.0},
+                              std::tuple{200.0, 30.0, 200.0}}) {
+        const double closed = strength_factor(m5, s1, s3, s2, SfMode::RS2).sf.value();
+        EXPECT_NEAR(hb_scaled_sf(m5, s1, s3, s2), closed, 1e-6) << s1;
+        EXPECT_LT(std::abs(strength_factor(hb(10, 1, 100, 0.5001), s1, s3, s2, SfMode::RS2).sf.value() - closed), 1e-3);
+    }
+    const auto m55 = hb(10, 0.5, 100, 0.55);  // sobre la envolvente generalizada: SF = 1
+    for (double s3 : {0.0, 5.0, 20.0}) {
+        const double s1 = s3 + 100 * std::pow(10 * s3 / 100 + 0.5, 0.55);
+        for (double s2 : {s3, s1, (s1 + s3) / 2})
+            for (auto mode : {SfMode::RS2, SfMode::Examine2D})
+                EXPECT_NEAR(strength_factor(m55, s1, s3, s2, mode).sf.value(), 1.0, 1e-6) << s3 << " " << s2;
+    }
+}
+
+TEST(StrengthFactor, test_zero_horizontal_stress) {  // K = 0: la corona del círculo queda en tracción (MC, T = 0)
+    const auto sol = bem_solve(input({ellipse_pts(128, 1, 1)}, 30, 0));
+    const auto f = bem_field(sol, {{0.0, 1.1}, {0.0, -1.1}, {1.1, 0.0}, {0.0, 0.0}});
+    const auto r = bem_strength_factor(f, mc(5, 30), SfMode::RS2);
+    ASSERT_EQ(r.size(), 4u);
+    EXPECT_TRUE(r[0].tension);
+    EXPECT_TRUE(r[1].tension);
+    EXPECT_FALSE(r[0].sf.has_value());
+    EXPECT_FALSE(r[2].tension);  // hastial: compresión alta
+    ASSERT_TRUE(r[2].sf.has_value());
+    EXPECT_GT(*r[2].sf, 0.0);
+    EXPECT_FALSE(r[3].tension);  // dentro de la excavación
+    EXPECT_FALSE(r[3].sf.has_value());
+}
+
+TEST(StrengthFactor, ValidacionSinValores) {
+    for (auto m : {mc(-1, 30), mc(5, 95), mc(5, 30, -0.25), hb(-7.5, 1, 100), hb(10, 1.25, 100), hb(10, 1, -3.5),
+                   hb(10, 1, 100, 1.75)}) {
+        const auto msg = error_of([&] { strength_factor(m, 40, 10, 10, SfMode::RS2); });
+        EXPECT_NE(msg.find("Domain error"), std::string::npos);
+        for (const char* v : {"-1", "95", "0.25", "7.5", "1.25", "3.5", "1.75"}) EXPECT_EQ(msg.find(v), std::string::npos) << msg;
+    }
+    EXPECT_NE(error_of([] { strength_factor(mc(5, 30), std::nan(""), 10, 10, SfMode::RS2); }).find("sigma1"),
+              std::string::npos);
+}
+
+TEST(StrengthFactor, Info) {
+    EXPECT_EQ(strength_factor_info(SfMode::RS2).method_id, "SF-RS2-3D");
+    EXPECT_EQ(strength_factor_info(SfMode::RS2).verification, Verification::PrimaryLaterAuthors);
+    EXPECT_EQ(strength_factor_info(SfMode::Examine2D).method_id, "SF-2D-Examine2D");
+    EXPECT_EQ(strength_factor_info(SfMode::Examine2D).verification, Verification::Secondary);
+}

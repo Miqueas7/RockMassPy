@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -508,6 +509,146 @@ inline std::vector<BemPointStress> bem_field(const BemSolution& sol, const std::
         r.angle1_deg = 0.5 * std::atan2(2 * r.sxy, r.sxx - r.syy) * 180 / kPi;
         out.push_back(r);
     }
+    return out;
+}
+
+// ---- Strength factor (FORMULAS_FASE8C §3), compresión positiva ----
+
+enum class SfCriterion { MohrCoulomb, HoekBrown };
+/// RS2: la definición de Rocscience con los invariantes del tensor 3D (§3.2). Examine2D: la definición 2D de §3.3.
+enum class SfMode { RS2, Examine2D };
+
+/// Mohr-Coulomb usa c_mpa, phi_deg y tensile_mpa (T ≥ 0); Hoek-Brown usa sigma_ci_mpa, mb, s y a (T = s·σci/mb).
+struct SfMaterial {
+    SfCriterion criterion = SfCriterion::MohrCoulomb;
+    double c_mpa = validation::unset, phi_deg = validation::unset, tensile_mpa = 0.0;
+    double sigma_ci_mpa = validation::unset, mb = validation::unset, s = validation::unset, a = 0.5;
+};
+
+/// sf vacío si el punto está en tracción (σ3 < −T) o dentro de una excavación. Sin desviador, sf = +inf.
+struct SfResult {
+    std::optional<double> sf;
+    bool tension = false;
+};
+
+inline MethodInfo strength_factor_info(SfMode mode) {
+    if (mode == SfMode::RS2)
+        return {"SF-RS2-3D", Verification::PrimaryLaterAuthors,
+                "Rocscience Phase2 (RS2) theory, Strength Factor: Mohr-Coulomb p. 1 and Hoek-Brown a = 0.5 p. 3, from "
+                "the stress invariants I1, J2 and the Lode angle; generalized Hoek-Brown by scaling the deviator at "
+                "fixed I1 and Lode angle (FORMULAS_FASE8C §3.2, §3.4)"};
+    return {"SF-2D-Examine2D", Verification::Secondary,
+            "2D strength factor as described for Examine2D in Eberhardt, EOSC 433 Lab (UBC): shear strength over induced "
+            "maximum shear at the same mean stress (sigma1 + sigma3)/2 (FORMULAS_FASE8C §3.3)"};
+}
+
+namespace bem2d_detail {
+inline void check_material(const SfMaterial& m) {
+    if (m.criterion == SfCriterion::MohrCoulomb) {
+        finite(m.c_mpa, "c_mpa");
+        if (m.c_mpa < 0.0) fail("c_mpa", "must not be negative");
+        finite(m.phi_deg, "phi_deg");
+        if (m.phi_deg < 0.0 || m.phi_deg >= 90.0) fail("phi_deg", "must be within [0, 90)");
+        finite(m.tensile_mpa, "tensile_mpa");
+        if (m.tensile_mpa < 0.0) fail("tensile_mpa", "must not be negative");
+    } else {
+        positive(m.sigma_ci_mpa, "sigma_ci_mpa");
+        positive(m.mb, "mb");
+        finite(m.s, "s");
+        if (m.s < 0.0 || m.s > 1.0) fail("s", "must be within [0, 1]");
+        positive(m.a, "a");
+        if (m.a > 1.0) fail("a", "must be within (0, 1]");
+    }
+}
+
+/// Resistencia a tracción T ≥ 0 (§3.4): la del usuario en Mohr-Coulomb; s·σci/mb en Hoek-Brown (HB02 ec. 7).
+inline double tensile_cutoff(const SfMaterial& m) {
+    return m.criterion == SfCriterion::MohrCoulomb ? m.tensile_mpa : m.s * m.sigma_ci_mpa / m.mb;
+}
+
+/// Raíz de g creciente en [lo, hi] con g(lo) < 0 < g(hi), por bisección hasta la precisión de máquina.
+template <class G>
+double bisect(G g, double lo, double hi) {
+    for (int it = 0; it < 200 && hi - lo > 1e-15 * std::abs(hi); ++it) {
+        const double mid = (lo + hi) / 2;
+        (g(mid) < 0.0 ? lo : hi) = mid;
+    }
+    return (lo + hi) / 2;
+}
+
+/// SF de RS2 para Hoek-Brown generalizado (§3.4): factor k que escala la parte desviadora a I1 y Θ fijos hasta que
+/// los principales escalados tocan σ1 = σ3 + σci(mb·σ3/σci + s)^a. Exige que ningún principal esté en tracción.
+inline double hb_scaled_sf(const SfMaterial& m, double s1, double s3, double s2) {
+    const double p = (s1 + s2 + s3) / 3;
+    const double dmax = std::max({s1, s2, s3}) - p, dmin = std::min({s1, s2, s3}) - p;
+    if (!(dmax > dmin)) return std::numeric_limits<double>::infinity();
+    // con k = kt el principal menor llega a −T: más allá la potencia no existe y ya hay falla
+    const double kt = (p + tensile_cutoff(m)) / -dmin;
+    return bisect(
+        [&](double k) {
+            return k * (dmax - dmin) - m.sigma_ci_mpa * std::pow(std::max(0.0, m.mb * (p + k * dmin) / m.sigma_ci_mpa + m.s), m.a);
+        },
+        0.0, kt);
+}
+}  // namespace bem2d_detail
+
+/// Strength factor en un punto (compresión positiva; σ2 es σz en deformación plana). RS2 arma el tensor diagonal
+/// (σ1, σ3, σ2): los invariantes no dependen de los ejes, así que basta con los principales. La tracción se mira con
+/// el menor de los tres principales en RS2 y con σ3 del plano en Examine2D, que no usa σz.
+inline SfResult strength_factor(const SfMaterial& m, double sigma1, double sigma3, double sigma2, SfMode mode) {
+    using namespace bem2d_detail;
+    check_material(m);
+    finite(sigma1, "sigma1");
+    finite(sigma3, "sigma3");
+    finite(sigma2, "sigma2");
+    const double t = tensile_cutoff(m);
+    const double hi = std::max(sigma1, sigma3), lo = std::min(sigma1, sigma3);
+    if ((mode == SfMode::RS2 ? std::min(lo, sigma2) : lo) < -t) return {std::nullopt, true};
+    const double inf = std::numeric_limits<double>::infinity();
+    const bool mc = m.criterion == SfCriterion::MohrCoulomb;
+    const double phi = mc ? m.phi_deg * kPi / 180 : 0.0;
+    if (mode == SfMode::Examine2D) {
+        const double sm = (hi + lo) / 2, tau = (hi - lo) / 2;
+        if (!(tau > 0.0)) return {inf, false};
+        // con T > c·cot φ el círculo puede salir del vértice de Mohr-Coulomb: SF 0, no negativo
+        if (mc) return {std::max(0.0, (m.c_mpa * std::cos(phi) + sm * std::sin(phi)) / tau), false};
+        const double tf = bisect(
+            [&](double x) {
+                return 2 * x - m.sigma_ci_mpa * std::pow(std::max(0.0, m.mb * (sm - x) / m.sigma_ci_mpa + m.s), m.a);
+            },
+            0.0, sm + t);
+        return {tf / tau, false};
+    }
+    if (!mc && m.a != 0.5) return {hb_scaled_sf(m, hi, lo, sigma2), false};
+    // invariantes de §3.2 con el tensor diagonal
+    const double i1 = hi + lo + sigma2, q = i1 / 3;
+    const double j2 = ((hi - lo) * (hi - lo) + (lo - sigma2) * (lo - sigma2) + (sigma2 - hi) * (sigma2 - hi)) / 6;
+    if (!(j2 > 0.0)) return {inf, false};
+    // Θ = (1/3)·asin(−3√3·J3 / (2·J2^1.5)) es, con los principales ordenados, tan Θ = (2σmed − σmax − σmin)/(√3(σmax −
+    // σmin)): identidad exacta. El asin pierde √ε (~1e-8) cerca de Θ = ±π/6, es decir con σ2 igual a σ1 o a σ3
+    const double smax3 = std::max(hi, sigma2), smin3 = std::min(lo, sigma2), smid = i1 - smax3 - smin3;
+    const double th = std::atan((2 * smid - smax3 - smin3) / (std::sqrt(3.0) * (smax3 - smin3)));
+    double smax;
+    if (mc) {
+        smax = (q * std::sin(phi) + m.c_mpa * std::cos(phi)) / (std::cos(th) + std::sin(th) * std::sin(phi) / std::sqrt(3.0));
+    } else {
+        const double k = (1 + std::tan(th) / std::sqrt(3.0)) * m.mb * m.sigma_ci_mpa / 8;
+        // el radicando es ≥ 0 porque ningún principal está bajo −T (§3.4)
+        smax = (std::sqrt(k * k + m.mb * m.sigma_ci_mpa * i1 / 12 + m.s * m.sigma_ci_mpa * m.sigma_ci_mpa / 4) - k) /
+               std::cos(th);
+    }
+    return {std::max(0.0, smax / std::sqrt(j2)), false};
+}
+
+/// Strength factor de cada punto del campo con σ1, σ3 y σz (σ2). Los puntos dentro de una excavación dan sf vacío y
+/// tension false; los coarse se calculan igual (su aviso es del análisis).
+inline std::vector<SfResult> bem_strength_factor(const std::vector<BemPointStress>& pts, const SfMaterial& m,
+                                                 SfMode mode) {
+    bem2d_detail::check_material(m);
+    std::vector<SfResult> out;
+    out.reserve(pts.size());
+    for (const auto& p : pts)
+        out.push_back(p.inside ? SfResult{} : strength_factor(m, p.sigma1, p.sigma3, p.szz, mode));
     return out;
 }
 

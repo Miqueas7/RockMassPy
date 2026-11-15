@@ -131,3 +131,46 @@ def test_messages_without_values():
     assert "Received" not in str(e.value)
     with pytest.raises(ValueError, match="'elements_per_side_hint'"):
         rm.bem_discretize([rm.BemContour(vertices=sq, elements_per_side_hint=2000)], 1.0)
+
+
+MC = rm.SfMaterial(criterion=rm.SfCriterion.MohrCoulomb, c_mpa=5, phi_deg=30)
+HB = rm.SfMaterial(criterion=rm.SfCriterion.HoekBrown, sigma_ci_mpa=100, mb=10, s=1)
+
+
+@pytest.mark.parametrize("mat,mode,expected", [(MC, rm.SfMode.RS2, 1.146), (MC, rm.SfMode.Examine2D, 1.122),
+                                               (HB, rm.SfMode.RS2, 2.457), (HB, rm.SfMode.Examine2D, 2.075)])
+def test_strength_factor_example(mat, mode, expected):
+    r = rm.strength_factor(mat, 40, 10, 10, mode)  # FORMULAS §3.3
+    assert r.sf == pytest.approx(expected, abs=1e-3)
+    assert not r.tension
+
+
+def test_strength_factor_tension_and_info():
+    r = rm.strength_factor(HB, 20, -10.5, 2)  # T = s·σci/mb = 10
+    assert r.tension and r.sf is None
+    assert rm.strength_factor_info().method_id == "SF-RS2-3D"
+    assert rm.strength_factor_info().verification == rm.Verification.PrimaryLaterAuthors
+    assert rm.strength_factor_info(rm.SfMode.Examine2D).method_id == "SF-2D-Examine2D"
+    assert rm.strength_factor_info(rm.SfMode.Examine2D).verification == rm.Verification.Secondary
+
+
+def test_hb_general_continuous():
+    closed = rm.strength_factor(HB, 40, 10, 10).sf
+    near = rm.SfMaterial(criterion=rm.SfCriterion.HoekBrown, sigma_ci_mpa=100, mb=10, s=1, a=0.5001)
+    assert abs(rm.strength_factor(near, 40, 10, 10).sf - closed) < 1e-3
+
+
+def test_zero_horizontal_stress():
+    sol = solve([ellipse_pts(128, 1, 1)], 30, 0)
+    f = rm.bem_field(sol, [(0.0, 1.1), (1.1, 0.0), (0.0, 0.0)])
+    r = rm.bem_strength_factor(f, rm.SfMaterial(criterion=rm.SfCriterion.MohrCoulomb, c_mpa=5, phi_deg=30, tensile_mpa=0))
+    assert r[0].tension and r[0].sf is None  # corona
+    assert not r[1].tension and r[1].sf > 0  # hastial
+    assert not r[2].tension and r[2].sf is None  # dentro
+
+
+def test_strength_factor_messages_without_values():
+    bad = rm.SfMaterial(criterion=rm.SfCriterion.HoekBrown, sigma_ci_mpa=100, mb=10, s=1.37)
+    with pytest.raises(ValueError, match="'s'") as e:
+        rm.strength_factor(bad, 40, 10, 10)
+    assert "1.37" not in str(e.value)
