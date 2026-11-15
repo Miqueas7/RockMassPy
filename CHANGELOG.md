@@ -31,7 +31,7 @@ Phase 8C: 2D boundary elements (stresses around excavations). Phase 8D: surrogat
 - The generalized Hoek-Brown SF (a other than 0.5) is numeric and has no published oracle.
 - Surrogate: box margin 5 %, chi-squared level 0.99 for the domain, useful when RMSE < 0.5 times the mean model's,
   out-of-domain warning above 5 % of samples, `rbf` as default (on the planar bench `poly2` gave 1.8 times the true
-  PoF while its validation looked fine).
+  PoF on the full-range bench (1.55 in example 18) while its validation looked fine).
 - In RS2 mode, tension is checked with the minimum of the three principal stresses (including sigma_z), which is
   conservative; RS2's text says "Sigma 3".
 

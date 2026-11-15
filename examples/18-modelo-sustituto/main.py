@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from rockmasspy import probabilistic as pb
-from rockmasspy.predictive.surrogate import fit_surrogate, load_runs, surrogate_pof, validate_surrogate
+from rockmasspy.predictive.surrogate import SurrogateData, fit_surrogate, load_runs, surrogate_pof, validate_surrogate
 from rockmasspy.predictive.surrogate_bench import planar_base, planar_runs
 
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp())
@@ -28,7 +28,7 @@ print(f"Corridas leídas: {len(data.y)} con {len(data.names)} entradas")
 # 2. Validación: por escenario (agrupada) frente a aleatoria; la agrupada es la honesta
 print("\nValidación (RMSE de FS; modelo de la media = referencia)")
 for kind in ("rbf", "poly2"):
-    for etiqueta, d in (("agrupada", data), ("aleatoria", type(data)(data.X, data.y, data.names))):
+    for etiqueta, d in (("agrupada", data), ("aleatoria", SurrogateData(X=data.X, y=data.y, names=data.names))):
         v = validate_surrogate(d, kind=kind)
         print(f"  {kind:5s} {etiqueta:9s}: RMSE {v.rmse:.3f} (media {v.rmse_mean_model:.3f}), R2 {v.r2:.3f}, "
               f"útil: {'sí' if v.useful else 'no'}")
@@ -47,6 +47,13 @@ for kind, s in (("rbf", rbf), ("poly2", poly2)):
     print(f"  {kind:5s}: PoF {r.pof:.4f} ({r.pof / truth:.2f} veces la verdad), cotas {r.pof_lower:.4f} a "
           f"{r.pof_upper:.4f}, fuera de dominio {r.n_out_of_domain}")
 print("  poly2 puede validar bien y aun así sesgar la PoF: por eso el sustituto por omisión es rbf")
+
+# 3b. Colas más anchas que las corridas: las muestras fuera del dominio se excluyen y la verdad queda entre las cotas
+anchas = {**variables, "cohesion": pb.normal(10, 6, 2, 40)}
+truth2 = pb.run_probabilistic("planar", base, anchas, n=5000, seed=1).pof
+r = surrogate_pof(rbf, anchas, n=5000, seed=1)
+print(f"\nColas anchas, rbf: PoF {r.pof:.4f}, cotas [{r.pof_lower:.4f}, {r.pof_upper:.4f}], fuera de dominio "
+      f"{r.n_out_of_domain}, verdad {truth2:.4f}, verdad dentro de las cotas: {r.pof_lower <= truth2 <= r.pof_upper}")
 
 # 4. Una extrapolación se rechaza: la cohesión pedida sale del rango de las corridas
 fuera = np.tile(rbf.mean, (1, 1))

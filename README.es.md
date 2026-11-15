@@ -814,7 +814,7 @@ muy lejos de ellas (nivel χ² de 0,99) se rechaza (`FS = nan`), y las muestras 
 `pof_lower` y `pof_upper` como cotas de la PoF de la distribución completa. Valídalo agrupado por escenario (es lo
 que hace cuando das una columna de grupo): los pliegues aleatorios se ven mejor y engañan. Es «útil» si su RMSE es
 menor que 0,5 veces el del modelo de la media. Una buena validación no asegura una buena PoF: en el banco planar
-`poly2` valida bien y aun así da de 1,5 a 1,8 veces la PoF verdadera, por eso `rbf` es el valor por omisión. No
+`poly2` valida bien y aun así da 1,55 veces la PoF verdadera en el ejemplo, hasta 1,8 en el banco de rango completo, por eso `rbf` es el valor por omisión. No
 reemplaza la corrida final en el programa de origen.
 
 ```python

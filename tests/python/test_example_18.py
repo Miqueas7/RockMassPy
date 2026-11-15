@@ -1,5 +1,6 @@
 """El ejemplo 18 corre y termina en 0."""
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,4 +14,7 @@ def test_ejemplo_18(tmp_path):
     assert p.returncode == 0, p.stderr
     for t in ("agrupada", "aleatoria", "PoF de verdad", "poly2", "FS = nan"):
         assert t in p.stdout
+    m = re.search(r"cotas \[([\d.]+), ([\d.]+)\], fuera de dominio (\d+)", p.stdout)
+    assert m and float(m[1]) < float(m[2]) and int(m[3]) > 0
+    assert "dentro de las cotas: True" in p.stdout
     assert (tmp_path / "corridas.csv").exists()

@@ -787,7 +787,7 @@ far from them (chi-squared level 0.99) is refused (`FS = nan`), and samples excl
 `pof_lower` and `pof_upper` bounding the PoF of the full distribution. Validate it grouped by scenario (the default
 when you give a group column): random folds look better and mislead. It is "useful" when its RMSE is below 0.5 times
 that of the mean model. A good validation does not guarantee a good PoF: on the planar bench `poly2` validates well
-and still gives 1.5 to 1.8 times the true PoF, which is why `rbf` is the default. It does not replace the final run
+and still gives 1.55x the true PoF in the example, up to 1.8x on the full-range bench, which is why `rbf` is the default. It does not replace the final run
 in the source program.
 
 ```python
