@@ -34,6 +34,7 @@
 #include "rockmasspy/bench.hpp"
 #include "rockmasspy/newmark.hpp"
 #include "rockmasspy/excavation.hpp"
+#include "rockmasspy/lining.hpp"
 #include "rockmasspy/slip_search.hpp"
 
 namespace nb = nanobind;
@@ -725,6 +726,41 @@ NB_MODULE(_rockmasspy_core, m) {
           nb::arg("a_m"), nb::arg("b_m"), nb::arg("theta_deg"));
     m.def("ellipse_ends", &ellipse_ends, nb::arg("p_mpa"), nb::arg("k_ratio"), nb::arg("width_m"), nb::arg("height_m"));
     m.def("einstein_schwartz", &einstein_schwartz, nb::arg("input"));
+
+    // Revestimiento: diagramas de capacidad M-N y Q-N, sección compuesta
+    nb::class_<LiningSection>(m, "LiningSection", "Equivalent rectangular lining section; sigma_t_mpa is negative.")
+        .def(nb::init<>())
+        .def_rw("area_m2", &LiningSection::area_m2).def_rw("inertia_m4", &LiningSection::inertia_m4)
+        .def_rw("thickness_m", &LiningSection::thickness_m).def_rw("sigma_c_mpa", &LiningSection::sigma_c_mpa)
+        .def_rw("sigma_t_mpa", &LiningSection::sigma_t_mpa);
+    nb::class_<LiningForce>(m, "LiningForce", "Thrust N (MN), moment M (MN m) and shear Q (MN) per metre.")
+        .def(nb::init<>())
+        .def_rw("n_mn", &LiningForce::n_mn).def_rw("m_mnm", &LiningForce::m_mnm).def_rw("q_mn", &LiningForce::q_mn);
+    nb::class_<CapacityEnvelope>(m, "CapacityEnvelope", "M-N capacity rhombus; vertices are (N, M) pairs.")
+        .def_ro("n_max", &CapacityEnvelope::n_max).def_ro("n_min", &CapacityEnvelope::n_min)
+        .def_ro("n_cr", &CapacityEnvelope::n_cr).def_ro("m_max", &CapacityEnvelope::m_max)
+        .def_ro("vertices", &CapacityEnvelope::vertices).def_ro("info", &CapacityEnvelope::info);
+    nb::class_<CapacityCheck>(m, "CapacityCheck", "Indices of the (N, M) pairs outside the capacity rhombus.")
+        .def_ro("outside", &CapacityCheck::outside).def_ro("all_inside", &CapacityCheck::all_inside)
+        .def_ro("info", &CapacityCheck::info);
+    nb::class_<ElasticSection>(m, "ElasticSection", "Elastic modulus, Poisson ratio, area and inertia of a support element.")
+        .def(nb::init<>())
+        .def_rw("e_mpa", &ElasticSection::e_mpa).def_rw("nu", &ElasticSection::nu)
+        .def_rw("area_m2", &ElasticSection::area_m2).def_rw("inertia_m4", &ElasticSection::inertia_m4);
+    nb::class_<CompositeSection>(m, "CompositeSection", "Equivalent steel-set plus shotcrete section.")
+        .def_ro("d_eq", &CompositeSection::d_eq).def_ro("k_eq", &CompositeSection::k_eq)
+        .def_ro("t_eq", &CompositeSection::t_eq).def_ro("e_eq", &CompositeSection::e_eq);
+    nb::class_<SplitForces>(m, "SplitForces", "N, M and Q taken by the steel set and by the shotcrete.")
+        .def_ro("n_steel", &SplitForces::n_steel).def_ro("m_steel", &SplitForces::m_steel)
+        .def_ro("q_steel", &SplitForces::q_steel).def_ro("n_shotcrete", &SplitForces::n_shotcrete)
+        .def_ro("m_shotcrete", &SplitForces::m_shotcrete).def_ro("q_shotcrete", &SplitForces::q_shotcrete);
+    m.def("capacity_mn", &capacity_mn, nb::arg("section"), nb::arg("fs"));
+    m.def("q_crit", &q_crit, nb::arg("section"), nb::arg("fs"));
+    m.def("shear_capacity_n", &shear_capacity_n, nb::arg("section"), nb::arg("q_mn"), nb::arg("fs"),
+          nb::arg("compression"));
+    m.def("check_capacity", &check_capacity, nb::arg("section"), nb::arg("forces"), nb::arg("fs"));
+    m.def("composite", &composite, nb::arg("steel"), nb::arg("shotcrete"), nb::arg("n_sets_per_m"), nb::arg("radius_m"));
+    m.def("split_forces", &split_forces, nb::arg("composite"), nb::arg("n_mn"), nb::arg("m_mnm"), nb::arg("q_mn"));
     m.def("hoek_marinos", &hoek_marinos, nb::arg("sigma_cm_mpa"), nb::arg("p0_mpa"), nb::arg("pi_mpa"),
           nb::arg("radius_m"));
 

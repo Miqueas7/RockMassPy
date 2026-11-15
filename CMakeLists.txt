@@ -106,6 +106,7 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_limit_equilibrium.cpp
         tests/cpp/test_newmark.cpp
         tests/cpp/test_excavation.cpp
+        tests/cpp/test_lining.cpp
         tests/cpp/test_slip_search.cpp
         tests/cpp/test_yield_coefficient.cpp
         tests/cpp/test_sarma.cpp
