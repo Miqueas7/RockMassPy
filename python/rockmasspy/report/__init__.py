@@ -511,6 +511,64 @@ def build_stope_report(results, *, title: str, lang: str = "es", author: str = "
                   __version__, date or datetime.date.today().isoformat())
 
 
+def _tunnel_blocks(results, inputs, lang: str, figures: bool, capacity) -> tuple:
+    from ..viz.tunnel import lining_capacity_figure, tunnel_figure
+
+    blocks: list = []
+    if inputs:
+        names = [k for k in inputs[0].__dataclass_fields__ if any(getattr(i, k) is not None for i in inputs)]
+        blocks.append(Table(t("tn_cap_inputs", lang), tuple(names),
+                            tuple(tuple(_str(getattr(i, k)) for k in names) for i in inputs)))
+    head = (t("h_method", lang), t("h_pcrit", lang), t("h_rp", lang), t("h_umax", lang), t("h_strain", lang),
+            t("h_squeezing", lang), t("h_fs", lang), t("h_uin", lang))
+
+    def fs(r):
+        i = r.interaction
+        return "" if i is None else (f"{i.fs:.2f}" if i.fs is not None else t("h_no_cross", lang))
+
+    blocks.append(Table(t("tn_cap_results", lang), head, tuple(
+        (r.method, f"{r.p_crit_mpa:.3f}", f"{r.rp_m:.2f}", f"{r.u_max_m * 1e3:.1f}", f"{r.strain_pct:.2f}",
+         r.squeezing.squeezing_class, fs(r), "" if r.u_install_m is None else f"{r.u_install_m * 1e3:.1f}")
+        for r in results)))
+    for r in results:
+        blocks.append(_fig(t("tn_fig", lang), lambda r=r: tunnel_figure(r, lang=lang), lang, figures))
+    if capacity is not None:
+        section, forces = capacity
+        blocks.append(_fig(t("tn_fig_cap", lang), lambda: lining_capacity_figure(section, forces, lang=lang),
+                           lang, figures))
+    return tuple(blocks)
+
+
+def build_tunnel_report(results, *, title: str, lang: str = "es", author: str = "", date: str = "",
+                        figures: bool = True, inputs=None, capacity=None) -> Report:
+    """Informe de convergencia-confinamiento. `inputs` (TunnelInput, uno por resultado) agrega la tabla de entradas;
+    `capacity` = (LiningSection, pares LiningForce) agrega el diagrama de capacidad del revestimiento."""
+    _check_lang(lang)
+    results = list(results)
+    if not results:
+        raise ValueError("results is empty: nothing to report")
+    inputs = list(inputs) if inputs else []
+    if inputs and len(inputs) != len(results):
+        raise ValueError("inputs must have one entry per result")
+    methods = tuple({(r.info.method_id, r.info.source): MethodRef(r.info.method_id, r.info.verification.name,
+                                                                    r.info.source) for r in results}.values())
+    counts = Counter(w for r in results for w in set(r.warnings))
+    s4 = (Table(t("tn_cap_warnings", lang), (t("h_warning", lang), t("tn_h_cases", lang)),
+                tuple((w, str(n)) for w, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))),
+          ) if counts else (Paragraph(t("no_warnings", lang)),)
+    sections = (
+        Section("1", t("st_s1", lang), (Paragraph(t("tn_scope", lang)),)),
+        Section("2", t("st_s2", lang), (Table(
+            t("cap_methods", lang), (t("h_method", lang), t("h_verification", lang), t("h_source", lang)),
+            tuple((m.method_id, m.verification, m.source) for m in methods)),)),
+        Section("3", t("tn_s3", lang), _tunnel_blocks(results, inputs, lang, figures, capacity)),
+        Section("4", t("st_s4", lang), s4),
+        Section("5", t("st_s5", lang), (Paragraph(DISCLAIMER[lang]),)),
+    )
+    return Report(title, _subtitle(t("tn_title", lang), author, lang), lang, sections, methods, DISCLAIMER[lang],
+                  __version__, date or datetime.date.today().isoformat())
+
+
 _SLOPE_MODES = ("planar", "wedge", "flexural_toppling", "direct_toppling")
 
 

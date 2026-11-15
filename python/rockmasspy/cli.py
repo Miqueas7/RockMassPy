@@ -239,6 +239,69 @@ def _mathews(a) -> int:
     return 2 if ws or counts[2] or counts[3] else 0
 
 
+def _tunnel(a) -> int:
+    from . import report as rp
+    from .excavation import TunnelInput, analyze_tunnel
+    from .support_capacity import HOEK_SUPPORT_TABLE, SupportCapacity, load_support_capacity
+
+    ext = Path(a.report).suffix.lower() if a.report else ""
+    if a.report and ext not in (".docx", ".html"):
+        raise ValueError("report must end in .docx or .html")
+    inp = TunnelInput(radius_m=a.radius, p0_mpa=a.p0, nu=a.nu, criterion=a.criterion, e_mpa=a.e, c_mpa=a.c,
+                      phi_deg=a.phi, sigma_ci_mpa=a.sigci, gsi=a.gsi, mi=a.mi, d=a.d, psi_deg=a.psi,
+                      k_ratio=a.k_ratio, shape=a.shape)
+    diameter = a.diameter or 2 * a.radius
+    hoek = {i.name for i in HOEK_SUPPORT_TABLE}
+    supports = []
+    for spec in a.support or ():
+        name, sep, spacing = spec.rpartition(":")
+        if not sep or spec in hoek:
+            name, spacing = spec, ""
+        try:
+            sp = float(spacing) if spacing else None
+        except ValueError:
+            raise ValueError("--support spacing must be a number: NAME[:SPACING]") from None
+        if name not in hoek:
+            raise ValueError("unknown Hoek support item in --support; see HOEK_SUPPORT_TABLE")
+        supports.append(SupportCapacity(name, "hoek", hoek_item=name, spacing_m=sp, eps_sm=a.eps_sm))
+    if a.support_code:
+        if not a.capacity:
+            raise ValueError("--support-code needs --capacity")
+        table = load_support_capacity(a.capacity)
+        for code in a.support_code:
+            if code not in table:
+                raise ValueError("--support-code is not in the capacity sheet")
+            supports.append(table[code])
+    elif a.capacity:
+        raise ValueError("--capacity needs --support-code")
+    r = analyze_tunnel(inp, supports=supports, install_distance_m=a.install_distance, ldp=a.ldp,
+                       combination=a.combination)
+    # el diámetro de los ítems de Hoek va en la conversión a elemento; analyze_tunnel usa 2R, que es el de --diameter
+    # por omisión (shortcut: un --diameter distinto no cambia el análisis, solo el de la tabla de Hoek)
+    print(f"method: {r.method} [{r.info.verification.name}]")
+    print(f"rp: {r.rp_m:.2f} m")
+    print(f"strain: {r.strain_pct:.2f} %")
+    print(f"squeezing: {r.squeezing.squeezing_class}")
+    i = r.interaction
+    if i is not None:
+        print(f"FS {i.fs:.2f}" if i.fs is not None else "FS none")
+    for w in r.warnings:
+        print(f"warning: {w}")
+    for n in r.notes:
+        print(f"note: {n}")
+    if a.chart:
+        from .viz import plot_tunnel
+
+        print(f"chart: {plot_tunnel(r, a.chart, lang=a.lang)}")
+    if a.report:
+        rep = rp.build_tunnel_report([r], inputs=[inp], title=a.title or t("tn_title", a.lang), lang=a.lang,
+                                     author=a.author or "")
+        out = rp.write_docx(rep, a.report, author=a.author or "") if ext == ".docx" else rp.write_html(rep, a.report)
+        print(f"report: {out}")
+    print("the library recommends, the engineer decides")
+    return 2 if r.needs_attention else 0
+
+
 def _verify(a) -> int:
     import datetime
 
@@ -1038,6 +1101,36 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--lang", choices=("es", "en"), default="es")
     c.add_argument("--no-figures", action="store_true")
     c.set_defaults(fn=_mathews)
+
+    c = sub.add_parser("tunnel", help="circular tunnel: ground reaction curve, support and squeezing")
+    c.add_argument("--radius", type=float, required=True, metavar="M")
+    c.add_argument("--p0", type=float, required=True, metavar="MPA")
+    c.add_argument("--nu", type=float, required=True)
+    c.add_argument("--criterion", choices=("MC", "HB"), required=True)
+    c.add_argument("--c", type=float, metavar="MPA", help="cohesion (MC)")
+    c.add_argument("--phi", type=float, metavar="DEG", help="friction angle (MC)")
+    c.add_argument("--e", type=float, metavar="MPA", help="rock mass modulus (MC; HB with a = 0.5)")
+    c.add_argument("--sigci", type=float, metavar="MPA")
+    c.add_argument("--gsi", type=float)
+    c.add_argument("--mi", type=float)
+    c.add_argument("--d", type=float, default=0.0)
+    c.add_argument("--psi", type=float, default=0.0, metavar="DEG")
+    c.add_argument("--k-ratio", type=float, default=1.0)
+    c.add_argument("--shape", default="circular")
+    c.add_argument("--support", action="append", metavar="NAME[:SPACING]", help="Hoek table item, repeatable")
+    c.add_argument("--capacity", metavar="FILE", help="capacity sheet (.xlsx or .csv)")
+    c.add_argument("--support-code", action="append", metavar="CODE", help="row of --capacity, repeatable")
+    c.add_argument("--eps-sm", type=float, metavar="F", help="maximum average strain of the --support items")
+    c.add_argument("--install-distance", type=float, metavar="M")
+    c.add_argument("--diameter", type=float, metavar="M", help="diameter for Hoek items (default 2R)")
+    c.add_argument("--ldp", choices=("PANET1995", "UNLU_GERCEK2003", "CHERN1998", "VD2009"), default="VD2009")
+    c.add_argument("--combination", choices=("stiffness", "rocsupport3", "rocsupport"), default="stiffness")
+    c.add_argument("--chart", metavar="OUT.png")
+    c.add_argument("--report", metavar="OUT.docx|.html")
+    c.add_argument("--title")
+    c.add_argument("--author")
+    c.add_argument("--lang", choices=("es", "en"), default="es")
+    c.set_defaults(fn=_tunnel)
 
     c = sub.add_parser("mrmr", help="MRMR (Laubscher 1990) and caving diagram zone")
     c.add_argument("--irs", type=float, required=True, metavar="MPA")

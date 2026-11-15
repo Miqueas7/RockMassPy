@@ -297,3 +297,21 @@ def footer(fig, source: str, style: Style) -> None:
     """Fuente o edición abajo a la izquierda; todo gráfico la llama."""
     _mpl()
     fig.text(0.01, 0.01, source, ha="left", va="bottom", fontsize=style.font_size - 2)
+
+TEXTS.update({
+    "tn_title": {"es": "Convergencia-confinamiento del túnel", "en": "Tunnel convergence-confinement"},
+    "tn_u_axis": {"es": "Convergencia u (mm)", "en": "Convergence u (mm)"},
+    "tn_p_axis": {"es": "Presión p (MPa)", "en": "Pressure p (MPa)"},
+    "tn_grc": {"es": "GRC (curva del terreno)", "en": "GRC (ground reaction curve)"},
+    "tn_scc": {"es": "SCC (sostenimiento)", "en": "SCC (support)"},
+    "tn_cross": {"es": "cruce GRC-SCC", "en": "GRC-SCC intersection"},
+    "tn_install": {"es": "instalación", "en": "installation"},
+    "tn_ldp_title": {"es": "Perfil de deformación longitudinal", "en": "Longitudinal deformation profile"},
+    "tn_x_axis": {"es": "Distancia al frente x/R", "en": "Distance to the face x/R"},
+    "tn_ur_axis": {"es": "u / umax", "en": "u / umax"},
+    "tn_ldp_model": {"es": "LDP {m}", "en": "LDP {m}"},
+    "tn_cap_title": {"es": "Capacidad del revestimiento", "en": "Lining capacity"},
+    "tn_n_axis": {"es": "N (MN/m)", "en": "N (MN/m)"},
+    "tn_m_axis": {"es": "M (MN·m/m)", "en": "M (MN·m/m)"},
+    "tn_demand": {"es": "pares (N, M) de diseño", "en": "design (N, M) pairs"},
+})

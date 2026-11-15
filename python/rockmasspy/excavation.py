@@ -65,6 +65,9 @@ class TunnelResult:
     interaction: rm.Interaction | None
     warnings: tuple[str, ...]
     notes: tuple[str, ...]
+    radius_m: float | None = None  # para dibujar el LDP; los llena analyze_tunnel
+    nu: float | None = None
+    install_distance_m: float | None = None
 
     @property
     def needs_attention(self) -> bool:
@@ -146,7 +149,7 @@ def analyze_tunnel(inp: TunnelInput, *, supports: Sequence[SupportCapacity | rm.
     return TunnelResult(
         grc.info.method_id, grc.info, grc.p_crit_mpa, grc.rp_unsupported_m, grc.u_max_m, strain, sq,
         tuple((p.pi_mpa, p.u_m) for p in grc.curve), ldp, u_in, inter, tuple(dict.fromkeys(warns)),
-        tuple(dict.fromkeys(notes)))
+        tuple(dict.fromkeys(notes)), r, inp.nu, install_distance_m)
 
 
 def tunnel_uncertainty(inp: TunnelInput, variables: Mapping[str, Distribution], *,

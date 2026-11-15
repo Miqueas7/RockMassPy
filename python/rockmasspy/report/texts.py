@@ -1063,5 +1063,34 @@ TRIPOD_ITEMS: tuple[tuple[str, dict[str, tuple[str, str]]], ...] = (
 )
 
 
+REPORT_TEXTS.update({
+    # --- Excavaciones subterráneas: convergencia-confinamiento ---
+    "tn_title": {"es": "Excavaciones subterráneas: convergencia-confinamiento",
+                 "en": "Underground excavations: convergence-confinement"},
+    "tn_scope": {
+        "es": "Este documento analiza túneles circulares con la curva de reacción del terreno (GRC), el perfil de "
+              "deformación longitudinal (LDP) y la curva característica del sostenimiento (SCC). Supone campo "
+              "hidrostático (K = 1), pequeñas deformaciones y excavación a sección completa; el ingeniero decide.",
+        "en": "This document analyses circular tunnels with the ground reaction curve (GRC), the longitudinal "
+              "deformation profile (LDP) and the support characteristic curve (SCC). It assumes a hydrostatic field "
+              "(K = 1), small strains and full-face excavation; the engineer decides."},
+    "tn_s3": {"es": "Resultados", "en": "Results"},
+    "tn_cap_inputs": {"es": "Entradas del análisis", "en": "Analysis inputs"},
+    "tn_cap_results": {"es": "Resultados del análisis", "en": "Analysis results"},
+    "tn_cap_warnings": {"es": "Avisos del análisis", "en": "Analysis warnings"},
+    "tn_fig": {"es": "GRC, SCC y LDP", "en": "GRC, SCC and LDP"},
+    "tn_fig_cap": {"es": "Capacidad del revestimiento", "en": "Lining capacity"},
+    "h_rp": {"es": "rp (m)", "en": "rp (m)"},
+    "h_pcrit": {"es": "p crítica (MPa)", "en": "critical p (MPa)"},
+    "h_umax": {"es": "u máx (mm)", "en": "max u (mm)"},
+    "h_strain": {"es": "ε (%)", "en": "ε (%)"},
+    "h_squeezing": {"es": "Squeezing", "en": "Squeezing"},
+    "h_fs": {"es": "FS", "en": "FS"},
+    "h_uin": {"es": "u instalación (mm)", "en": "u at installation (mm)"},
+    "tn_h_cases": {"es": "Casos", "en": "Cases"},
+    "h_no_cross": {"es": "sin cruce", "en": "no intersection"},
+})
+
+
 def t(key: str, lang: str) -> str:
     return REPORT_TEXTS[key][lang]
