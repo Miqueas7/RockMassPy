@@ -31,6 +31,7 @@
 #include "rockmasspy/yield_coefficient.hpp"
 #include "rockmasspy/sarma.hpp"
 #include "rockmasspy/toppling.hpp"
+#include "rockmasspy/bem2d.hpp"
 #include "rockmasspy/bench.hpp"
 #include "rockmasspy/newmark.hpp"
 #include "rockmasspy/excavation.hpp"
@@ -990,4 +991,49 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("make_slices", &make_slices, nb::arg("section"), nb::arg("surface"), nb::arg("n_slices"));
     m.def("le_factor_of_safety", &le_factor_of_safety, nb::arg("section"), nb::arg("surface"), nb::arg("method"),
           nb::arg("options") = LeOptions());
+
+    // Elementos de contorno 2D (DDM de elemento constante)
+    nb::class_<BemContour>(m, "BemContour", "Closed excavation polygon in any direction; the closing point may repeat.")
+        .def("__init__", [](BemContour* self, std::vector<std::pair<double, double>> vertices,
+                            int elements_per_side_hint) { new (self) BemContour{std::move(vertices), elements_per_side_hint}; },
+             nb::arg("vertices"), nb::arg("elements_per_side_hint") = 0)
+        .def_rw("vertices", &BemContour::vertices).def_rw("elements_per_side_hint", &BemContour::elements_per_side_hint);
+    nb::class_<BemElement>(m, "BemElement", "Constant element from node 1 to node 2 (counterclockwise), midpoint and tangent.")
+        .def_ro("x1", &BemElement::x1).def_ro("y1", &BemElement::y1).def_ro("x2", &BemElement::x2)
+        .def_ro("y2", &BemElement::y2).def_ro("xm", &BemElement::xm).def_ro("ym", &BemElement::ym)
+        .def_ro("length", &BemElement::length).def_ro("cos_b", &BemElement::cos_b).def_ro("sin_b", &BemElement::sin_b)
+        .def_ro("contour", &BemElement::contour);
+    nb::class_<BemInput>(m, "BemInput",
+                         "Excavations, in situ field (sigma1, sigma3, alpha of sigma1 from x, compression positive), "
+                         "rock E and nu, and maximum element length; sigma_z defaults to plane strain.")
+        .def("__init__", [](BemInput* self, std::vector<BemContour> contours, double sigma1_mpa, double sigma3_mpa,
+                            double alpha_deg, double sigma_z_mpa, double e_mpa, double nu, double max_element_m) {
+                 new (self) BemInput{std::move(contours), sigma1_mpa, sigma3_mpa, alpha_deg, sigma_z_mpa, e_mpa, nu,
+                                     max_element_m};
+             }, nb::arg("contours") = std::vector<BemContour>{}, nb::arg("sigma1_mpa") = nan, nb::arg("sigma3_mpa") = nan,
+             nb::arg("alpha_deg") = nan, nb::arg("sigma_z_mpa") = nan, nb::arg("e_mpa") = nan, nb::arg("nu") = nan,
+             nb::arg("max_element_m") = nan)
+        .def_rw("contours", &BemInput::contours).def_rw("sigma1_mpa", &BemInput::sigma1_mpa)
+        .def_rw("sigma3_mpa", &BemInput::sigma3_mpa).def_rw("alpha_deg", &BemInput::alpha_deg)
+        .def_rw("sigma_z_mpa", &BemInput::sigma_z_mpa).def_rw("e_mpa", &BemInput::e_mpa).def_rw("nu", &BemInput::nu)
+        .def_rw("max_element_m", &BemInput::max_element_m);
+    nb::class_<BemSolution>(m, "BemSolution", "Elements, local displacement discontinuities (dx shear, dy normal) and field.")
+        .def_ro("elements", &BemSolution::elements).def_ro("dx", &BemSolution::dx).def_ro("dy", &BemSolution::dy)
+        .def_ro("sxx0_mpa", &BemSolution::sxx0_mpa).def_ro("syy0_mpa", &BemSolution::syy0_mpa)
+        .def_ro("sxy0_mpa", &BemSolution::sxy0_mpa).def_ro("szz0_mpa", &BemSolution::szz0_mpa)
+        .def_ro("e_mpa", &BemSolution::e_mpa).def_ro("nu", &BemSolution::nu).def_ro("info", &BemSolution::info);
+    nb::class_<BemBoundary>(m, "BemBoundary", "Per element midpoint: tangential stress (compression positive) and induced displacement.")
+        .def_ro("x", &BemBoundary::x).def_ro("y", &BemBoundary::y).def_ro("sigma_tt_mpa", &BemBoundary::sigma_tt_mpa)
+        .def_ro("ux_m", &BemBoundary::ux_m).def_ro("uy_m", &BemBoundary::uy_m);
+    nb::class_<BemPointStress>(m, "BemPointStress",
+                               "Stress at a point (compression positive); NaN when inside an excavation.")
+        .def_ro("sxx", &BemPointStress::sxx).def_ro("syy", &BemPointStress::syy).def_ro("sxy", &BemPointStress::sxy)
+        .def_ro("szz", &BemPointStress::szz).def_ro("sigma1", &BemPointStress::sigma1)
+        .def_ro("sigma3", &BemPointStress::sigma3).def_ro("angle1_deg", &BemPointStress::angle1_deg)
+        .def_ro("inside", &BemPointStress::inside).def_ro("corrected", &BemPointStress::corrected);
+    m.def("bem_info", &bem_info);
+    m.def("bem_discretize", &bem_discretize, nb::arg("contours"), nb::arg("max_element_m"));
+    m.def("bem_solve", &bem_solve, nb::arg("input"));
+    m.def("bem_boundary", &bem_boundary, nb::arg("solution"));
+    m.def("bem_field", &bem_field, nb::arg("solution"), nb::arg("points"));
 }

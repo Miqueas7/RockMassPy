@@ -110,6 +110,7 @@ if(ROCKMASSPY_BUILD_TESTS)
         tests/cpp/test_slip_search.cpp
         tests/cpp/test_yield_coefficient.cpp
         tests/cpp/test_sarma.cpp
+        tests/cpp/test_bem2d.cpp
     )
     target_link_libraries(rockmasspy_tests PRIVATE
         rockmasspy_core
