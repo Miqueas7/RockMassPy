@@ -138,3 +138,16 @@ def test_long_format_with_quantity_columns_notes_them(tmp_path):
     assert [(r.quantity, r.value) for r in s.records] == [("fs", 1.3)]
     assert "quantity columns ignored in long format" in s.notes
     assert not any("FS" in n or "ZZSENT" in n for n in s.notes)
+
+
+@pytest.mark.parametrize("program", ["PLAXIS 2D", "PLAXIS 3D", "FLAC/Slope", "FLAC 3D", "RS2 11", "phase2"])
+def test_fe_program_prefix_without_method_is_ssr_with_note(tmp_path, program):
+    """Re-revisión: el programa se reconoce por prefijo; la nota sale una vez aunque haya varias filas."""
+    s = load_external(_w(tmp_path, f"programa,id,magnitud,valor\n{program},ZZSENT-a,fs,1.5\n{program},ZZSENT-b,fs,1.4\n"))
+    assert [r.method for r in s.records] == ["ssr", "ssr"] and s.notes.count(FE_NOTE) == 1
+
+
+@pytest.mark.parametrize("program", ["Slide2", "Slope/W", "SLIDE3", "Phase"])
+def test_le_program_without_method_is_not_ssr(tmp_path, program):
+    s = load_external(_w(tmp_path, f"programa,id,magnitud,valor\n{program},a,fs,1.5\n"))
+    assert s.records[0].method is None and FE_NOTE not in s.notes

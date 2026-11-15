@@ -223,3 +223,23 @@ def test_ext_file_id_keeps_model_and_scenario(tmp_path):
     assert {c.object_id for c in cs} == {A, B}  # la API sigue con el id del objeto
     ids = [r["id_objeto"] for r in _csv_rows(save_criteria_results(cs, tmp_path / "c.csv"))]
     assert set(ids) == {f"M1/estatico/{A}", f"M1/sismico/{A}", B}
+
+
+@pytest.mark.parametrize("kw", [dict(program="PLAXIS 2D"), dict(program="PLAXIS 3D"), dict(program="FLAC/Slope"),
+                                dict(method="SSR-FEM"), dict(method="FEM SSR"), dict(method="phi-c reduction"),
+                                dict(method="Phi C Reduction"), dict(method="c-phi reduction")])
+def test_ssr_variants_judged_as_srf(kw):
+    """Re-revisión del antiobjetivo: prefijos de programa y variantes del método de reducción."""
+    r = ExternalRecord(A, "fs", 1.5, scale="global", consequence="alta", **kw)
+    assert r.method == "ssr"
+    c = get(run([r], ssr_policy="not_verifiable"), A, "slope_fs_static")
+    assert (c.status, c.reason) == ("not_verifiable", SSR_REJECTED)
+
+
+@pytest.mark.parametrize("method", ["bishop", "Spencer", "GLE", "janbu", "sarma", "Morgenstern-Price", "M-P"])
+def test_le_method_with_fe_program_is_kept(method):
+    r = ExternalRecord(A, "fs", FS_REQ + 0.2, program="RS2", method=method, scale="global", consequence="alta")
+    assert r.method == method.lower()
+    c = get(run([r], ssr_policy="not_verifiable"), A, "slope_fs_static")
+    assert c.status == "meets" and c.reason == ""
+    assert ExternalRecord(A, "fs", 1.5, program="Slide2").method is None

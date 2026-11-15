@@ -108,14 +108,21 @@ def _number(v, sheet, n, col, dec):
         raise ValueError(f"{_where(sheet, n, col)}: expected a number") from None
 
 
-FE_PROGRAMS = ("rs2", "rs3", "phase2", "flac", "flac2d", "flac3d", "plaxis")
+FE_PROGRAMS = ("rs2", "rs3", "phase2", "flac", "plaxis")  # prefijos: «PLAXIS 2D», «FLAC/Slope», «RS2 11»
 FE_NOTE = "FS from a finite-element/difference program treated as SRF"
+_SSR_WORDS = ("strength reduction", "phi c reduction", "c phi reduction")
 
 
 def _fe_fs(r, method) -> bool:
-    """¿FS sin método de un programa de FEM/FDM? El programa se compara sin mayúsculas, espacios ni guiones."""
+    """¿FS sin método de un programa de FEM/FDM? Prefijo del programa sin mayúsculas, espacios, guiones ni barras."""
     return (r.quantity == "fs" and method is None
-            and re.sub(r"[\s_-]", "", (r.program or "").lower()) in FE_PROGRAMS)
+            and re.sub(r"[\s_/-]", "", (r.program or "").lower()).startswith(FE_PROGRAMS))
+
+
+def _ssr_method(m) -> bool:
+    """¿El método (ya en minúsculas) es reducción de resistencia? «SSR-FEM», «FEM SSR», «phi-c reduction»..."""
+    w = re.sub(r"[\s_-]+", " ", m)
+    return w in ("ssr", "srf") or re.search(r"\bssr\b", w) is not None or any(k in w for k in _SSR_WORDS)
 
 
 @dataclass(frozen=True)
@@ -143,9 +150,10 @@ class ExternalRecord:
 
     def __post_init__(self):
         m = (self.method or "").strip().lower() or None
-        # E1: un SRF siempre es «ssr»; también un método escrito «SSR» o «shear strength reduction» y, por la
-        # revisión final, un FS sin método de un programa de elementos o diferencias finitas (es lo que calculan)
-        if self.quantity == "srf" or m == "srf" or (m and "strength reduction" in m) or _fe_fs(self, m):
+        # E1: un SRF siempre es «ssr»; también un método de reducción de resistencia («SSR-FEM», «phi-c reduction»)
+        # y, por la revisión final, un FS sin método de un programa de elementos o diferencias finitas (es lo que
+        # calculan). Un método de equilibrio límite explícito se respeta aunque el programa sea de FEM.
+        if self.quantity == "srf" or (m and _ssr_method(m)) or _fe_fs(self, m):
             m = "ssr"
         object.__setattr__(self, "method", m)
 
