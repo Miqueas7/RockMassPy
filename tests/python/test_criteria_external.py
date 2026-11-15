@@ -74,6 +74,18 @@ def test_ext_mixed_methods_policy():
     assert a.status == "fails" and a.reason == "lowest of 2 methods: ssr"
 
 
+def test_srf_without_method_is_ssr():
+    """E1: un srf armado a mano, sin método (o con otro), se trata igual como «ssr»."""
+    raw = ExternalRecord(A, "srf", FS_REQ, scale="global", consequence="alta")
+    assert raw.method == "ssr" and ExternalRecord(A, "srf", 1.0, method="bishop").method == "ssr"
+    c = get(run([raw]), A, "slope_fs_static")
+    assert c.status == "meets" and c.reason == SRF_NOTE and c.attention_note and c.needs_attention
+    c = get(run([raw], ssr_policy="not_verifiable"), A, "slope_fs_static")
+    assert (c.status, c.reason) == ("not_verifiable", "SRF not accepted by the policy")
+    (m,) = compare_methods([raw, ExternalRecord(A, "fs", 1.3, method="bishop")])
+    assert set(m.values) == {"ssr", "bishop"}
+
+
 def test_ext_lowest_names_le_method():
     a = get(run([rec(A, "fs", FS_REQ + 0.1, "bishop"), rec(A, "fs", FS_REQ + 0.05, "spencer"),
                  rec(A, "srf", FS_REQ + 0.3)]), A, "slope_fs_static")

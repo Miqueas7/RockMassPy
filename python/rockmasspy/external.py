@@ -130,6 +130,10 @@ class ExternalRecord:
     source_file: str | None = None
     row: int | None = None
 
+    def __post_init__(self):
+        if self.quantity == "srf":  # E1: un SRF siempre es método «ssr», venga de donde venga el registro
+            object.__setattr__(self, "method", "ssr")
+
 
 @dataclass(frozen=True)
 class ExternalSet:
@@ -224,7 +228,7 @@ def load_external(path, *, sheet: str = "Resultados_externos", column_map: dict 
                 raise ValueError(f"{_where(sheet, n, vcol)}: yielded must be 0 or 1")
             r = replace(ExternalRecord(common["object_id"], q, x, QUANTITIES[q]), **{
                 k: w for k, w in common.items() if k != "object_id"})
-            out.append(replace(r, method="ssr") if q == "srf" else r)
+            out.append(r)  # un srf ya sale con método «ssr» (__post_init__)
     notes = ("unrecognized columns ignored",) if ignored else ()
     return ExternalSet(tuple(out), (), notes)
 
