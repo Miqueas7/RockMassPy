@@ -185,6 +185,7 @@ decides. Full documentation: <https://miqueas.dev/rockmasspy>.
   optional extras `io`, `viz`, `report` and `ml`; type stubs (`py.typed`).
 - Thirteen worked examples in `examples/` with synthetic data only.
 
+[0.4.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Miqueas7/RockMassPy/releases/tag/v0.1.1

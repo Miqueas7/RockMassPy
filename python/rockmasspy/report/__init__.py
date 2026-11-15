@@ -974,9 +974,12 @@ def _crit_required(c, lang) -> str:
 
 def _crit_rows(checks, lang) -> tuple:
     """Una fila por chequeo: objeto, id, criterio, regla, estado, requerido, obtenido, rango, razón y su respaldo."""
-    return tuple((t(f"kind_{c.object_kind}", lang), c.object_id or "-", c.item_id or "-", t(f"rule_{c.rule}", lang),
+    from ..criteria import file_id, full_reason
+
+    return tuple((t(f"kind_{c.object_kind}", lang), file_id(c) or "-", c.item_id or "-", t(f"rule_{c.rule}", lang),
                   t(f"cr_{c.status}", lang), _crit_required(c, lang),
-                  _num(c.obtained, ".1f" if c.rule in _PCT_RULES else ".3f"), c.range_used or "-", c.reason or "-",
+                  _num(c.obtained, ".1f" if c.rule in _PCT_RULES else ".3f"), c.range_used or "-",
+                  full_reason(c) or "-",
                   c.source or "-", t(f"force_{c.force}", lang), c.verification) for c in checks)
 
 

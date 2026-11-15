@@ -69,3 +69,11 @@ def test_axial_without_moment_and_missing_shear_note():
                         _f("L", "2", "axial_force_mn", 1.0), _f("L", "2", "moment_mnm", 0.1)))
     notes = []
     assert len(lining_forces(recs, notes=notes)) == 2 and notes == ["shear force absent; assumed 0"]
+
+
+def test_tunnel_result_only_convergence_pct():
+    """Revisión final: un TunnelResult solo modela la convergencia en %, no se mezcla con metros."""
+    inp = TunnelInput(radius_m=6, p0_mpa=1.62, nu=0.3, criterion="HB", sigma_ci_mpa=7, gsi=15, mi=10, d=0.0)
+    meas = ExternalSet((ExternalRecord("T1", "convergence_m", 0.12, "m"),))
+    with pytest.raises(ValueError, match="a TunnelResult models only convergence_pct"):
+        compare_monitoring(meas, {"T1": analyze_tunnel(inp)}, quantity="convergence_m")

@@ -15,7 +15,7 @@ import datetime
 import math
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -64,6 +64,8 @@ class CriterionCheck:
     verification: str
     range_used: str | None
     attention_note: str | None = None  # solo en `ext`: cumple, pero cerca del umbral (banda del SRF)
+    model: str = field(default="", repr=False)  # solo en `ext`: el id del objeto sigue siendo object_id
+    scenario: str = field(default="", repr=False)
 
     @property
     def needs_attention(self) -> bool:
@@ -192,7 +194,8 @@ def _ext_value(rule, rows, ssr_policy):
     if not fs:
         return None, f"no {'pseudo-static' if pseudo else 'static'} FS", "", False
     low = min(fs, key=lambda r: (r.value, r.method == "ssr"))  # en un empate manda el de equilibrio límite
-    notes = [f"lowest of {len(fs)} methods" + (f": {low.method}" if low.method else "")] if len(fs) > 1 else []
+    n = len({r.method for r in fs})  # dos filas Bishop son un método
+    notes = [f"lowest of {n} methods" + (f": {low.method}" if low.method else "")] if n > 1 else []
     warn = low.method == "ssr" and ssr_policy == "warn"
     if warn:
         notes.append(SSR_NOTE)
@@ -327,6 +330,7 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
     objects += [("le", r.id_analisis, r.order, r) for r in le]
     objects += [("ext", k, n, rows) for n, (k, rows) in enumerate(_ext_rows(external), start=1)]
     for kind, key, order, r in objects:
+        start = len(out)
         scale, cons = assign((kind, key))
         oid = key[2] if kind == "ext" else key
         unknown = _unknown(scale, cons)
@@ -361,6 +365,8 @@ def assess_criteria(profile: NormativeProfile, *, blocks: Iterable[BlockResult] 
             for item in hits:
                 out.append(_check(kind, oid, order, item, policy, obtained, reason, note,
                                   newmark=kind == "le" and r.newmark is not None, band=band))
+        if kind == "ext":
+            out[start:] = [replace(c, model=key[0], scenario=key[1]) for c in out[start:]]
     for item in by_rule.get("pseudostatic_analysis_present", ()):
         status, reason = _pseudostatic_present(item, le, assign, return_periods or {})
         out.append(CriterionCheck("le_set", "", 0, item.item_id, item.check, item.value, item.comparison, None,
@@ -390,11 +396,22 @@ _STATUS_WORD = {"meets": "cumple", "fails": "no_cumple", "not_verifiable": "no_v
 _FORCE_WORD = {"law": "ley", "guide": "guia"}
 
 
+def file_id(c: CriterionCheck) -> str:
+    """El id que va a los archivos: en `ext`, «modelo/escenario/id» sin las partes vacías (el mismo id en dos
+    escenarios no se confunde)."""
+    return "/".join(x for x in (c.model, c.scenario, c.object_id) if x) if c.object_kind == "ext" else c.object_id
+
+
+def full_reason(c: CriterionCheck) -> str:
+    """La razón con la nota de atención de la banda del SRF, para los archivos y el informe."""
+    return "; ".join(x for x in (c.reason, c.attention_note) if x)
+
+
 def save_criteria_results(checks: Iterable[CriterionCheck], path) -> Path:
     """Escribe .xlsx (hoja `Criterios_resultados`) o .csv. Lleva el id del objeto; un FS infinito va como «inf»."""
-    rows = [[_KIND_WORD[c.object_kind], c.object_id, c.order, c.item_id, c.rule, c.required, c.comparison,
+    rows = [[_KIND_WORD[c.object_kind], file_id(c), c.order, c.item_id, c.rule, c.required, c.comparison,
              ("inf" if c.obtained > 0 else "-inf") if c.obtained is not None and math.isinf(c.obtained)
-             else c.obtained, _STATUS_WORD[c.status], c.reason, c.source, _FORCE_WORD.get(c.force, c.force),
+             else c.obtained, _STATUS_WORD[c.status], full_reason(c), c.source, _FORCE_WORD.get(c.force, c.force),
              c.verification, c.range_used] for c in checks]
     return write_table(path, CRITERIA_RESULT_COLUMNS, rows, sheet="Criterios_resultados")
 

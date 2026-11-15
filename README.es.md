@@ -801,7 +801,9 @@ for c in compare_methods(ext):          # Bishop, Spencer y SRF de la misma secc
     print(c.spread, c.warning)
 ```
 
-Un SRF (reducción de la resistencia al corte) siempre se guarda con método `ssr`. `ssr_policy` dice qué hacen los
+Un SRF (reducción de la resistencia al corte) siempre se guarda con método `ssr`. Un FS de RS2, RS3, Phase2,
+FLAC/FLAC3D o PLAXIS sin método también se trata como SRF (es lo que calculan esos programas), con una nota.
+`ssr_policy` dice qué hacen los
 criterios con él: `"warn"` (por omisión) lo evalúa con la nota «SRF, no FS de equilibrio límite» y pide atención si
 queda a menos del 5 % del umbral; `"accept"` lo evalúa sin nota; `"not_verifiable"` no lo evalúa. Un objeto con FS de
 equilibrio límite y SRF se juzga con el más bajo. La banda del 5 % y el aviso del 10 % entre métodos son provisionales.

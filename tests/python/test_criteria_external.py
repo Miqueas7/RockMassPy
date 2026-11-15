@@ -161,3 +161,65 @@ def test_compare_methods():
     assert b.values == {"bishop": 1.30, "spencer": 1.25, "rockmasspy:bishop": 1.27} and b.warning is None
     assert compare_methods(rows, threshold=0.15)[0].warning == "methods differ by more than 15 %"
     assert compare_methods(rows, threshold=0.20)[0].warning is None
+
+
+SSR_REJECTED = "SRF not accepted by the policy"
+
+
+@pytest.mark.parametrize("kw", [dict(method="SSR"), dict(method=" ssr "), dict(method="shear strength reduction"),
+                                dict(method="Strength Reduction"), dict(program="RS2"), dict(program="FLAC3D")],
+                         ids=["upper", "spaces", "words", "words-upper", "rs2", "flac3d"])
+def test_fs_written_as_ssr_is_judged_as_srf(kw):
+    """Revisión final (antiobjetivo): un FS que en realidad es SRF no se juzga en silencio como FS de LE."""
+    r = ExternalRecord(A, "fs", 1.5, scale="global", consequence="alta", **kw)
+    assert r.method == "ssr"
+    c = get(run([r], ssr_policy="not_verifiable"), A, "slope_fs_static")
+    assert (c.status, c.reason, c.obtained) == ("not_verifiable", SSR_REJECTED, None)
+    assert SRF_NOTE in get(run([r]), A, "slope_fs_static").reason
+
+
+def test_explicit_le_method_and_le_program_are_kept():
+    assert ExternalRecord(A, "fs", 1.5, program="RS2", method=" Bishop ").method == "bishop"
+    assert ExternalRecord(A, "fs", 1.5, program="Slide2").method is None
+    assert ExternalRecord(A, "u_total_m", 0.1, program="RS2").method is None  # solo el FS se vuelve SRF
+
+
+def test_lowest_counts_distinct_methods():
+    """Dos filas Bishop son un solo método: no hay «lowest of n methods»."""
+    c = get(run([rec(A, "fs", FS_REQ + 0.2, "bishop"), rec(A, "fs", FS_REQ + 0.1, "bishop")]), A, "slope_fs_static")
+    assert c.reason == "" and c.obtained == FS_REQ + 0.1
+    c = get(run([rec(A, "fs", FS_REQ + 0.2, "bishop"), rec(A, "fs", FS_REQ + 0.1, "bishop"),
+                 rec(A, "fs", FS_REQ + 0.3, "spencer")]), A, "slope_fs_static")
+    assert c.reason == "lowest of 2 methods: bishop"
+
+
+def _csv_rows(path):
+    import csv
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        text = f.read()
+    return list(csv.DictReader(text.splitlines(), delimiter=";" if text.count(";") > text.count(",") else ","))
+
+
+def test_band_note_written_to_criteria_file(tmp_path):
+    from rockmasspy.criteria import SSR_ATTENTION, save_criteria_results
+
+    cs = run([rec(A, "srf", FS_REQ)])
+    (row,) = [r for r in _csv_rows(save_criteria_results(cs, tmp_path / "c.csv")) if r["regla"] == "slope_fs_static"]
+    assert SRF_NOTE in row["razon"] and SSR_ATTENTION in row["razon"]
+    far = run([rec(A, "srf", FS_REQ + 0.5)])
+    (row,) = [r for r in _csv_rows(save_criteria_results(far, tmp_path / "f.csv")) if r["regla"] == "slope_fs_static"]
+    assert row["razon"] == SRF_NOTE
+
+
+def test_ext_file_id_keeps_model_and_scenario(tmp_path):
+    from rockmasspy.criteria import save_criteria_results
+
+    rows = [ExternalRecord(A, "fs", FS_REQ + 0.2, method="bishop", model="M1", scenario="estatico", scale="global",
+                           consequence="alta"),
+            ExternalRecord(A, "fs", FS_REQ - 0.1, method="bishop", model="M1", scenario="sismico", kh=0.1,
+                           scale="global", consequence="alta"),
+            ExternalRecord(B, "fs", FS_REQ + 0.2, method="bishop", scale="global", consequence="alta")]
+    cs = run(rows)
+    assert {c.object_id for c in cs} == {A, B}  # la API sigue con el id del objeto
+    ids = [r["id_objeto"] for r in _csv_rows(save_criteria_results(cs, tmp_path / "c.csv"))]
+    assert set(ids) == {f"M1/estatico/{A}", f"M1/sismico/{A}", B}

@@ -76,3 +76,17 @@ def test_writes_html_and_docx(parts, tmp_path):
                                        lang=lang)
         assert rp.write_html(rep, tmp_path / f"{lang}.html").exists()
         assert rp.write_docx(rep, tmp_path / f"{lang}.docx").exists()
+
+
+def test_check_table_has_band_note_and_full_id():
+    """Revisión final: la nota de la banda del SRF y modelo/escenario del objeto van en la tabla de chequeos."""
+    from rockmasspy.criteria import SSR_ATTENTION, _threshold
+
+    prof = get_profile("READ-STACEY-2009")
+    req = _threshold(prof.version("RS-FS-global-alta", "2026-11-14"), prof.range_policy)[0]
+    ext = ExternalSet((ExternalRecord(A, "srf", req, model="M1", scenario="est", scale="global", consequence="alta"),))
+    checks = assess_criteria(prof, external=ext, assignments=criteria_assignments(external=ext), as_of="2026-11-14")
+    rep = rp.build_external_report(ext, checks=checks, title="T", lang="en")
+    rows = [r for s in rep.sections for b in s.blocks if isinstance(b, rp.Table) for r in b.rows]
+    (row,) = [r for r in rows if any(SSR_ATTENTION in c for c in r)]
+    assert f"M1/est/{A}" in row

@@ -104,3 +104,37 @@ def test_rocdata_table_consistent_and_gamma_note(tmp_path):
 def test_rocdata_gamma_kn(tmp_path):
     t = ROC.replace("(MN/m3)", "(kN/m3)").format(g="27")
     assert not any(c.notes for c in check_rocdata(load_rocdata_table(_w(tmp_path, t))))
+
+
+FE_NOTE = "FS from a finite-element/difference program treated as SRF"
+
+
+def test_fs_from_fe_program_without_method_is_ssr_with_note(tmp_path):
+    """Revisión final: un FS de RS2/FLAC3D sin método es un SRF; la nota va agrupada y sin ids."""
+    s = load_external(_w(tmp_path, "programa,id,magnitud,metodo,valor\nRS2,ZZSENT-a,fs,,1.5\n"
+                                   "FLAC3D,ZZSENT-b,fs,,1.4\nSlide2,ZZSENT-c,fs,,1.3\nRS2,ZZSENT-d,fs,Bishop,1.2\n"))
+    assert [r.method for r in s.records] == ["ssr", "ssr", None, "bishop"]
+    assert s.notes.count(FE_NOTE) == 1 and not any("ZZSENT" in n or "1.5" in n for n in s.notes)
+    assert FE_NOTE not in load_external(_w(tmp_path, "programa,id,magnitud,valor\nSlide2,a,fs,1.3\n", "s.csv")).notes
+
+
+def test_column_map_targets_accept_aliases(tmp_path):
+    p = _w(tmp_path, "Section ID,FoS,Probability of Failure (%)\nZZSENT-1,1.3,2.5\n")
+    s = load_external(p, column_map={"Section ID": "id", "FoS": "Factor of Safety"})
+    assert {(r.object_id, r.quantity, r.value) for r in s.records} == {("ZZSENT-1", "fs", 1.3),
+                                                                      ("ZZSENT-1", "pof_pct", 2.5)}
+    s = load_external(_w(tmp_path, "Node,Total Displacement (mm)\nZZSENT-N1,35\n", "n.csv"),
+                      column_map={"Node": "Object ID"})
+    assert s.records[0].object_id == "ZZSENT-N1"
+
+
+def test_probability_of_failure_alias(tmp_path):
+    (r,) = load_external(_w(tmp_path, "id,Probability of Failure (%)\na,2.5\n")).records
+    assert (r.quantity, r.value, r.unit) == ("pof_pct", 2.5, "%")
+
+
+def test_long_format_with_quantity_columns_notes_them(tmp_path):
+    s = load_external(_w(tmp_path, "id,magnitud,valor,FS\nZZSENT-a,fs,1.3,1.4\n"))
+    assert [(r.quantity, r.value) for r in s.records] == [("fs", 1.3)]
+    assert "quantity columns ignored in long format" in s.notes
+    assert not any("FS" in n or "ZZSENT" in n for n in s.notes)

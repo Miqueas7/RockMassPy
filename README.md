@@ -774,7 +774,9 @@ for c in compare_methods(ext):          # Bishop vs Spencer vs SRF of the same s
     print(c.spread, c.warning)
 ```
 
-An SRF (shear strength reduction) is always recorded with method `ssr`. `ssr_policy` says what the criteria do with it:
+An SRF (shear strength reduction) is always recorded with method `ssr`. An FS from RS2, RS3, Phase2, FLAC/FLAC3D or
+PLAXIS without a method is treated as an SRF too (that is what those programs compute), with a note.
+`ssr_policy` says what the criteria do with it:
 `"warn"` (default) evaluates it with the note "SRF, not a limit-equilibrium FS" and asks for attention when it falls
 within 5 % of the threshold; `"accept"` evaluates it without a note; `"not_verifiable"` does not evaluate it. An object
 with both a limit-equilibrium FS and an SRF is judged by the lowest. The 5 % band and the 10 % method-spread warning

@@ -60,7 +60,7 @@ _QTY = {_norm(q): q for q in QUANTITIES}
 _QTY.update({
     "factor of safety": "fs", "safety factor": "fs", "critical srf": "srf", "total displacement": "u_total_m",
     "sigma 1": "sigma1_mpa", "sigma 3": "sigma3_mpa", "axial force": "axial_force_mn", "moment": "moment_mnm",
-    "shear force": "shear_mn",
+    "shear force": "shear_mn", "probability of failure": "pof_pct",
 })
 
 
@@ -108,6 +108,16 @@ def _number(v, sheet, n, col, dec):
         raise ValueError(f"{_where(sheet, n, col)}: expected a number") from None
 
 
+FE_PROGRAMS = ("rs2", "rs3", "phase2", "flac", "flac2d", "flac3d", "plaxis")
+FE_NOTE = "FS from a finite-element/difference program treated as SRF"
+
+
+def _fe_fs(r, method) -> bool:
+    """¿FS sin método de un programa de FEM/FDM? El programa se compara sin mayúsculas, espacios ni guiones."""
+    return (r.quantity == "fs" and method is None
+            and re.sub(r"[\s_-]", "", (r.program or "").lower()) in FE_PROGRAMS)
+
+
 @dataclass(frozen=True)
 class ExternalRecord:
     object_id: str
@@ -132,8 +142,12 @@ class ExternalRecord:
     row: int | None = None
 
     def __post_init__(self):
-        if self.quantity == "srf":  # E1: un SRF siempre es método «ssr», venga de donde venga el registro
-            object.__setattr__(self, "method", "ssr")
+        m = (self.method or "").strip().lower() or None
+        # E1: un SRF siempre es «ssr»; también un método escrito «SSR» o «shear strength reduction» y, por la
+        # revisión final, un FS sin método de un programa de elementos o diferencias finitas (es lo que calculan)
+        if self.quantity == "srf" or m == "srf" or (m and "strength reduction" in m) or _fe_fs(self, m):
+            m = "ssr"
+        object.__setattr__(self, "method", m)
 
 
 @dataclass(frozen=True)
@@ -154,14 +168,17 @@ def load_external(path, *, sheet: str = "Resultados_externos", column_map: dict 
                   defaults: dict | None = None) -> ExternalSet:
     """Lee un Excel (hoja `sheet`) o un CSV en formato largo o ancho.
 
-    column_map {encabezado: campo o magnitud} gana sobre los alias; defaults llena campos ausentes o vacíos.
+    column_map {encabezado: campo o magnitud} gana sobre los alias, y el destino también acepta alias («Section ID»:
+    «id»); defaults llena campos ausentes o vacíos. En formato largo, las columnas con nombre de magnitud no se leen
+    y quedan en una nota.
     """
     sheet, header, rows, dec = _rows(path, sheet)
     cmap = {_norm(k): v for k, v in (column_map or {}).items()}
     fields, wide, ignored = {}, {}, False  # campo -> índice; (índice -> magnitud); ¿columnas sin reconocer?
     for i, h in enumerate(header):
         k = _norm(h)
-        t = cmap.get(k) or _FIELDS.get(k) or _QTY.get(k)
+        v = cmap.get(k)  # el destino del column_map pasa por los mismos alias que los encabezados
+        t = (_FIELDS.get(_norm(v)) or _QTY.get(_norm(v)) or v) if v is not None else (_FIELDS.get(k) or _QTY.get(k))
         if t in QUANTITIES:
             wide[i] = t
         elif t in _FIELDS.values():
@@ -183,7 +200,7 @@ def load_external(path, *, sheet: str = "Resultados_externos", column_map: dict 
             _factor(_header_unit(header[i]), q, _where(sheet, 1, _text(header[i])))
 
     src = Path(path).name
-    out = []
+    out, fe = [], False
     for n, raw in enumerate(rows, start=2):
         if all(_blank(v) for v in raw):
             continue
@@ -230,8 +247,10 @@ def load_external(path, *, sheet: str = "Resultados_externos", column_map: dict 
             r = replace(ExternalRecord(common["object_id"], q, x, QUANTITIES[q]), **{
                 k: w for k, w in common.items() if k != "object_id"})
             out.append(r)  # un srf ya sale con método «ssr» (__post_init__)
-    notes = ("unrecognized columns ignored",) if ignored else ()
-    return ExternalSet(tuple(out), (), notes)
+            fe = fe or ("method" not in common and r.method == "ssr" and q == "fs")
+    notes = [n for n, on in (("unrecognized columns ignored", ignored),
+                             ("quantity columns ignored in long format", long and wide), (FE_NOTE, fe)) if on]
+    return ExternalSet(tuple(out), (), tuple(notes))
 
 
 # --- comparación de métodos (investigación §11.2 regla 5) ---
@@ -364,6 +383,9 @@ def compare_monitoring(measured, modeled, *, quantity: str = "convergence_pct") 
         table = {(r.object_id, r.stage): r.value for r in modeled.records if r.quantity == quantity}
         get = lambda oid, st: table.get((oid, st), table.get((oid, None)))  # noqa: E731
     else:
+        if quantity != "convergence_pct":  # no mezclar metros medidos con el % del modelo
+            raise ValueError("a TunnelResult models only convergence_pct")
+
         def get(oid, st):
             t = modeled.get(oid)
             if t is None:

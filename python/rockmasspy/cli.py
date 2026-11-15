@@ -680,14 +680,14 @@ def _ext(a) -> int:
     print(f"objects: {len(es.objects())}")
     attn = 0
     if checks is not None:
-        from .criteria import criteria_counts
+        from .criteria import criteria_counts, file_id
 
         c = criteria_counts(checks)
         print(f"criteria: {prof.profile_id}")
         print(f"meets: {c['meets']}, fails: {c['fails']}, not verifiable: {c['not_verifiable']}")
         _grouped("attention", (x.attention_note for x in checks if x.attention_note))
         _grouped("fails by rule", (x.rule for x in checks if x.status == "fails"))
-        attn = len({(x.object_kind, x.object_id) for x in checks if x.needs_attention})
+        attn = len({(x.object_kind, file_id(x)) for x in checks if x.needs_attention})
         print(f"objects needing attention: {attn}")
     print(f"method comparisons: {len(cmps)}")
     print(f"monitoring comparisons: {len(mons)}")

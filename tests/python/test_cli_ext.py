@@ -141,3 +141,12 @@ def test_ext_bad_report_extension(tmp_path, capsys):
     p = _csv(tmp_path, [_srf(1.8)])
     assert main(["ext", "--results", p, "--report", str(tmp_path / "x.pdf")]) == 1
     assert capsys.readouterr().out == ""
+
+
+def test_ext_map_target_alias(tmp_path, capsys):
+    """Revisión final: --map acepta alias como destino («Node=id»)."""
+    p = tmp_path / "n.csv"
+    p.write_text(f"Node,Total Displacement (mm)\n{A},35\n", encoding="utf-8")
+    out = tmp_path / "o.csv"
+    assert main(["ext", "--results", str(p), "--map", "Node=id", "--output", str(out)]) == 0
+    assert "records: 1" in capsys.readouterr().out and A in out.read_text(encoding="utf-8")
