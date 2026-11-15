@@ -36,18 +36,25 @@ def _run(tmp_path, **ajustes):
     return load_external(out)
 
 
+T = np.array([[-3.0, 0.7, -0.4], [0.7, -2.0, 0.9], [-0.4, 0.9, -1.0]])  # tracción positiva, con cortantes
+
+
 def test_flac3d_script_roundtrip(tmp_path, monkeypatch):
-    _fake(monkeypatch, np.array([[-3.0, -2.0, -1.0, 0, 0, 0]]))  # tracción positiva: 3, 2, 1 MPa de compresión
+    _fake(monkeypatch, T[None])
     ext = _run(tmp_path)
     q = {(r.object_id, r.quantity): r.value for r in ext.records}
+    e = np.linalg.eigvalsh(-T)  # compresión positiva
     assert {r.quantity for r in ext.records} <= set(QUANTITIES) and all(r.program == "FLAC3D" for r in ext.records)
     assert q[("N1", "u_total_m")] == pytest.approx(0.005) and q[("N1", "uz_m")] == pytest.approx(0.004)
-    assert q[("Z1", "sigma1_mpa")] == pytest.approx(3.0) and q[("Z1", "sigma3_mpa")] == pytest.approx(1.0)
+    assert q[("Z1", "sigma1_mpa")] == pytest.approx(e[2]) and q[("Z1", "sigma3_mpa")] == pytest.approx(e[0])
     assert not any(r.quantity == "yielded" for r in ext.records)
 
 
-def test_flac3d_script_tensor_and_yielded(tmp_path, monkeypatch):
-    _fake(monkeypatch, -np.diag([4.0, 2.0, 1.0])[None], state=np.array([2]))
+def test_flac3d_script_units_yielded_and_flat_rejected(tmp_path, monkeypatch):
+    _fake(monkeypatch, (T * 1000)[None], state=np.array([2]))
     ext = _run(tmp_path, FUNCION_FLUENCIA="state", UNIDAD_ESFUERZO="kPa")
     q = {(r.object_id, r.quantity): r.value for r in ext.records}
-    assert q[("Z1", "sigma1_mpa")] == pytest.approx(0.004) and q[("Z1", "yielded")] == 1.0
+    assert q[("Z1", "sigma1_mpa")] == pytest.approx(np.linalg.eigvalsh(-T)[2]) and q[("Z1", "yielded")] == 1.0
+    _fake(monkeypatch, np.zeros((1, 6)))
+    with pytest.raises(ValueError, match="3, 3"):
+        _run(tmp_path)

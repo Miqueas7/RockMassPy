@@ -26,14 +26,9 @@ COLUMNAS = ["programa", "version", "modelo", "etapa", "tipo_objeto", "id", "x", 
 
 def _tensores(s):
     s = np.asarray(s, dtype=float)
-    if s.ndim == 3:  # (n, 3, 3)
-        return s
-    t = np.empty((len(s), 3, 3))  # (n, 6): xx, yy, zz, xy, xz, yz
-    t[:, 0, 0], t[:, 1, 1], t[:, 2, 2] = s[:, 0], s[:, 1], s[:, 2]
-    t[:, 0, 1] = t[:, 1, 0] = s[:, 3]
-    t[:, 0, 2] = t[:, 2, 0] = s[:, 4]
-    t[:, 1, 2] = t[:, 2, 1] = s[:, 5]
-    return t
+    if s.ndim != 3 or s.shape[1:] != (3, 3):  # solo zonearray.stress() (n, 3, 3); stress_flat() usa otro orden
+        raise ValueError("zonearray.stress() must return an (n, 3, 3) array")
+    return s
 
 
 def exportar():
@@ -48,6 +43,7 @@ def exportar():
             filas.append(base + ["node", oid, *p, q, "", float(v), UNIDAD_LONGITUD])
 
     zpos = np.asarray(itasca.zonearray.pos(), float)
+    # tracción positiva es la convención general de FLAC para stress() (supuesto: confírmalo en tu versión)
     eig = np.linalg.eigvalsh(-_tensores(itasca.zonearray.stress()))  # compresión positiva; orden ascendente
     fluencia = None
     if FUNCION_FLUENCIA and hasattr(itasca.zonearray, FUNCION_FLUENCIA):
