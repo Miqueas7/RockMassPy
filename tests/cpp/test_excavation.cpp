@@ -250,6 +250,7 @@ TEST(Hb1982, RS2Problema3) {
     EXPECT_NEAR(s.sigma_r, 25.8, 0.1);
     EXPECT_NEAR(s.sigma_theta, 34.2, 0.1);
     EXPECT_NEAR(hb1982_stress(in, 1).sigma_r, 0, 1e-9);
+    EXPECT_EQ(s.info.method_id, "HB-1982-brittle");
     in.m = -1;
     EXPECT_NE(error_of([&] { hb1982_plastic_radius(in); }).find("'m'"), std::string::npos);
 }
@@ -260,6 +261,7 @@ TEST(Reed, RS2Problema30) {  // ro = 4 y q = 100: la Tabla 30.1 del manual trae 
     EXPECT_NEAR(reed_plastic_radius(in), 7.77, 0.01);
     EXPECT_NEAR(reed_stress(in, 4).sigma_theta, 17.3, 0.1);
     EXPECT_NEAR(reed_stress(in, 4).sigma_r, 0, 1e-9);
+    EXPECT_EQ(reed_stress(in, 4).info.method_id, "Reed-1986");
     EXPECT_NEAR(reed_stress(in, 14).sigma_r, 76.6, 0.1);
     EXPECT_NEAR(reed_stress(in, 14).sigma_theta, 123.4, 0.1);
     in.q_mpa = 30; in.radius_m = 2;  // con los datos erróneos no plastifica
@@ -267,4 +269,14 @@ TEST(Reed, RS2Problema30) {  // ro = 4 y q = 100: la Tabla 30.1 del manual trae 
     EXPECT_NEAR(reed_stress(in, 2).sigma_theta, 60, 1e-9);
     in.phi_deg = 0;
     EXPECT_NE(error_of([&] { reed_plastic_radius(in); }).find("'phi_deg'"), std::string::npos);
+}
+
+TEST(Reed, SinCohesionResidualNiPresion) {
+    ReedInput in;
+    in.q_mpa = 100; in.radius_m = 4; in.c_peak_mpa = 30; in.c_res_mpa = 0; in.phi_deg = 30; in.pi_mpa = 0;
+    const auto e = error_of([&] { reed_plastic_radius(in); });
+    EXPECT_NE(e.find("'c_res_mpa'"), std::string::npos);
+    EXPECT_EQ(e.find("30"), std::string::npos);
+    in.pi_mpa = 1;  // con presión interna sí se resuelve
+    EXPECT_TRUE(std::isfinite(reed_plastic_radius(in)));
 }

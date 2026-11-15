@@ -766,7 +766,8 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("grc_mc_from_hb", &grc_mc_from_hb, nb::arg("sigma_ci_mpa"), nb::arg("gsi"), nb::arg("mi"), nb::arg("d"),
           nb::arg("p0_mpa"), nb::arg("radius_m"), nb::arg("nu"), nb::arg("edition"));
     nb::class_<RadialStress>(m, "RadialStress", "Radial and hoop stress (MPa) at a radius.")
-        .def_ro("sigma_r", &RadialStress::sigma_r).def_ro("sigma_theta", &RadialStress::sigma_theta);
+        .def_ro("sigma_r", &RadialStress::sigma_r).def_ro("sigma_theta", &RadialStress::sigma_theta)
+        .def_ro("info", &RadialStress::info);
     nb::class_<Hb1982Input>(m, "Hb1982Input", "Hoek-Brown 1982 peak (m, s) and residual (mr, sr) input.")
         .def("__init__", [](Hb1982Input* self, double p0_mpa, double radius_m, double sigma_c_mpa, double m_, double s,
                             double mr, double sr, double pi_mpa) {

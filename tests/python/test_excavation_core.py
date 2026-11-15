@@ -115,3 +115,12 @@ def test_hb1982_and_reed_stresses():
     rd = rm.ReedInput(q_mpa=100, radius_m=4, c_peak_mpa=30, c_res_mpa=5, phi_deg=30)
     assert rm.reed_plastic_radius(rd) == pytest.approx(7.77, abs=0.01)
     assert rm.reed_stress(rd, 4).sigma_theta == pytest.approx(17.3, abs=0.1)
+    assert rm.reed_stress(rd, 4).info.method_id == "Reed-1986"
+    assert rm.hb1982_stress(hb, 5).info.method_id == "HB-1982-brittle"
+
+
+def test_reed_no_residual_cohesion_no_pressure():
+    rd = rm.ReedInput(q_mpa=100, radius_m=4, c_peak_mpa=30, c_res_mpa=0, phi_deg=30)
+    with pytest.raises(ValueError, match="c_res_mpa") as e:
+        rm.reed_plastic_radius(rd)
+    assert "100" not in str(e.value)

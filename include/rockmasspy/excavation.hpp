@@ -388,6 +388,7 @@ inline GrcResult grc_hb(const GrcHbInput& in, int n_points = 50) {
 
 struct RadialStress {
     double sigma_r, sigma_theta;
+    MethodInfo info;
 };
 
 struct Hb1982Input {
@@ -421,6 +422,11 @@ inline double hb1982_plastic_radius(const Hb1982Input& in) {
     return std::max(re, in.radius_m);
 }
 
+inline MethodInfo hb1982_info() {
+    return {"HB-1982-brittle", Verification::PrimaryLaterAuthors,
+            "Hoek and Brown (1982) with residual strength as reproduced in RS2-S p. 22 (problem 3); original not read"};
+}
+
 inline RadialStress hb1982_stress(const Hb1982Input& in, double r_m) {
     const double re = hb1982_plastic_radius(in);
     validation::require_finite(r_m, "r_m");
@@ -429,12 +435,12 @@ inline RadialStress hb1982_stress(const Hb1982Input& in, double r_m) {
     if (r_m < re) {
         const double l = std::log(r_m / in.radius_m), b = std::sqrt(in.mr * sc * in.pi_mpa + in.sr * sc * sc);
         const double sr_ = in.mr * sc / 4 * l * l + l * b + in.pi_mpa;
-        return {sr_, sr_ + std::sqrt(in.mr * sc * sr_ + in.sr * sc * sc)};
+        return {sr_, sr_ + std::sqrt(in.mr * sc * sr_ + in.sr * sc * sc), hb1982_info()};
     }
     // sin zona plástica el contorno elástico pasa por la presión interna
     const double sre = re > in.radius_m ? in.p0_mpa - excavation_detail::hb1982_m_factor(in) * sc : in.pi_mpa;
     const double d = (in.p0_mpa - sre) * (re / r_m) * (re / r_m);
-    return {in.p0_mpa - d, in.p0_mpa + d};
+    return {in.p0_mpa - d, in.p0_mpa + d, hb1982_info()};
 }
 
 struct ReedInput {
@@ -454,6 +460,8 @@ inline ReedState reed_state(const ReedInput& in) {
     non_negative(in.pi_mpa, "pi_mpa");
     validation::require_finite(in.phi_deg, "phi_deg");
     if (in.phi_deg < 1.0 || in.phi_deg >= 90.0) fail("phi_deg", "must be within [1, 90) degrees");
+    // sin cohesión residual ni presión interna, p' = 0 y r̄ se divide por cero
+    if (in.c_res_mpa == 0.0 && in.pi_mpa == 0.0) fail("c_res_mpa", "must be positive when pi_mpa is 0");
     const double sp = std::sin(rad(in.phi_deg)), cp = std::cos(rad(in.phi_deg));
     ReedState s{};
     s.k = (1 + sp) / (1 - sp);
@@ -468,20 +476,25 @@ inline ReedState reed_state(const ReedInput& in) {
 /// Radio r̄ del contorno elastoplástico de Reed; ro si no hay zona plástica.
 inline double reed_plastic_radius(const ReedInput& in) { return excavation_detail::reed_state(in).rbar; }
 
+inline MethodInfo reed_info() {
+    return {"Reed-1986", Verification::PrimaryLaterAuthors,
+            "Reed (1986) brittle-plastic stresses as reproduced in RS2-S p. 176 (problem 30); original not read"};
+}
+
 inline RadialStress reed_stress(const ReedInput& in, double r_m) {
     const auto s = excavation_detail::reed_state(in);
     validation::require_finite(r_m, "r_m");
     if (r_m < in.radius_m) excavation_detail::fail("r_m", "must be at least 'radius_m'");
     if (r_m < s.rbar) {
         const double t = (in.pi_mpa + s.pp) * std::pow(r_m / in.radius_m, s.k - 1);
-        return {t - s.pp, s.k * t - s.pp};
+        return {t - s.pp, s.k * t - s.pp, reed_info()};
     }
     if (s.rbar > in.radius_m) {
         const double a = std::pow(s.rbar / r_m, 2) * ((s.k - 1) * in.q_mpa + s.sc) / (s.k + 1);
-        return {in.q_mpa - a, in.q_mpa + a};
+        return {in.q_mpa - a, in.q_mpa + a, reed_info()};
     }
     const double a = std::pow(in.radius_m / r_m, 2) * (in.q_mpa - in.pi_mpa);  // todo elástico: σr(ro) = pi
-    return {in.q_mpa - a, in.q_mpa + a};
+    return {in.q_mpa - a, in.q_mpa + a, reed_info()};
 }
 
 }  // namespace rockmasspy
