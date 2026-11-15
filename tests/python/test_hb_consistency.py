@@ -38,3 +38,15 @@ def test_simplified_erm_when_no_ei():
 def test_k_ratio():
     assert check_k_ratio(1.0, 0.3) == ("model K differs from the study K",)
     assert check_k_ratio(0.48, 0.48) == ()
+
+
+@pytest.mark.parametrize("gsi,mi,mb,s,a,emr", [
+    (53, 21.22, 3.961, 0.0054, 0.505, 11920),   # SPP
+    (56, 22.01, 4.573, 0.0075, 0.504, 15093),   # SPB
+    (50, 26.17, 4.388, 0.0039, 0.506, 9340),    # volcánico
+    (53, 28.98, 5.409, 0.0054, 0.505, 11920),   # dique
+])
+def test_garcia_aquino_table32(gsi, mi, mb, s, a, emr):
+    # García Aquino (2024), tabla 32, p. 69: D = 0 y Emr de Hoek-Diederichs simplificado
+    r = check_hoek_brown(gsi=gsi, mi=mi, d=0, mb=mb, s=s, a=a, erm_mpa=emr)
+    assert r.mismatches == ()
