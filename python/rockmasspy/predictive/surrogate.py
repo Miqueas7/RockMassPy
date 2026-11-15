@@ -190,3 +190,73 @@ def fit_surrogate(data: SurrogateData, *, kind: str = "poly2", smoothing: float 
     return Surrogate(data.names, kind, _INFO[kind], mean, std, lo - DOMAIN_BOX_MARGIN * (hi - lo),
                      hi + DOMAIN_BOX_MARGIN * (hi - lo), np.linalg.pinv(cov),
                      float(chi2.ppf(DOMAIN_CHI2_LEVEL, p)), model)
+
+
+# ---------- validación agrupada (Fase 8D, tarea 2) ----------
+
+# decisión de diseño (por confirmar, S4): el sustituto es útil si su RMSE fuera de pliegue es menor que esta fracción
+# del RMSE del modelo «media»
+USEFUL_RMSE_RATIO = 0.5
+OOD_WARN_FRACTION = 0.05
+
+
+@dataclass(frozen=True)
+class SurrogateValidation:
+    """Métricas fuera de pliegue con las predicciones fuera del dominio EXCLUIDAS (se cuentan en `ood_fraction`)."""
+
+    kind: str
+    folds_kind: str
+    n_folds: int
+    rmse: float
+    mae: float
+    max_abs_error: float
+    r2: float
+    ood_fraction: float
+    rmse_mean_model: float
+    useful: bool
+    warnings: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+def validate_surrogate(data: SurrogateData, *, kind: str = "poly2", k: int = 5, seed: int = 0,
+                       smoothing: float = 0.0) -> SurrogateValidation:
+    from .validation import group_kfold, leave_one_group_out, random_kfold
+
+    n = len(data.y)
+    notes: list[str] = []
+    n_groups = len(set(data.groups)) if data.groups is not None else 0
+    if n_groups < 2:
+        folds, folds_kind = random_kfold(n, k=k, seed=seed), "random_kfold"
+        notes.append("no groups given: random folds overestimate accuracy")
+    elif n_groups >= k:
+        folds, folds_kind = group_kfold(data.groups, k=k, seed=seed), "group_kfold"
+    else:
+        folds, folds_kind = leave_one_group_out(data.groups), "leave_one_group_out"
+    err, base_err, y_all, n_ood = [], [], [], 0
+    for f in folds:
+        try:  # el error de un pliegue nombra `runs`, nunca el pliegue ni sus filas
+            s = fit_surrogate(SurrogateData(data.X[f.train], data.y[f.train], data.names), kind=kind,
+                              smoothing=smoothing)
+        except ValueError as e:
+            if not str(e).startswith("runs:"):
+                raise
+            raise ValueError("runs: a training fold has too few or degenerate runs for this surrogate; "
+                             "use fewer folds or more runs") from None
+        pred = s.predict(data.X[f.test])
+        ok = pred.in_domain
+        n_ood += int((~ok).sum())
+        yt = data.y[f.test][ok]
+        err.append(pred.y[ok] - yt)
+        base_err.append(data.y[f.train].mean() - yt)
+        y_all.append(yt)
+    e, b, yt = np.concatenate(err), np.concatenate(base_err), np.concatenate(y_all)
+    if e.size == 0:
+        raise ValueError("runs: no fold prediction fell inside the surrogate domain")
+    rmse, rmse0 = float(np.sqrt(np.mean(e ** 2))), float(np.sqrt(np.mean(b ** 2)))
+    sst = float(np.sum((yt - yt.mean()) ** 2))
+    ood = n_ood / n
+    warns = ("many fold predictions outside the surrogate domain; the metrics cover only the in-domain part",) \
+        if ood > OOD_WARN_FRACTION else ()
+    return SurrogateValidation(kind, folds_kind, len(folds), rmse, float(np.mean(np.abs(e))),
+                               float(np.max(np.abs(e))), 1 - float(np.sum(e ** 2)) / sst if sst > 0 else math.nan,
+                               ood, rmse0, bool(rmse < USEFUL_RMSE_RATIO * rmse0), warns, tuple(notes))

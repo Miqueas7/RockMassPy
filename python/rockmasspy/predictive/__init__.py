@@ -56,3 +56,5 @@ from .surrogate import (DOMAIN_BOX_MARGIN, DOMAIN_CHI2_LEVEL, Surrogate, Surroga
                         SurrogatePrediction, fit_surrogate, load_runs)
 __all__ += ["DOMAIN_BOX_MARGIN", "DOMAIN_CHI2_LEVEL", "Surrogate", "SurrogateData", "SurrogatePrediction",
             "fit_surrogate", "load_runs"]
+from .surrogate import USEFUL_RMSE_RATIO, SurrogateValidation, validate_surrogate  # noqa: E402
+__all__ += ["USEFUL_RMSE_RATIO", "SurrogateValidation", "validate_surrogate"]

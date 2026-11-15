@@ -98,3 +98,46 @@ def test_rbf_duplicate_rows(data):
     with pytest.raises(ValueError, match="runs.*smoothing"):
         fit_surrogate(d, kind="rbf")
     assert fit_surrogate(d, kind="rbf", smoothing=1e-3).kind == "rbf"
+
+
+# ---------- tarea 2: validación agrupada y banco ----------
+
+from rockmasspy.predictive.surrogate import USEFUL_RMSE_RATIO, validate_surrogate  # noqa: E402
+from rockmasspy.predictive.surrogate_bench import grc_runs, planar_runs  # noqa: E402
+
+
+def test_planar_bench_grouped_validation():
+    d = planar_runs(300, seed=1)
+    assert d.groups is not None and len(set(d.groups)) == 6
+    v2, vr = validate_surrogate(d, kind="poly2"), validate_surrogate(d, kind="rbf")
+    assert v2.folds_kind == vr.folds_kind == "group_kfold" and v2.n_folds == 5
+    assert v2.useful and vr.useful and vr.rmse <= v2.rmse
+    assert vr.rmse < 0.2 * vr.rmse_mean_model and USEFUL_RMSE_RATIO == 0.5
+
+
+def test_no_groups_note_and_leave_one_group_out():
+    d = planar_runs(120, seed=3)
+    assert validate_surrogate(SurrogateData(d.X, d.y, d.names)).notes == \
+        ("no groups given: random folds overestimate accuracy",)
+    g3 = SurrogateData(d.X, d.y, d.names, tuple("ABC"[i % 3] for i in range(len(d.y))))
+    v = validate_surrogate(g3, k=5)
+    assert v.folds_kind == "leave_one_group_out" and v.n_folds == 3
+
+
+def test_unbalanced_groups():
+    d = planar_runs(150, seed=4)
+    g = tuple("big" if i < 0.8 * len(d.y) else f"s{i % 4}" for i in range(len(d.y)))
+    v = validate_surrogate(SurrogateData(d.X, d.y, d.names, g), kind="rbf")
+    assert all(np.isfinite(x) for x in (v.rmse, v.mae, v.max_abs_error, v.r2, v.rmse_mean_model))
+
+
+def test_grc_bench_rbf_useful():
+    v = validate_surrogate(grc_runs(200, seed=2), kind="rbf")
+    assert v.useful and 0 <= v.ood_fraction < 0.05
+
+
+def test_validation_deterministic_and_small_fold_error():
+    d = planar_runs(100, seed=5)
+    assert validate_surrogate(d, seed=7) == validate_surrogate(d, seed=7)
+    with pytest.raises(ValueError, match="runs"):
+        validate_surrogate(SurrogateData(d.X[:14], d.y[:14], d.names), kind="poly2")
