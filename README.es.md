@@ -782,6 +782,45 @@ mb, s, a y Erm declarados son los de GSI, mi y D?), la capacidad M-N de shotcret
 `rm.check_capacity`), los esfuerzos del revestimiento de Einstein y Schwartz, `plot_tunnel`, un informe de túnel y el
 comando `rockmass tunnel`. Ver `examples/15-tuneles-convergencia-confinamiento/`.
 
+## Resultados de Slide2, RS2 y FLAC3D
+
+`load_external` lee lo que un programa exportó (CSV o Excel, tabla larga o ancha) como un registro por valor:
+programa, modelo, escenario, etapa, objeto, magnitud, método, valor y unidad. Los encabezados se reconocen por alias,
+sin distinguir mayúsculas, tildes ni la unidad entre paréntesis (`Factor of Safety (-)`, `Total Displacement (mm)`);
+las unidades se convierten a MPa, m, MN y %. Para otros encabezados usa `column_map`, y `defaults` para columnas fijas.
+
+```python
+from rockmasspy.criteria import assess_criteria, criteria_assignments
+from rockmasspy.external import load_external, compare_methods
+from rockmasspy.normative import get_profile
+
+ext = load_external("resultados.csv", defaults={"program": "Slide2"})
+checks = assess_criteria(get_profile("READ-STACEY-2009"), assignments=criteria_assignments(external=ext),
+                         external=ext, ssr_policy="warn")
+for c in compare_methods(ext):          # Bishop, Spencer y SRF de la misma sección
+    print(c.spread, c.warning)
+```
+
+Un SRF (reducción de la resistencia al corte) siempre se guarda con método `ssr`. `ssr_policy` dice qué hacen los
+criterios con él: `"warn"` (por omisión) lo evalúa con la nota «SRF, no FS de equilibrio límite» y pide atención si
+queda a menos del 5 % del umbral; `"accept"` lo evalúa sin nota; `"not_verifiable"` no lo evalúa. Un objeto con FS de
+equilibrio límite y SRF se juzga con el más bajo. La banda del 5 % y el aviso del 10 % entre métodos son provisionales.
+También hay `compare_monitoring` (convergencia medida frente a modelada, sin veredicto), `lining_forces` (N, M, Q para
+`rm.check_capacity`) y `load_rocdata_table` / `check_rocdata` (¿los parámetros Hoek-Brown de una tabla de RocData
+son los de GSI, mi y D?, ¿el peso unitario está en el rango usual?). El comando es `rockmass ext`.
+
+Qué exportar de cada programa (solo exportaciones de texto documentadas; nunca se leen los binarios de resultados):
+
+- **Slide2:** *Export Raw Data* (un texto por método, con el FS de cada superficie) o la tabla copiada a Excel;
+  agrega las columnas de método, id de sección, escala y consecuencia.
+- **RS2:** el SRF crítico, y *Export Value at All Nodes* o *Plot in Excel* para strength factor, desplazamientos,
+  sigma 1 y sigma 3 por etapa; fuerzas de pernos y revestimiento para `lining_forces`.
+- **FLAC3D:** `examples/16-resultados-externos/flac3d_exportar.py`, un guion que corre dentro de FLAC3D y escribe
+  desplazamientos por nodo y sigma1/sigma3 por zona en formato largo. RockMassPy nunca importa `itasca`.
+
+No se incluyen guiones de Rocscience: sus paquetes de scripting necesitan una instalación con licencia y no se pueden
+probar en este repositorio; el ejemplo solo indica qué columnas exportar. Mira `examples/16-resultados-externos/`.
+
 ## Métodos
 
 Cada resultado lleva `info.method_id` y una marca de verificación: **Primary** (verificada en la fuente original, o en

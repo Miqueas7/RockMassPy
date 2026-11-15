@@ -755,6 +755,46 @@ mb, s, a and Erm those of GSI, mi and D?), the shotcrete and steel M-N capacity 
 `rm.check_capacity`), the Einstein-Schwartz lining forces, `plot_tunnel`, a tunnel report and the `rockmass tunnel`
 command. See `examples/15-tuneles-convergencia-confinamiento/`.
 
+## Results from Slide2, RS2 and FLAC3D
+
+`load_external` reads the numbers a program exported (CSV or Excel, long or wide table) into one record per value:
+program, model, scenario, stage, object, quantity, method, value and unit. Headers are matched by alias, ignoring case,
+accents and the unit in parentheses (`Factor of Safety (-)`, `Total Displacement (mm)`); units are converted to MPa, m,
+MN and %. Use `column_map` for any other header and `defaults` for fixed columns.
+
+```python
+from rockmasspy.criteria import assess_criteria, criteria_assignments
+from rockmasspy.external import load_external, compare_methods
+from rockmasspy.normative import get_profile
+
+ext = load_external("resultados.csv", defaults={"program": "Slide2"})
+checks = assess_criteria(get_profile("READ-STACEY-2009"), assignments=criteria_assignments(external=ext),
+                         external=ext, ssr_policy="warn")
+for c in compare_methods(ext):          # Bishop vs Spencer vs SRF of the same section
+    print(c.spread, c.warning)
+```
+
+An SRF (shear strength reduction) is always recorded with method `ssr`. `ssr_policy` says what the criteria do with it:
+`"warn"` (default) evaluates it with the note "SRF, not a limit-equilibrium FS" and asks for attention when it falls
+within 5 % of the threshold; `"accept"` evaluates it without a note; `"not_verifiable"` does not evaluate it. An object
+with both a limit-equilibrium FS and an SRF is judged by the lowest. The 5 % band and the 10 % method-spread warning
+are provisional. Also available: `compare_monitoring` (measured against modeled convergence, no verdict),
+`lining_forces` (N, M, Q for `rm.check_capacity`) and `load_rocdata_table` / `check_rocdata` (are the Hoek-Brown
+parameters of a RocData table those of GSI, mi and D? is the unit weight in the usual range?). The command is
+`rockmass ext`.
+
+What to export from each program (only documented text exports; binary result files are never read):
+
+- **Slide2:** *Export Raw Data* (one text file per method, with the FS of every surface) or the table copied to Excel;
+  add the method, section id, scale and consequence columns.
+- **RS2:** the critical SRF, and *Export Value at All Nodes* or *Plot in Excel* for strength factor, displacements,
+  sigma 1 and sigma 3 by stage; bolt and liner forces for `lining_forces`.
+- **FLAC3D:** `examples/16-resultados-externos/flac3d_exportar.py`, a script that runs inside FLAC3D and writes node
+  displacements and zone sigma1/sigma3 in the long format. RockMassPy never imports `itasca`.
+
+The Rocscience scripting packages are not used here: they need a licensed install and cannot be tested in this
+repository, so the example only says which columns to export. See `examples/16-resultados-externos/`.
+
 ## Methods
 
 Every result carries `info.method_id` and a verification mark: **Primary** (verified in the original source, or a
