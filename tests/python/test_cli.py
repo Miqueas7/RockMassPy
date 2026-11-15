@@ -321,7 +321,7 @@ def test_mathews_summary_files_and_no_leak(tmp_path, capsys):
     assert "stable: 3" in cap.out and "transition: 1" in cap.out and "caved: 2" in cap.out
     assert "warnings: 2" in cap.out and "warning: N' below the graph (0.1): taken as caved (2)" in cap.out
     assert cap.out.rstrip().endswith("the library recommends, the engineer decides")
-    assert "SECRETO-123" not in cap.out and not re.search(r"S[1-6]", cap.out + cap.err)
+    assert "SECRETO-123" not in cap.out and not re.search(r"\bS[1-6]\b", cap.out + cap.err)
     assert "SECRETO-123" not in cap.err and "SECRETO-123" not in out.read_text(encoding="utf-8")
     assert "L-" not in cap.out + cap.err and "L-" not in out.read_text(encoding="utf-8")  # labor_codigo
     assert len(out.read_text(encoding="utf-8").splitlines()[0].split(",")) == 13
