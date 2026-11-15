@@ -371,6 +371,17 @@ TEST(Interaccion, InstaladoDemasiadoTarde) {  // test_interaction_installed_too_
         EXPECT_TRUE(r.fs_by_element.empty());
         EXPECT_TRUE(has(r.warnings, kD6));
     }
+    // casi al final: sí hay cruce, con presión ínfima, y el FS es positivo y finito (antes salía negativo)
+    for (double f : {1e-12, 1e-14}) {
+        const auto r = interaction_mc(in, {support_from_eps("B34", 0.354, 0.002)}, umax * (1 - f),
+                                      Combination::ROCSUPPORT3);
+        ASSERT_TRUE(r.found);
+        ASSERT_TRUE(r.fs.has_value());
+        EXPECT_TRUE(std::isfinite(*r.fs));
+        EXPECT_GT(*r.fs, 0.0);
+        EXPECT_GT(r.fs_by_element[0], 0.0);
+        EXPECT_TRUE(r.elastic);
+    }
 }
 
 TEST(Interaccion, AvisoLdpD4) {  // Panet con rp/R = 3

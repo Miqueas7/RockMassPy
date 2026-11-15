@@ -651,13 +651,14 @@ inline Interaction interaction(double radius, double p0, Disp disp, Rad rp_fn, c
     // Bisección en pi, equivalente a hacerla en u sin invertir la GRC: g(pi) = pi − p_SCC(u(pi)) crece con pi.
     auto cross = [&](bool capped) {
         double lo = 0.0, hi = p0;
-        for (int i = 0; i < 200 && hi - lo > 1e-13 * p0; ++i) {
+        // tope relativo a la raíz: con instalación muy tardía la presión del cruce puede ser ínfima
+        for (int i = 0; i < 400 && hi - lo > 1e-13 * hi; ++i) {
             const double mid = 0.5 * (lo + hi), du = std::max(disp(mid) - u_install_m, 0.0) / radius;
             double s = 0.0;
             for (const auto& e : els) s += capped ? std::min(e.stiffness_mpa * du, e.psm_mpa) : e.stiffness_mpa * du;
             (mid > s ? hi : lo) = mid;
         }
-        return 0.5 * (lo + hi);
+        return lo;  // g(lo) <= 0 garantiza u(lo) > u_in: Δu y el FS quedan positivos
     };
     const double p_lin = cross(false), du_lin = (disp(p_lin) - u_install_m) / radius;
     for (const auto& e : els) r.fs_by_element.push_back(e.psm_mpa / (e.stiffness_mpa * du_lin));

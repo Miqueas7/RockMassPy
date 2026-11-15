@@ -180,6 +180,10 @@ def test_interaction_installed_too_late():
     umax = rm.grc_mc_displacement(inp, 0)
     r = rm.interaction_mc(inp, [rm.support_from_eps("B34", 0.354, 0.002)], umax, rm.Combination.ROCSUPPORT3)
     assert not r.found and r.fs is None and list(r.fs_by_element) == [] and D6 in r.warnings
+    for f in (1e-12, 1e-14):  # casi al final: cruce con presión ínfima y FS positivo y finito
+        r = rm.interaction_mc(inp, [rm.support_from_eps("B34", 0.354, 0.002)], umax * (1 - f),
+                              rm.Combination.ROCSUPPORT3)
+        assert r.found and math.isfinite(r.fs) and r.fs > 0 and r.fs_by_element[0] > 0
 
 
 def test_interaction_ldp_warning_panet():

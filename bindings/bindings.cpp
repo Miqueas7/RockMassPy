@@ -794,10 +794,13 @@ NB_MODULE(_rockmasspy_core, m) {
     m.def("thick_ring_stiffness", &thick_ring_stiffness, nb::arg("e_mpa"), nb::arg("nu"), nb::arg("radius_m"),
           nb::arg("thickness_m"));
     m.def("combine_supports", &combine_supports, nb::arg("elements"), nb::arg("combination"));
+    const char* interaction_doc =
+        "GRC-SCC crossing. If a support yields (elastic=False), fs and fs_by_element use the displacement of the "
+        "extended elastic line (D6), not the real u_eq.";
     m.def("interaction_mc", &interaction_mc, nb::arg("input"), nb::arg("elements"), nb::arg("u_install_m"),
-          nb::arg("combination"), nb::arg("ldp") = nb::none());
+          nb::arg("combination"), nb::arg("ldp") = nb::none(), interaction_doc);
     m.def("interaction_hb", &interaction_hb, nb::arg("input"), nb::arg("elements"), nb::arg("u_install_m"),
-          nb::arg("combination"), nb::arg("ldp") = nb::none());
+          nb::arg("combination"), nb::arg("ldp") = nb::none(), interaction_doc);
     nb::class_<RadialStress>(m, "RadialStress", "Radial and hoop stress (MPa) at a radius.")
         .def_ro("sigma_r", &RadialStress::sigma_r).def_ro("sigma_theta", &RadialStress::sigma_theta)
         .def_ro("info", &RadialStress::info);
