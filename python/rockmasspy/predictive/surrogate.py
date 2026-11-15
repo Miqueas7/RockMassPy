@@ -159,7 +159,7 @@ class Surrogate:
         return SurrogatePrediction(y, ok, d2)
 
 
-def fit_surrogate(data: SurrogateData, *, kind: str = "poly2", smoothing: float = 0.0) -> Surrogate:
+def fit_surrogate(data: SurrogateData, *, kind: str = "rbf", smoothing: float = 0.0) -> Surrogate:
     if kind not in KINDS:
         raise ValueError(f"kind: must be one of {', '.join(KINDS)}")
     X, y = data.X, data.y
@@ -218,7 +218,7 @@ class SurrogateValidation:
     notes: tuple[str, ...] = ()
 
 
-def validate_surrogate(data: SurrogateData, *, kind: str = "poly2", k: int = 5, seed: int = 0,
+def validate_surrogate(data: SurrogateData, *, kind: str = "rbf", k: int = 5, seed: int = 0,
                        smoothing: float = 0.0) -> SurrogateValidation:
     from .validation import group_kfold, leave_one_group_out, random_kfold
 
@@ -267,7 +267,11 @@ def validate_surrogate(data: SurrogateData, *, kind: str = "poly2", k: int = 5, 
 
 @dataclass(frozen=True)
 class SurrogatePof:
-    """PoF = fracción de muestras válidas (dentro del dominio) con FS < umbral; `n_out_of_domain` se excluyen."""
+    """`pof` = fracción de muestras válidas (dentro del dominio) con FS < umbral; las `n_out_of_domain` se excluyen.
+
+    Es condicional al dominio del sustituto y puede quedar del lado inseguro (las colas excluidas suelen fallar más):
+    `pof_lower` (las excluidas no fallan) y `pof_upper` (todas fallan) acotan la PoF de la distribución completa.
+    """
 
     pof: float
     n: int
@@ -279,12 +283,19 @@ class SurrogatePof:
     fs_p95: float
     warnings: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    pof_lower: float = math.nan
+    pof_upper: float = math.nan
 
 
 def surrogate_pof(surrogate: Surrogate, variables, *, n: int = 20000, sampling: str = "lhs", seed: int = 1,
                   threshold: float = 1.0) -> SurrogatePof:
     from ..probabilistic import sample
 
+    if not (isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and math.isfinite(threshold)):
+        raise ValueError("threshold: must be a finite number")
+    from ..probabilistic import Distribution
+    if not all(isinstance(d, Distribution) for d in variables.values()):
+        raise ValueError("variables: every value must be a Distribution")
     if not set(variables) <= set(surrogate.names):
         raise ValueError("variables: every name must be an input of the surrogate")
     if not variables:
@@ -300,8 +311,12 @@ def surrogate_pof(surrogate: Surrogate, variables, *, n: int = 20000, sampling: 
         raise ValueError("variables: no sample fell inside the surrogate domain")
     n_ood = n - n_valid
     notes = ("unsampled inputs fixed at their training mean",) if len(variables) < len(surrogate.names) else ()
-    warns = ("many samples outside the surrogate domain; the PoF covers only the sampled domain",) \
-        if n_ood / n > OOD_WARN_FRACTION else ()
+    if n_ood:
+        notes += ("PoF conditional on the surrogate domain; see pof_lower and pof_upper",)
+    if surrogate.kind == "poly2":
+        notes += ("a quadratic surface can bias the PoF near the threshold; check it with kind='rbf'",)
+    warns = ("many samples outside the surrogate domain; the PoF covers only the surrogate domain",)         if n_ood / n > OOD_WARN_FRACTION else ()
+    n_fail = int(np.sum(fs < threshold))
     p05, p50, p95 = np.percentile(fs, [5, 50, 95])
-    return SurrogatePof(float(np.mean(fs < threshold)), n, n_valid, n_ood, float(fs.mean()), float(p05), float(p50),
-                        float(p95), warns, notes)
+    return SurrogatePof(n_fail / n_valid, n, n_valid, n_ood, float(fs.mean()), float(p05), float(p50),
+                        float(p95), warns, notes, n_fail / n, (n_fail + n_ood) / n)

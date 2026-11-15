@@ -1,5 +1,6 @@
 """Sustituto (Fase 8D, tarea 1): datos, poly2, RBF y dominio. Solo datos sintéticos."""
 
+import numpy as np
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -86,8 +87,8 @@ def test_load_runs_csv_comma_decimal(tmp_path):
 
 def test_poly2_needs_more_runs_than_terms(data):
     with pytest.raises(ValueError, match="runs.*quadratic"):
-        fit_surrogate(SurrogateData(data.X[:8], data.y[:8], data.names))
-    assert fit_surrogate(SurrogateData(data.X[:11], data.y[:11], data.names)).kind == "poly2"
+        fit_surrogate(SurrogateData(data.X[:8], data.y[:8], data.names), kind="poly2")
+    assert fit_surrogate(SurrogateData(data.X[:11], data.y[:11], data.names), kind="poly2").kind == "poly2"
     fit_surrogate(SurrogateData(data.X[:8], data.y[:8], data.names), kind="rbf")
 
 
@@ -173,15 +174,16 @@ from rockmasspy.predictive.surrogate_bench import planar_base  # noqa: E402
 POF_VARS = {"cohesion": pb.normal(10, 4, 2, 25), "friction_deg": pb.normal(33, 3, 20, 45)}
 
 
-def _truth(s, n=20000):
+def _truth(s, n=20000, tails=None):
     base = planar_base()
     for k in ("plane_dip_deg", "height_m", "water_fill"):
         setattr(base, k, float(s.mean[s.names.index(k)]))
-    return pb.run_probabilistic("planar", base, POF_VARS, n=n, sampling="lhs", seed=1).pof
+    return pb.run_probabilistic("planar", base, tails or POF_VARS, n=n, sampling="lhs", seed=1).pof
 
 
 # con los rangos completos poly2 queda a ~8 puntos de la verdad (la superficie cuadrática no sigue la curvatura del
 # FS en 5 dimensiones); con estos rangos más estrechos llega a ±4. La tolerancia de rbf nunca se afloja (±2).
+# El truncamiento de POF_VARS ([2, 25] y [20, 45]) excede estos rangos: ~0.7 % de las muestras se excluye.
 POLY2_RANGES = {"cohesion": (3, 20), "friction_deg": (24, 42), "plane_dip_deg": (32, 43), "height_m": (45, 65)}
 
 
@@ -203,7 +205,19 @@ def test_pof_with_tails_out_of_domain():
     assert r.n_out_of_domain > 0 and r.n_valid == 5000 - r.n_out_of_domain
     assert r.n_out_of_domain / 5000 > OOD_WARN_FRACTION
     assert any("many samples outside the surrogate domain" in w for w in r.warnings)
-    assert 0 <= r.pof <= 1
+    assert r.pof_lower <= r.pof <= r.pof_upper
+    assert any("conditional on the surrogate domain" in x for x in r.notes)
+    # discriminante: la PoF es la fracción sobre las válidas de las MISMAS muestras
+    d = pb.sample(wide, 5000, sampling="lhs", seed=1)
+    X = np.tile(s.mean, (5000, 1))
+    for k, v in d.items():
+        X[:, s.names.index(k)] = v
+    p = s.predict(X)
+    assert r.pof == float(np.mean(p.y[p.in_domain] < 1.0)) and r.n_valid == int(p.in_domain.sum())
+    # caso del revisor: la PoF de la distribución completa queda dentro de [pof_lower, pof_upper]
+    tails = {"cohesion": pb.normal(10, 8, 0, 60), "friction_deg": pb.normal(33, 6, 5, 60)}
+    q = surrogate_pof(s, tails, n=20000, seed=1)
+    assert q.n_out_of_domain > 0 and q.pof_lower <= _truth(s, tails=tails) <= q.pof_upper
 
 
 def test_pof_unknown_variable_names_parameter():
@@ -211,3 +225,15 @@ def test_pof_unknown_variable_names_parameter():
     with pytest.raises(ValueError, match="variables") as e:
         surrogate_pof(s, {"zzz": pb.uniform(0, 1)})
     assert "zzz" not in str(e.value)
+
+
+def test_pof_poly2_note_and_input_checks():
+    d = planar_runs(300, seed=1)
+    assert any("quadratic surface" in x for x in surrogate_pof(fit_surrogate(d, kind="poly2"), POF_VARS, n=500).notes)
+    s = fit_surrogate(d)
+    assert s.kind == "rbf" and not any("quadratic" in x for x in surrogate_pof(s, POF_VARS, n=500).notes)
+    with pytest.raises(ValueError, match="threshold"):
+        surrogate_pof(s, POF_VARS, threshold=float("nan"))
+    with pytest.raises(ValueError, match="variables") as e:
+        surrogate_pof(s, {"cohesion": 7.5})
+    assert "7.5" not in str(e.value)
