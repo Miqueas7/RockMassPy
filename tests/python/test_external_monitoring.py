@@ -46,7 +46,7 @@ def test_lining_forces_and_capacity():
     recs = []
     for st, n, m in (("1", 0.5, 0.01), ("2", 1.0, 0.05), ("3", 40.0, 0.5)):
         recs += [_f("L1", st, "axial_force_mn", n), _f("L1", st, "moment_mnm", m)]
-    recs.append(_f("L2", "1", "axial_force_mn", 9.0))
+    recs += [_f("L2", "1", "axial_force_mn", 9.0), _f("L2", "1", "moment_mnm", 0.1)]
     fs = lining_forces(ExternalSet(tuple(recs)), object_id="L1")
     assert len(fs) == 3 and fs[1].n_mn == 1.0 and fs[1].m_mnm == 0.05
     s = rm.LiningSection()
@@ -59,3 +59,13 @@ def test_moment_without_axial():
     with pytest.raises(ValueError, match="axial_force_mn") as e:
         lining_forces(ExternalSet((_f("SENT", "1", "moment_mnm", 0.1),)))
     assert "SENT" not in str(e.value)
+
+
+def test_axial_without_moment_and_missing_shear_note():
+    with pytest.raises(ValueError, match="moment_mnm") as e:
+        lining_forces(ExternalSet((_f("SENT", "1", "axial_force_mn", 1.0),)))
+    assert "SENT" not in str(e.value)
+    recs = ExternalSet((_f("L", "1", "axial_force_mn", 1.0), _f("L", "1", "moment_mnm", 0.1),
+                        _f("L", "2", "axial_force_mn", 1.0), _f("L", "2", "moment_mnm", 0.1)))
+    notes = []
+    assert len(lining_forces(recs, notes=notes)) == 2 and notes == ["shear force absent; assumed 0"]

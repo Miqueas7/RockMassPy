@@ -383,8 +383,12 @@ def compare_monitoring(measured, modeled, *, quantity: str = "convergence_pct") 
     return out
 
 
-def lining_forces(external, *, object_id: str | None = None) -> list:
-    """rm.LiningForce por (id, etapa) desde axial_force_mn, moment_mnm y shear_mn; sin M ni Q valen 0."""
+def lining_forces(external, *, object_id: str | None = None, notes: list | None = None) -> list:
+    """rm.LiningForce por (id, etapa) desde axial_force_mn, moment_mnm y shear_mn.
+
+    N y M son obligatorios (un M faltante daría un resultado optimista con (N, 0)). Q ausente vale 0, porque
+    check_capacity no lo revisa; si `notes` es una lista, se le agrega una vez «shear force absent; assumed 0».
+    """
     recs = external.records if isinstance(external, ExternalSet) else tuple(external)
     groups: dict = {}
     for r in recs:
@@ -394,7 +398,12 @@ def lining_forces(external, *, object_id: str | None = None) -> list:
     for g in groups.values():
         if "axial_force_mn" not in g:
             raise ValueError("lining force without its 'axial_force_mn'")
+        if "moment_mnm" not in g:
+            raise ValueError("lining force without its 'moment_mnm'")
         f = rm.LiningForce()
-        f.n_mn, f.m_mnm, f.q_mn = g["axial_force_mn"], g.get("moment_mnm", 0.0), g.get("shear_mn", 0.0)
+        f.n_mn, f.m_mnm, f.q_mn = g["axial_force_mn"], g["moment_mnm"], g.get("shear_mn", 0.0)
         out.append(f)
+    note = "shear force absent; assumed 0"
+    if notes is not None and any("shear_mn" not in g for g in groups.values()) and note not in notes:
+        notes.append(note)
     return out
