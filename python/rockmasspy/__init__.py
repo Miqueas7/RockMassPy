@@ -84,3 +84,5 @@ from .normative import CONSEQUENCES, RANGE_POLICIES, SCALES  # noqa: E402,F401
 from .criteria import (CRITERIA_COLUMNS, CRITERIA_RESULT_COLUMNS, CRITERIA_STATUSES, CriterionCheck,  # noqa: E402,F401
                        assess_criteria, criteria_attention, criteria_counts, load_criteria_table,
                        save_criteria_results)
+from .support_capacity import HOEK_SUPPORT_TABLE, HoekSupportItem, SupportCapacity, hoek_psm, load_support_capacity  # noqa: E402,F401
+from .hb_consistency import HbConsistency, check_hoek_brown, check_k_ratio  # noqa: E402,F401
