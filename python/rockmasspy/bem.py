@@ -142,6 +142,7 @@ class BemResult:
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     needs_attention: bool = False
+    excavations: list = field(default_factory=list)  # polígonos de entrada, para dibujar el contorno real
 
 
 # ---------------------------------------------------------------- análisis
@@ -272,7 +273,8 @@ def analyze_bem(excavations, *, sigma1_mpa: float, sigma3_mpa: float, alpha_deg:
         field=fld, min_sf=min_sf, min_sf_location=None if kmin is None else pts[kmin],
         min_sf_coarse=min(cs) if cs else None, tension_count=tension_count, info=sol.info, warnings=warnings,
         notes=[NOTE_ELASTIC],
-        needs_attention=bool((min_sf is not None and min_sf < 1) or tension_count or any(fld.coarse)))
+        needs_attention=bool((min_sf is not None and min_sf < 1) or tension_count or any(fld.coarse)),
+        excavations=polys)
 
 
 # ---------------------------------------------------------------- lectura de excavaciones
@@ -299,6 +301,8 @@ def load_excavations(path, sheet: str = "Excavaciones") -> list[list[tuple[float
     groups: dict[str, list] = {}
     for _, r in rows:
         groups.setdefault(r["id"], []).append((r["orden"], r["x"], r["y"]))
+    if any(len({o for o, _, _ in g}) != len(g) for g in groups.values()):
+        raise ValueError(f"sheet '{sheet}': duplicate value in column 'orden' within an excavation")
     if not groups:
         raise ValueError(f"sheet '{sheet}': no excavations found")
     return [[(x, y) for _, x, y in sorted(g)] for g in groups.values()]

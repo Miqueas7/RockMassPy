@@ -326,4 +326,6 @@ TEXTS.update({
     "bem_boundary": {"es": "σ tangencial en el borde", "en": "Tangential stress along the boundary"},
     "bem_element": {"es": "Elemento de contorno (n.º)", "en": "Boundary element (no.)"},
     "bem_stt_axis": {"es": "σtt (MPa)", "en": "σtt (MPa)"},
+    "bem_coarse_grid": {"es": "Grilla gruesa junto a la excavación; refina --grid",
+                        "en": "Grid coarse near the opening; refine --grid"},
 })

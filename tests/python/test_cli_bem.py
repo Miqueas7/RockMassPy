@@ -57,3 +57,26 @@ def test_chart_and_report(tmp_path, capsys):
 
 def test_horseshoe_runs(capsys):
     assert main(BASE + ["--horseshoe", "5:3", "--grid=-8:8:-6:10:12:12"]) in (0, 2)
+
+
+def test_grid_help_documents_equals_form(capsys):
+    with pytest.raises(SystemExit):
+        main(["bem", "--help"])
+    assert "--grid=XMIN:XMAX" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("extra,opt", [(["--circle", "0"], "--circle"), (["--circle", "-2"], "--circle"),
+                                       (["--horseshoe", "4:0"], "--horseshoe"),
+                                       (["--circle", "3", "--grid=-9:9:-9:9:20.5:20"], "--grid")])
+def test_invalid_geometry_options(extra, opt, capsys):
+    assert main(BASE + extra) == 1
+    cap = capsys.readouterr()
+    assert cap.out == "" and cap.err.startswith("error: ") and opt in cap.err and cap.err.count("\n") == 1
+
+
+def test_duplicate_orden_is_input_error(tmp_path, capsys):
+    f = tmp_path / "e.csv"
+    f.write_text("id,orden,x,y\nZZSENT,1,0,0\nZZSENT,1,4,0\nZZSENT,3,4,4\nZZSENT,4,0,4\n", encoding="utf-8")
+    assert main(BASE + ["--excavations", str(f)]) == 1
+    cap = capsys.readouterr()
+    assert cap.out == "" and "'orden'" in cap.err and "ZZSENT" not in cap.err

@@ -339,13 +339,19 @@ def _bem(a) -> int:
     if a.excavations:
         polys = load_excavations(a.excavations)
     elif a.circle is not None:
+        if a.circle <= 0:
+            raise ValueError("--circle must be positive")
         polys = [circle(0.0, 0.0, a.circle)]
     else:
         w, h = _pair(a.horseshoe, "--horseshoe", 2)
+        if w <= 0 or h <= 0:
+            raise ValueError("--horseshoe values must be positive")
         polys = [horseshoe(0.0, 0.0, w, h)]
     grid = None
     if a.grid:
         g = _pair(a.grid, "--grid", 6)
+        if not (g[4].is_integer() and g[5].is_integer()):
+            raise ValueError("--grid NX and NY must be integers")
         grid = (g[0], g[1], g[2], g[3], int(g[4]), int(g[5]))
     r = analyze_bem(polys, sigma1_mpa=a.sigma1, sigma3_mpa=a.sigma3, alpha_deg=a.alpha, sigma_z_mpa=a.sigma_z,
                     e_mpa=a.e, nu=a.nu, material=_bem_material(a), grid=grid, max_element_m=a.max_element,
@@ -1332,7 +1338,8 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--s", type=float)
     c.add_argument("--a", type=float)
     c.add_argument("--sf-mode", choices=("rs2", "examine2d"), default="rs2")
-    c.add_argument("--grid", metavar="XMIN:XMAX:YMIN:YMAX:NX:NY")
+    c.add_argument("--grid", metavar="XMIN:XMAX:YMIN:YMAX:NX:NY", help="field grid; use --grid=XMIN:XMAX:... "
+                   "(with '=') when XMIN is negative")
     c.add_argument("--max-element", type=float, metavar="M")
     c.add_argument("--quantity", choices=("sf", "sigma1", "sigma3"), default="sf")
     c.add_argument("--chart", metavar="OUT.png")

@@ -36,3 +36,18 @@ def test_errors(res):
         rp.build_bem_report([], title="T")
     with pytest.raises(ValueError):
         rp.build_bem_report([res], title="T", lang="fr")
+
+
+def test_mask_leaves_no_unpainted_triangle_outside_the_opening(tmp_path):
+    pytest.importorskip("matplotlib")
+    import numpy as np
+    from rockmasspy.viz import plot_bem
+    from rockmasspy.viz.bem import bem_triangulation
+
+    r = analyze_bem([circle(0, 0, 3, 128)], sigma1_mpa=30, sigma3_mpa=15, e_mpa=10000, nu=0.2,
+                    material=BemMaterial("MC", c_mpa=5, phi_deg=30), grid=(-9, 9, -9, 9, 20, 20))
+    tri, _ = bem_triangulation(r, r.field.sf)
+    tx, ty = np.array(r.field.x)[tri.triangles].mean(axis=1), np.array(r.field.y)[tri.triangles].mean(axis=1)
+    outside = np.hypot(tx, ty) > 3.0 + 1e-9
+    assert not tri.mask[outside & (np.hypot(tx, ty) < 6)].any()
+    assert plot_bem(r, tmp_path / "f.png").stat().st_size > 0
