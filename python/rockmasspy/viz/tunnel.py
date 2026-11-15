@@ -23,9 +23,10 @@ def tunnel_figure(result, *, lang: str = "es"):
             label=text("tn_grc", lang))
     i, u_in = result.interaction, result.u_install_m
     if i is not None and u_in is not None:
-        # shortcut: SCC como recta al cruce, exacta solo si el cruce es elástico; sin cruce no se dibuja SCC
-        if i.found:  # solo el tramo hasta el cruce: el resultado no guarda la SCC completa
-            ax.plot([u_in * 1e3, i.u_eq_m * 1e3], [0, i.p_eq_mpa], color="tab:blue", lw=1.4, label=text("tn_scc", lang))
+        if result.scc:
+            ax.plot([u * 1e3 for u, _ in result.scc], [p for _, p in result.scc], color="tab:blue", lw=1.4,
+                    label=text("tn_scc", lang))
+        if i.found:
             ax.scatter([i.u_eq_m * 1e3], [i.p_eq_mpa], c="tab:red", zorder=5, label=text("tn_cross", lang))
         ax.axvline(u_in * 1e3, color="0.5", ls="--", lw=1, label=text("tn_install", lang))
     ax.set_xlabel(text("tn_u_axis", lang), fontsize=fs)

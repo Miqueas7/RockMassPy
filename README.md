@@ -7,7 +7,7 @@ regulatory profiles, rock slope analysis (kinematics, stereonets, block and limi
 **Documentation: <https://miqueas.dev/rockmasspy>** (guide, methods, worked examples and API reference, in English
 and Spanish). Changes per version are in [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md).
 
-**Status:** version 0.3.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications; 0.3.0: every continuous RMR89 and RMR14 curve of Kundu et al. (2020), checked against Table 3 of the paper). The library recommends, the engineer decides.
+**Status:** version 0.4.0 (phases 1 to 5: calculation core and per-labor tables, support and the Peru profile, open pit, predictive module, synthetic mine and test bench; phase 7: uncertainty in classifications; 0.3.0: every continuous RMR89 and RMR14 curve of Kundu et al. (2020), checked against Table 3 of the paper; phase 8: analytical tunnels (convergence-confinement) and external results from Slide2, RS2 and FLAC3D). The library recommends, the engineer decides.
 
 ## Installation
 
@@ -856,7 +856,7 @@ If RockMassPy helps your work, please cite it. GitHub shows a "Cite this reposit
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (version 0.3.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (version 0.4.0) [Computer software]. https://github.com/Miqueas7/RockMassPy
 
 Each result also records the method and edition it follows (`result.info`); cite that original source as well.
 

@@ -170,3 +170,31 @@ def test_support_diameter_changes_hoek_lining():
     kw = dict(supports=[lin], install_distance_m=3)
     a, b = analyze_tunnel(_rst1(), **kw), analyze_tunnel(_rst1(), support_diameter_m=10, **kw)
     assert a.interaction.fs != pytest.approx(b.interaction.fs)
+
+
+def test_scc_rst1_elastic_then_plateau():
+    r = analyze_tunnel(_rst1(), supports=[_bolt()], install_distance_m=3, ldp="CHERN1998", combination="rocsupport3")
+    el = _bolt().to_element(12)
+    (u0, p0), (u1, p1) = r.scc[0], r.scc[1]
+    assert u0 == pytest.approx(r.u_install_m) and p0 == 0
+    assert (p1 - p0) / (u1 - u0) == pytest.approx(el.stiffness_mpa / 6)
+    assert r.scc[-1][0] == pytest.approx(r.u_max_m) and r.scc[-1][1] == pytest.approx(el.psm_mpa)
+
+
+def test_scc_weak_support_ends_at_psm_and_empty_without_support():
+    weak = SupportCapacity("W", "bolt", psm_mpa=0.01, eps_sm=0.002)
+    r = analyze_tunnel(_rst1(), supports=[weak], install_distance_m=3)
+    assert r.scc[-1][1] == pytest.approx(0.01)
+    assert analyze_tunnel(_rst1()).scc == ()
+
+
+def test_scc_stiffness_two_elements_kink_at_first_yield():
+    weak = SupportCapacity("W", "bolt", psm_mpa=0.01, eps_sm=0.001)
+    r = analyze_tunnel(_rst1(), supports=[weak, _bolt()], install_distance_m=3, combination="stiffness")
+    k_w, k_b = weak.to_element(12).stiffness_mpa, _bolt().to_element(12).stiffness_mpa
+    u_y = r.u_install_m + 6 * 0.01 / k_w
+    pts = r.scc
+    slope = lambda a, b: (b[1] - a[1]) / (b[0] - a[0])
+    assert slope(pts[0], pts[1]) == pytest.approx((k_w + k_b) / 6)
+    i = next(j for j, q in enumerate(pts) if q[0] == pytest.approx(u_y))
+    assert slope(pts[i], pts[i + 1]) == pytest.approx(k_b / 6)

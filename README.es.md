@@ -7,7 +7,7 @@ normativos por país, análisis de taludes en roca (cinemática, estereografía,
 **Documentación: <https://miqueas.dev/rockmasspy>** (guía, métodos, casos resueltos y referencia de la API, en
 español e inglés). Los cambios de cada versión están en [CHANGELOG.md](https://github.com/Miqueas7/RockMassPy/blob/main/CHANGELOG.md) (en inglés).
 
-**Estado:** versión 0.3.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones; 0.3.0: todas las curvas continuas del RMR89 y del RMR14 de Kundu et al. (2020), comprobadas contra la Tabla 3 del artículo).
+**Estado:** versión 0.4.0 (fases 1 a 5: núcleo y tablas por labor, sostenimiento y perfil de Perú, tajo abierto, módulo predictivo, mina sintética y banco de pruebas; fase 7: incertidumbre en las clasificaciones; 0.3.0: todas las curvas continuas del RMR89 y del RMR14 de Kundu et al. (2020), comprobadas contra la Tabla 3 del artículo; fase 8: túneles analíticos (convergencia-confinamiento) y resultados externos de Slide2, RS2 y FLAC3D).
 La librería recomienda, el ingeniero decide.
 
 ## Instalación
@@ -882,7 +882,7 @@ Si RockMassPy te sirve en tu trabajo, cítalo. GitHub muestra el botón «Cite t
 [CITATION.cff](https://github.com/Miqueas7/RockMassPy/blob/main/CITATION.cff):
 
 > Quintanilla Ventura, M. (2026). *RockMassPy: rock mass classifications, Hoek-Brown strength and mining
-> geomechanics* (versión 0.3.0) [Software]. https://github.com/Miqueas7/RockMassPy
+> geomechanics* (versión 0.4.0) [Software]. https://github.com/Miqueas7/RockMassPy
 
 Cada resultado registra además el método y la edición que sigue (`result.info`); cita también esa fuente original.
 

@@ -74,6 +74,7 @@ class TunnelResult:
     radius_m: float | None = None  # para dibujar el LDP; los llena analyze_tunnel
     nu: float | None = None
     install_distance_m: float | None = None
+    scc: tuple[tuple[float, float], ...] = ()  # curva (u, p) del sostenimiento desde u_install hasta u_max
 
     @property
     def needs_attention(self) -> bool:
@@ -152,6 +153,13 @@ def _pick(table, key, name):
     return table[key]
 
 
+def _scc(els, u_in: float, u_max: float, r: float) -> tuple[tuple[float, float], ...]:
+    """Suma de las curvas elastoplásticas de cada elemento, en 100 puntos más el punto de fluencia de cada uno."""
+    us = [u_in + (u_max - u_in) * i / 100 for i in range(101)]
+    us += [u for e in els if u_in < (u := u_in + r * e.psm_mpa / e.stiffness_mpa) < u_max]
+    return tuple((u, sum(min(e.stiffness_mpa * (u - u_in) / r, e.psm_mpa) for e in els)) for u in sorted(set(us)))
+
+
 def analyze_tunnel(inp: TunnelInput, *, supports: Sequence[SupportCapacity | rm.SupportElement] = (),
                    install_distance_m: float | None = None, ldp: str = "VD2009", combination: str = "stiffness",
                    n_points: int = 50, support_diameter_m: float | None = None) -> TunnelResult:
@@ -172,7 +180,7 @@ def analyze_tunnel(inp: TunnelInput, *, supports: Sequence[SupportCapacity | rm.
             warns.append(W_SHAPE)
         if strain > 10:
             warns.append(W_LARGE)
-        u_in, inter = None, None
+        u_in, inter, scc = None, None, ()
         if install_distance_m is not None:
             u_in = rm.ldp_ratio(ldp_e, install_distance_m / r, grc.rp_unsupported_m / r, inp.nu) * grc.u_max_m
         if supports:
@@ -181,11 +189,12 @@ def analyze_tunnel(inp: TunnelInput, *, supports: Sequence[SupportCapacity | rm.
             els = [s.to_element(support_diameter_m or 2 * r) if isinstance(s, SupportCapacity) else s
                    for s in supports]
             inter = interact(g, els, u_in, comb, ldp_e)
+            scc = _scc(rm.combine_supports(els, comb), u_in, grc.u_max_m, r) if u_in < grc.u_max_m else ()
             warns += inter.warnings
     return TunnelResult(
         grc.info.method_id, grc.info, grc.p_crit_mpa, grc.rp_unsupported_m, grc.u_max_m, strain, sq,
         tuple((p.pi_mpa, p.u_m) for p in grc.curve), ldp, u_in, inter, tuple(dict.fromkeys(warns)),
-        tuple(dict.fromkeys(notes)), r, inp.nu, install_distance_m)
+        tuple(dict.fromkeys(notes)), r, inp.nu, install_distance_m, scc)
 
 
 def tunnel_uncertainty(inp: TunnelInput, variables: Mapping[str, Distribution], *,

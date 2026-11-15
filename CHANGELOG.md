@@ -4,9 +4,10 @@ All released versions of RockMassPy. The format follows [Keep a Changelog](https
 the project uses [semantic versioning](https://semver.org/). Before 1.0 the API may still change between minor
 versions.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-14
 
-Phase 8B: analytical tunnel excavations (convergence-confinement). The version number does not change yet.
+Phase 8B: analytical tunnel excavations (convergence-confinement). Phase 8A: results from external programs
+(Slide2, RS2, FLAC3D) read, checked and compared.
 
 ### Added
 
@@ -22,6 +23,13 @@ Phase 8B: analytical tunnel excavations (convergence-confinement). The version n
   number, without `info`).
 - `plot_tunnel`, `build_tunnel_report` and the `rockmass tunnel` command.
 - Example 15 (`examples/15-tuneles-convergencia-confinamiento/`).
+- `TunnelResult.scc`: the full support curve (elastic part, plateau at psm, kinks when each element yields), drawn in
+  the tunnel figure instead of a straight line to the crossing.
+- External results (phase 8A): `load_external` (Slide2, RS2 and FLAC3D results reader), RocData table check,
+  criteria for external results with `ssr_policy` and the SRF band, `compare_methods` (analytical vs numerical),
+  `compare_monitoring` (against field measurements), `lining_forces`, `build_external_report` and the
+  `rockmass ext` command.
+- FLAC3D export script and example 16.
 
 ### Values to confirm
 
@@ -38,6 +46,8 @@ Phase 8B: analytical tunnel excavations (convergence-confinement). The version n
   (Secondary).
 - In `tunnel_uncertainty`, `support_probabilities["no_crossing"]` counts the samples whose support was installed
   after full convergence (no crossing, no load); `fs_below_1` counts only crossings with FS below 1.
+- External results: the SRF band (`SSR_BAND`, 5 %), the method-spread threshold (10 %) and the monitoring ratio
+  (1.5) are provisional values, still to be confirmed.
 
 ### Fixed
 
