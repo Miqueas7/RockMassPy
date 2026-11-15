@@ -174,3 +174,13 @@ def test_strength_factor_messages_without_values():
     with pytest.raises(ValueError, match="'s'") as e:
         rm.strength_factor(bad, 40, 10, 10)
     assert "1.37" not in str(e.value)
+
+
+@pytest.mark.parametrize("mode", [rm.SfMode.RS2, rm.SfMode.Examine2D])
+def test_mc_tension_capped_at_apex(mode):
+    beyond = rm.SfMaterial(criterion=rm.SfCriterion.MohrCoulomb, c_mpa=0, phi_deg=30, tensile_mpa=1)
+    r = rm.strength_factor(beyond, 0.2, -0.8, -0.3, mode)  # c = 0: el corte es el vértice, no T
+    assert r.tension and r.sf is None
+    inner = rm.SfMaterial(criterion=rm.SfCriterion.MohrCoulomb, c_mpa=1, phi_deg=30, tensile_mpa=5)
+    r = rm.strength_factor(inner, 2, -1.7, -1.0, mode)  # c·cot φ = 1.732
+    assert not r.tension and 0 < r.sf < math.inf

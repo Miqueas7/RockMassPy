@@ -561,9 +561,12 @@ inline void check_material(const SfMaterial& m) {
     }
 }
 
-/// Resistencia a tracción T ≥ 0 (§3.4): la del usuario en Mohr-Coulomb; s·σci/mb en Hoek-Brown (HB02 ec. 7).
+/// Resistencia a tracción T ≥ 0 (§3.4): en Mohr-Coulomb, la del usuario topada en el vértice c·cot φ (más allá la
+/// envolvente no existe y el SF saldría negativo); en Hoek-Brown, s·σci/mb (HB02 ec. 7).
 inline double tensile_cutoff(const SfMaterial& m) {
-    return m.criterion == SfCriterion::MohrCoulomb ? m.tensile_mpa : m.s * m.sigma_ci_mpa / m.mb;
+    if (m.criterion == SfCriterion::HoekBrown) return m.s * m.sigma_ci_mpa / m.mb;
+    if (m.phi_deg == 0.0) return m.tensile_mpa;  // sin vértice
+    return std::min(m.tensile_mpa, m.c_mpa / std::tan(m.phi_deg * kPi / 180));
 }
 
 /// Raíz de g creciente en [lo, hi] con g(lo) < 0 < g(hi), por bisección hasta la precisión de máquina.
@@ -610,8 +613,8 @@ inline SfResult strength_factor(const SfMaterial& m, double sigma1, double sigma
     if (mode == SfMode::Examine2D) {
         const double sm = (hi + lo) / 2, tau = (hi - lo) / 2;
         if (!(tau > 0.0)) return {inf, false};
-        // con T > c·cot φ el círculo puede salir del vértice de Mohr-Coulomb: SF 0, no negativo
-        if (mc) return {std::max(0.0, (m.c_mpa * std::cos(phi) + sm * std::sin(phi)) / tau), false};
+        // σm ≥ σ3 ≥ −c·cot φ (corte topado en el vértice): el numerador no es negativo
+        if (mc) return {(m.c_mpa * std::cos(phi) + sm * std::sin(phi)) / tau, false};
         const double tf = bisect(
             [&](double x) {
                 return 2 * x - m.sigma_ci_mpa * std::pow(std::max(0.0, m.mb * (sm - x) / m.sigma_ci_mpa + m.s), m.a);
@@ -637,7 +640,7 @@ inline SfResult strength_factor(const SfMaterial& m, double sigma1, double sigma
         smax = (std::sqrt(k * k + m.mb * m.sigma_ci_mpa * i1 / 12 + m.s * m.sigma_ci_mpa * m.sigma_ci_mpa / 4) - k) /
                std::cos(th);
     }
-    return {std::max(0.0, smax / std::sqrt(j2)), false};
+    return {smax / std::sqrt(j2), false};  // Smax ≥ 0: I1/3 ≥ σmin ≥ −T, con T topado en el vértice
 }
 
 /// Strength factor de cada punto del campo con σ1, σ3 y σz (σ2). Los puntos dentro de una excavación dan sf vacío y

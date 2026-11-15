@@ -347,6 +347,26 @@ TEST(StrengthFactor, Traccion) {  // §3.4: σ3 < −T marca tracción y no da S
     }
 }
 
+TEST(StrengthFactor, TraccionTopadaEnElVertice) {  // revisión: T > c·cot φ usa el vértice como corte, no SF = 0
+    for (auto mode : {SfMode::RS2, SfMode::Examine2D}) {
+        auto r = strength_factor(mc(0, 30, 1.0), 0.2, -0.8, -0.3, mode);  // c = 0: el vértice está en 0
+        EXPECT_TRUE(r.tension);
+        EXPECT_FALSE(r.sf.has_value());
+        r = strength_factor(mc(1, 30, 5.0), 2, -1.7, -1.0, mode);  // c·cot φ = 1.732: justo dentro del vértice
+        EXPECT_FALSE(r.tension);
+        ASSERT_TRUE(r.sf.has_value());
+        EXPECT_GT(*r.sf, 0.0);
+        EXPECT_TRUE(std::isfinite(*r.sf));
+        r = strength_factor(mc(1, 30, 5.0), 2, -1.8, -1.0, mode);  // pasa el vértice: tracción aunque T = 5
+        EXPECT_TRUE(r.tension);
+        EXPECT_FALSE(r.sf.has_value());
+        r = strength_factor(mc(1, 0, 5.0), 2, -4.0, -1.0, mode);  // φ = 0: sin vértice, rige T
+        EXPECT_FALSE(r.tension);
+        r = strength_factor(mc(1, 0, 5.0), 2, -5.5, -1.0, mode);
+        EXPECT_TRUE(r.tension);
+    }
+}
+
 TEST(StrengthFactor, HidrostaticoEsInfinito) {  // sin desviador no hay corte: SF = +inf
     for (auto mode : {SfMode::RS2, SfMode::Examine2D}) {
         EXPECT_TRUE(std::isinf(strength_factor(mc(5, 30), 10, 10, 10, mode).sf.value()));
