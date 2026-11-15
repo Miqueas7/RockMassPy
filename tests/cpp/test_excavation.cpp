@@ -61,6 +61,20 @@ TEST(Ellipse, HuecoArmonico) {
         EXPECT_NEAR(ellipse_boundary_stress(20, 10, 1, 2, th), 30.0, 1e-9);
 }
 
+TEST(Ellipse, AnguloPolarIntermedio) {
+    // a = 2, b = 1: en t = 45° excéntrico Inglis da 30 − 30/2.5 = 18; su ángulo polar es atan(0.5)
+    EXPECT_NEAR(ellipse_boundary_stress(20, 10, 2, 1, 26.56505117707799), 18.0, 1e-9);
+    EXPECT_GT(std::abs(ellipse_boundary_stress(20, 10, 2, 1, 45) - 18.0), 1e-3);
+}
+
+TEST(Ellipse, SimetriaDeCuadrantes) {
+    for (double th : {10.0, 26.5, 45.0, 70.0}) {
+        const double s = ellipse_boundary_stress(20, 10, 2, 1, th);
+        EXPECT_NEAR(ellipse_boundary_stress(20, 10, 2, 1, -th), s, 1e-9);
+        EXPECT_NEAR(ellipse_boundary_stress(20, 10, 2, 1, 180 - th), s, 1e-9);
+    }
+}
+
 TEST(Ellipse, Extremos) {
     const auto e = ellipse_ends(20, 0.5, 4, 2);  // a = 2, b = 1
     EXPECT_NEAR(e.sidewall_mpa, 90.0, 1e-9);

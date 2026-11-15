@@ -29,6 +29,16 @@ def test_ellipse():
         rm.ellipse_boundary_stress(20, 10, 1, 0, 0)
 
 
+def test_ellipse_polar_angle():
+    # a = 2, b = 1: en t = 45° excéntrico Inglis da 18; su ángulo polar es atan(0.5)
+    assert rm.ellipse_boundary_stress(20, 10, 2, 1, 26.56505117707799) == pytest.approx(18.0, abs=1e-9)
+    assert abs(rm.ellipse_boundary_stress(20, 10, 2, 1, 45) - 18.0) > 1e-3
+    for th in (10.0, 26.5, 45.0, 70.0):
+        s = rm.ellipse_boundary_stress(20, 10, 2, 1, th)
+        assert rm.ellipse_boundary_stress(20, 10, 2, 1, -th) == pytest.approx(s, abs=1e-9)
+        assert rm.ellipse_boundary_stress(20, 10, 2, 1, 180 - th) == pytest.approx(s, abs=1e-9)
+
+
 def test_einstein_schwartz():
     def run(theta):
         i = rm.EinsteinSchwartzInput()

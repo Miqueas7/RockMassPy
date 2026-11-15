@@ -104,6 +104,8 @@ inline MethodInfo ellipse_info() {
 }
 
 /// σθ en el borde de una elipse de semiejes a (horizontal) y b (vertical); σ1 vertical, σ3 horizontal.
+/// theta_deg es el ángulo polar del punto del borde medido desde el eje x; la fórmula de Inglis usa el ángulo
+/// excéntrico t (x = a·cos t, y = b·sin t), así que se convierte adentro: t = atan2(a·sin θ, b·cos θ).
 inline double ellipse_boundary_stress(double sigma1_mpa, double sigma3_mpa, double a_m, double b_m, double theta_deg) {
     using namespace excavation_detail;
     validation::require_finite(sigma1_mpa, "sigma1_mpa");
@@ -111,7 +113,9 @@ inline double ellipse_boundary_stress(double sigma1_mpa, double sigma3_mpa, doub
     positive(a_m, "a_m");
     positive(b_m, "b_m");
     validation::require_finite(theta_deg, "theta_deg");
-    const double s2 = std::pow(std::sin(rad(theta_deg)), 2), c2 = std::pow(std::cos(rad(theta_deg)), 2);
+    const double th = rad(theta_deg);
+    const double t = std::atan2(a_m * std::sin(th), b_m * std::cos(th));  // polar -> excéntrico
+    const double s2 = std::pow(std::sin(t), 2), c2 = std::pow(std::cos(t), 2);
     const double sum = sigma1_mpa + sigma3_mpa;
     return sum - ((a_m - b_m) * sum + (a_m + b_m) * (sigma1_mpa - sigma3_mpa)) * (a_m * s2 - b_m * c2) /
                      (a_m * a_m * s2 + b_m * b_m * c2);

@@ -51,6 +51,8 @@ Phase 8B: analytical tunnel excavations (convergence-confinement). Phase 8A: res
 
 ### Fixed
 
+- `ellipse_boundary_stress` takes the polar angle of the boundary point and converts it to the eccentric angle of
+  Inglis' formula (it gave wrong values at intermediate angles).
 - `fisher_stats`: a horizontal pole perpendicular to the principal axis no longer changes the mean depending on how
   it was written (0/0 or 180/0); a warning says when the mean direction is not unique.
 
