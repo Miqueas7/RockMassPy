@@ -45,3 +45,12 @@ def test_capacity_sheet(tmp_path, capsys):
     argv = RST1[:RST1.index("--support")] + ["--capacity", str(csv), "--support-code", "B1"] + \
         RST1[RST1.index("--install-distance"):]
     assert main(argv) == 0 and "FS 1.84" in capsys.readouterr().out
+
+
+def test_diameter_changes_fs(capsys):
+    base = RST1[:RST1.index("--support")] + ["--support", "Concrete or shotcrete lining 50 mm 28 days 35 MPa",
+                                            "--install-distance", "3"]
+    main(base)
+    a = capsys.readouterr().out
+    main(base + ["--diameter", "10"])
+    assert capsys.readouterr().out.split("FS ")[1][:4] != a.split("FS ")[1][:4]

@@ -122,7 +122,7 @@ def _pick(table, key, name):
 
 def analyze_tunnel(inp: TunnelInput, *, supports: Sequence[SupportCapacity | rm.SupportElement] = (),
                    install_distance_m: float | None = None, ldp: str = "VD2009", combination: str = "stiffness",
-                   n_points: int = 50) -> TunnelResult:
+                   n_points: int = 50, support_diameter_m: float | None = None) -> TunnelResult:
     ldp_e, comb = _pick(_LDP, ldp, "ldp"), _pick(_COMB, combination, "combination")
     g, interact, grc_fn, sigma_cm = _ground(inp)
     grc = grc_fn(g, n_points)
@@ -143,7 +143,7 @@ def analyze_tunnel(inp: TunnelInput, *, supports: Sequence[SupportCapacity | rm.
     if supports:
         if u_in is None:
             raise ValueError("install_distance_m is required when supports are given")
-        els = [s.to_element(2 * r) if isinstance(s, SupportCapacity) else s for s in supports]
+        els = [s.to_element(support_diameter_m or 2 * r) if isinstance(s, SupportCapacity) else s for s in supports]
         inter = interact(g, els, u_in, comb, ldp_e)
         warns += inter.warnings
     return TunnelResult(
@@ -156,7 +156,7 @@ def tunnel_uncertainty(inp: TunnelInput, variables: Mapping[str, Distribution], 
                        supports: Sequence[SupportCapacity | rm.SupportElement] = (),
                        install_distance_m: float | None = None, ldp: str = "VD2009",
                        combination: str = "stiffness", n: int = 2000, sampling: str = "lhs",
-                       seed: int = 1) -> UncertaintyResult:
+                       seed: int = 1, support_diameter_m: float | None = None) -> UncertaintyResult:
     numeric = [f.name for f in dataclasses.fields(TunnelInput)
                if f.name not in ("criterion", "shape", "hb_edition")]
     for name in variables:
@@ -168,7 +168,8 @@ def tunnel_uncertainty(inp: TunnelInput, variables: Mapping[str, Distribution], 
 
     def one(draw):
         r = analyze_tunnel(dataclasses.replace(inp, **draw), supports=supports,
-                           install_distance_m=install_distance_m, ldp=ldp, combination=combination, n_points=2)
+                           install_distance_m=install_distance_m, ldp=ldp, combination=combination, n_points=2,
+                           support_diameter_m=support_diameter_m)
         outs = {"rp_m": r.rp_m, "strain_pct": r.strain_pct}
         classes[r.squeezing.squeezing_class] += 1
         if r.interaction is not None:

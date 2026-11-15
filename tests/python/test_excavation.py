@@ -86,3 +86,10 @@ def test_tunnel_uncertainty_bad_sample():
     msg = str(e.value)
     assert "narrow" in msg and "minimum" in msg and "maximum" in msg
     assert not any(t in msg for t in ("90", "110", "Received"))
+
+
+def test_support_diameter_changes_hoek_lining():
+    lin = SupportCapacity("L", "lining", hoek_item="Concrete or shotcrete lining 50 mm 28 days 35 MPa")
+    kw = dict(supports=[lin], install_distance_m=3)
+    a, b = analyze_tunnel(_rst1(), **kw), analyze_tunnel(_rst1(), support_diameter_m=10, **kw)
+    assert a.interaction.fs != pytest.approx(b.interaction.fs)
